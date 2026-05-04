@@ -91,7 +91,14 @@ class PromoteAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $asset = Asset::findOrFail($this->assetId);
+        $asset = Asset::query()->find($this->assetId);
+        if (! $asset) {
+            Log::info('[PromoteAssetJob] Skipping — asset no longer exists (likely deleted during processing)', [
+                'asset_id' => $this->assetId,
+            ]);
+
+            return;
+        }
         \App\Services\UploadDiagnosticLogger::jobStart('PromoteAssetJob', $asset->id);
 
         // Only promote assets with completed processing pipeline

@@ -9,6 +9,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
 use App\Services\AuthPermissionService;
+use App\Services\ImpersonationService;
 use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
@@ -53,7 +54,12 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
-        $user = $request->user();
+        $authUser = $request->user();
+        $impersonation = app(ImpersonationService::class);
+        if ($authUser instanceof User) {
+            $impersonation->primeFromSession($authUser);
+        }
+        $user = $impersonation->actingUser() ?? $authUser;
         $currentTenantId = session('tenant_id');
 
         // Membership list for nav — load tenants only; default brand colors come from a batch query (no Tenant->defaultBrand access).
@@ -79,7 +85,7 @@ class HandleInertiaRequests extends Middleware
             if ($tenant) {
                 // If user is no longer a member of this tenant (e.g. removed from company), clear session
                 // so we don't show their old company/brand in the header on /app/companies or errors.no-companies
-                if ($user && ! $user->belongsToTenant($tenant->id)) {
+                if ($authUser instanceof User && ! $authUser->belongsToTenant($tenant->id)) {
                     session()->forget(['tenant_id', 'brand_id', 'collection_id']);
                     $tenant = null;
                 } else {
@@ -113,16 +119,19 @@ class HandleInertiaRequests extends Middleware
                     $tenantRole = $user->getRoleForTenant($tenant);
                     $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
 
-                    // Phase MI-1: Verify user has active brand membership (unless owner/admin/agency_admin)
+                    // Match EnsureGatewayEntry + gateway list: active pivot row, not strict activeBrandMembership()
+                    // (invalid pivot roles would otherwise reset session to another brand right after gateway pick).
                     if (! $isTenantOwnerOrAdmin) {
-                        $membership = $user->activeBrandMembership($activeBrand);
-                        $hasBrandAccess = $membership !== null;
+                        $hasBrandAccess = $user->hasActiveBrandUserAssignment($activeBrand);
 
                         if (! $hasBrandAccess) {
                             // User doesn't have active membership - find a brand they do have access to
                             $userBrand = null;
-                            foreach ($tenant->brands as $brand) {
-                                if ($user->activeBrandMembership($brand)) {
+                            foreach ($tenant->brands->sortBy([
+                                fn ($b) => ($b->is_default ?? false) ? 0 : 1,
+                                fn ($b) => strtolower((string) ($b->name ?? '')),
+                            ]) as $brand) {
+                                if ($user->hasActiveBrandUserAssignment($brand)) {
                                     $userBrand = $brand;
                                     break;
                                 }
@@ -735,8 +744,37 @@ class HandleInertiaRequests extends Middleware
         }
 
         // Guarantee effective_permissions is always present (never undefined) — merge last to prevent overwrite
+        $impersonationPayload = null;
+        $sessionRow = $impersonation->currentSession();
+        if ($sessionRow) {
+            $sessionRow->loadMissing(['target', 'tenant']);
+            $target = $sessionRow->target;
+            $tenant = $sessionRow->tenant;
+            $impersonationPayload = [
+                'active' => true,
+                'mode' => $sessionRow->mode->value,
+                'mode_label' => $sessionRow->mode->label(),
+                'session_id' => $sessionRow->id,
+                'target' => $target ? [
+                    'id' => $target->id,
+                    'first_name' => $target->first_name,
+                    'last_name' => $target->last_name,
+                    'email' => $target->email,
+                ] : null,
+                'tenant' => $tenant ? [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                ] : null,
+                'expires_at' => $sessionRow->expires_at?->toIso8601String(),
+                'remaining_seconds' => $sessionRow->remainingSeconds(),
+                'exit_url' => route('impersonation.stop'),
+            ];
+        }
+
         $shared['auth'] = array_merge($shared['auth'] ?? [], [
             'effective_permissions' => $effectivePermissions,
+            'impersonation' => $impersonationPayload,
         ]);
 
         return $shared;

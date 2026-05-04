@@ -7,6 +7,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Define subscription plans with their Stripe price IDs and feature limits.
+    | Paid plan price IDs are centralized in config/billing_stripe.php (env STRIPE_PRICE_*_MONTHLY).
     | Plans define feature limits, not access logic.
     |
     | AI usage is tracked per-feature for analytics but enforced via a unified
@@ -94,7 +95,7 @@ return [
 
     'starter' => [
         'name' => 'Starter',
-        'stripe_price_id' => env('STRIPE_PRICE_STARTER', 'price_starter'),
+        'stripe_price_id' => config('billing_stripe.stripe_prices.plans.starter'),
         'fallback_monthly_price' => 59.00,
         'selectable' => true,
         'limits' => [
@@ -169,7 +170,7 @@ return [
 
     'pro' => [
         'name' => 'Pro',
-        'stripe_price_id' => env('STRIPE_PRICE_PRO', 'price_pro'),
+        'stripe_price_id' => config('billing_stripe.stripe_prices.plans.pro'),
         'fallback_monthly_price' => 199.00,
         'selectable' => true,
         'limits' => [
@@ -252,7 +253,7 @@ return [
 
     'business' => [
         'name' => 'Business',
-        'stripe_price_id' => env('STRIPE_PRICE_BUSINESS', 'price_business'),
+        'stripe_price_id' => config('billing_stripe.stripe_prices.plans.business'),
         'fallback_monthly_price' => 599.00,
         'selectable' => true,
         'limits' => [

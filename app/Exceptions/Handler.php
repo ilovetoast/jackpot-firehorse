@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Http\Support\AssetSessionWorkspace;
 use App\Models\Asset;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Container\BindingResolutionException;
@@ -63,6 +64,24 @@ class Handler
                     'message' => self::friendlyAssetMissingMessage($request, $e),
                     'code' => 404,
                 ], 404);
+            }
+        }
+
+        if ($e instanceof HttpExceptionInterface
+            && $e->getStatusCode() === 409
+            && $request->is('app/*')) {
+            $raw = (string) $e->getMessage();
+            if ($raw === AssetSessionWorkspace::ABORT_WRONG_TENANT || $raw === AssetSessionWorkspace::ABORT_WRONG_BRAND) {
+                $errorCode = $raw === AssetSessionWorkspace::ABORT_WRONG_TENANT
+                    ? 'asset_workspace_mismatch'
+                    : 'asset_brand_mismatch';
+
+                return new JsonResponse([
+                    'message' => AssetSessionWorkspace::friendlyMessage($raw),
+                    'title' => AssetSessionWorkspace::friendlyTitle($raw),
+                    'code' => 409,
+                    'error_code' => $errorCode,
+                ], 409);
             }
         }
 

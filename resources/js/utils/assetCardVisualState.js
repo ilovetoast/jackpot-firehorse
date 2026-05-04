@@ -3,6 +3,7 @@
  * Does not use local object URLs — pass ephemeral blob URL via options when needed.
  */
 
+import { originalImageGridFallbackUrl } from './originalImageGridFallbackUrl.js'
 import { getThumbnailState, supportsThumbnail } from './thumbnailUtils.js'
 
 const RAW_EXTENSIONS = new Set([
@@ -38,7 +39,9 @@ export function hasServerRasterThumbnail(asset) {
     if (!asset) return false
     if (asset.final_thumbnail_url || asset.preview_thumbnail_url) return true
     const ts = normalizeThumbStatus(asset)
-    return !!(asset.thumbnail_url && ts === 'completed')
+    if (asset.thumbnail_url && ts === 'completed') return true
+    if (originalImageGridFallbackUrl(asset)) return true
+    return false
 }
 
 function mimeIsRawLike(mime) {

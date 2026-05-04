@@ -24,9 +24,11 @@ use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Services\DocumentationService;
 use App\Services\GrantCreatorModuleToTenant;
 use App\Services\TenantAgencyService;
+use App\Support\Roles\RoleRegistry;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -452,6 +454,11 @@ class SiteAdminController extends Controller
 
         $query = User::with(['tenants', 'brands.tenant']);
 
+        if ($request->filled('tenant_id')) {
+            $tenantId = (int) $request->get('tenant_id');
+            $query->whereHas('tenants', fn ($q) => $q->where('tenants.id', $tenantId));
+        }
+
         // Add search filter if provided
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -500,6 +507,7 @@ class SiteAdminController extends Controller
                             'slug' => $brand->slug,
                             'tenant_id' => $brand->tenant_id,
                             'tenant_name' => $brand->tenant->name ?? null,
+                            'is_default' => (bool) $brand->is_default,
                             'role' => $brandRole,
                         ];
                     }),
@@ -853,7 +861,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
-            'role' => 'nullable|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
+            'role' => ['nullable', 'string', Rule::in(RoleRegistry::siteRoles())],
         ]);
 
         $newRole = $validated['role'] ?: null;
@@ -864,8 +872,8 @@ class SiteAdminController extends Controller
         }
 
         // Get old site roles for logging
-        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
-        $oldSiteRoles = $user->getRoleNames()->filter(fn ($role) => in_array($role, $siteRoleNames))->toArray();
+        $siteRoleNames = RoleRegistry::siteRoles();
+        $oldSiteRoles = $user->getRoleNames()->filter(fn ($role) => in_array($role, $siteRoleNames, true))->toArray();
 
         // Remove existing site roles (only use actual Spatie role names: site_compliance exists, 'compliance' does not)
         $user->removeRole($siteRoleNames);
@@ -2304,7 +2312,7 @@ class SiteAdminController extends Controller
         $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
 
         $validated = $request->validate([
-            'role_id' => 'required|string|in:site_owner,site_admin,site_support,site_engineering,site_compliance',
+            'role_id' => ['required', 'string', Rule::in(RoleRegistry::siteRoles())],
             'permissions' => 'required|array',
         ]);
 

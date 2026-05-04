@@ -59,6 +59,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // middleware strings via this map; route:cache may still reference this name.
             'incubation.not_locked' => \App\Http\Middleware\EnsureIncubationWorkspaceNotLocked::class,
             'ensure.onboarding' => \App\Http\Middleware\EnsureOnboardingComplete::class,
+            'impersonation' => \App\Http\Middleware\ImpersonationMiddleware::class,
         ]);
 
         $middleware->redirectUsersTo('/');
@@ -142,6 +143,18 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
             if (! $request->is('app/*')) {
+                return null;
+            }
+            // Impersonation endpoints must surface real 403s (tests + API clients); not asset-grid redirects.
+            if ($request->routeIs([
+                'impersonation.start',
+                'impersonation.stop',
+                'admin.impersonation.enter',
+                'admin.impersonation.start',
+                'admin.impersonation.index',
+                'admin.impersonation.show',
+                'admin.impersonation.end',
+            ])) {
                 return null;
             }
             if ($request->routeIs(['assets.index', 'assets.staged', 'assets.processing'])) {

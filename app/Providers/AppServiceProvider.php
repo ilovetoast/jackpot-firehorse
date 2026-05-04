@@ -180,6 +180,8 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 
+        $this->app->scoped(\App\Services\ImpersonationService::class);
+
         $this->app->singleton(\App\Services\NotificationOrchestrator::class, function ($app) {
             return new \App\Services\NotificationOrchestrator([
                 'in_app' => $app->make(\App\Services\Notifications\Channels\InAppChannel::class),
@@ -222,6 +224,7 @@ class AppServiceProvider extends ServiceProvider
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('incubation.not_locked', EnsureIncubationWorkspaceNotLocked::class);
         $router->aliasMiddleware('ensure.onboarding', EnsureOnboardingComplete::class);
+        $router->aliasMiddleware('impersonation', \App\Http\Middleware\ImpersonationMiddleware::class);
 
         $this->hydrateStudioRenderingDefaultFontPath();
 

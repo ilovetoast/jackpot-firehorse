@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\User;
+use App\Services\ImpersonationService;
 use Illuminate\Http\Request;
 
 if (! function_exists('privacy_region_country_code')) {
@@ -61,6 +63,34 @@ if (! function_exists('jackpot_privacy_bootstrap_array')) {
             'strict_opt_in_region' => privacy_needs_strict_opt_in($country),
             'gpc' => privacy_global_gpc($request),
         ];
+    }
+}
+
+if (! function_exists('impersonation')) {
+    function impersonation(): ImpersonationService
+    {
+        return app(ImpersonationService::class);
+    }
+}
+
+if (! function_exists('acting_user')) {
+    /**
+     * Effective user for authorization and UI while impersonating (target user),
+     * otherwise the authenticated user.
+     */
+    function acting_user(): ?User
+    {
+        return impersonation()->actingUser();
+    }
+}
+
+if (! function_exists('initiator_user')) {
+    /**
+     * The real signed-in user who started impersonation, or the current user when not impersonating.
+     */
+    function initiator_user(): ?User
+    {
+        return impersonation()->initiatorUser();
     }
 }
 

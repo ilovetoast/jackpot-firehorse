@@ -1,6 +1,7 @@
 import { router } from '@inertiajs/react'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AdminShell from '../../../Components/Admin/AdminShell'
@@ -20,7 +21,27 @@ import {
     ChartBarSquareIcon,
     BoltIcon,
     VideoCameraIcon,
+    XMarkIcon,
 } from '@heroicons/react/24/outline'
+
+const INCIDENTS_API = '/app/admin/incidents'
+
+async function executeIncidentAction(incident, action, onReload) {
+    const res = await axios.post(`${INCIDENTS_API}/${incident.id}/${action}`)
+    const data = res?.data ?? {}
+    onReload?.()
+    if (action === 'create-ticket') {
+        if (data.ticket_id) {
+            router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
+        } else if (!data.created) {
+            const msg = data.error
+                ? `Could not create ticket: ${data.error}`
+                : 'Could not create ticket. A ticket may already exist for this asset, or the incident may be resolved.'
+            alert(msg)
+        }
+    }
+    return data
+}
 
 /** Shown above "Why still open" — distinguishes stale/misleading incidents from real thumb/processing failures. */
 function PlaybookResolveBadge({ kind }) {
@@ -55,25 +76,18 @@ function PlaybookResolveBadge({ kind }) {
     )
 }
 
-function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick }) {
+function IncidentDetailModal({ open, onClose, incident, onReload, onSourceClick }) {
     const [loading, setLoading] = useState(null)
-    const baseUrl = '/app/admin/incidents'
+    if (!open || !incident) {
+        return null
+    }
+    const i = incident
+    const sourceLabel = i.source_type === 'asset' && i.source_id ? `asset/${i.source_id}` : `${i.source_type}/${i.source_id || '—'}`
+
     const handle = async (action) => {
         setLoading(action)
         try {
-            const res = await axios.post(`${baseUrl}/${i.id}/${action}`)
-            const data = res?.data ?? {}
-            onAction?.()
-            if (action === 'create-ticket') {
-                if (data.ticket_id) {
-                    router.visit(`/app/admin/support/tickets/${data.ticket_id}`)
-                } else if (!data.created) {
-                    const msg = data.error
-                        ? `Could not create ticket: ${data.error}`
-                        : 'Could not create ticket. A ticket may already exist for this asset, or the incident may be resolved.'
-                    alert(msg)
-                }
-            }
+            await executeIncidentAction(i, action, onReload)
         } catch (e) {
             console.error(e)
             if (action === 'create-ticket') {
@@ -84,6 +98,187 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
             setLoading(null)
         }
     }
+
+    return (
+        <Dialog open={open} onClose={onClose} className="relative z-[60]">
+            <div className="fixed inset-0 bg-slate-900/50" aria-hidden />
+            <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+                <DialogPanel className="flex max-h-[min(90vh,880px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-gray-200">
+                    <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                    className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                        i.severity === 'critical'
+                                            ? 'bg-red-100 text-red-800'
+                                            : i.severity === 'error'
+                                              ? 'bg-amber-100 text-amber-800'
+                                              : 'bg-gray-100 text-gray-800'
+                                    }`}
+                                >
+                                    {i.severity}
+                                </span>
+                                <span className="text-xs text-gray-500">Incident #{i.id}</span>
+                            </div>
+                            <DialogTitle className="mt-2 text-lg font-semibold leading-snug text-gray-900">
+                                {i.title}
+                            </DialogTitle>
+                            <p className="mt-1 text-sm text-gray-500">
+                                Detected {i.detected_at ? new Date(i.detected_at).toLocaleString() : '—'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                            aria-label="Close"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                        <div>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Source</h4>
+                            <div className="mt-1 break-all font-mono text-sm text-gray-800">
+                                {i.source_type === 'asset' && i.source_id ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            onClose()
+                                            onSourceClick?.(i.source_id)
+                                        }}
+                                        className="text-left text-indigo-600 hover:text-indigo-900 hover:underline"
+                                    >
+                                        {sourceLabel}
+                                    </button>
+                                ) : (
+                                    sourceLabel
+                                )}
+                            </div>
+                            {i.tenant_id != null && (
+                                <p className="mt-1 text-xs text-gray-500">Tenant id: {i.tenant_id}</p>
+                            )}
+                        </div>
+
+                        <div>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Repair attempts</h4>
+                            <p className="mt-1 text-sm text-gray-800">
+                                {i.repair_attempts > 0 ? (
+                                    <span
+                                        title={[
+                                            i.last_repair_attempt_at
+                                                ? `Last: ${new Date(i.last_repair_attempt_at).toLocaleString()}`
+                                                : '',
+                                            i.auto_repair_exhausted
+                                                ? 'Scheduled auto-repair has stopped; fix root cause or use Attempt Repair / Resolve.'
+                                                : '',
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' · ')}
+                                    >
+                                        {i.repair_attempts}
+                                        {i.repair_attempts >= 3 ? ' (suggest ticket)' : ''}
+                                        {i.auto_repair_exhausted ? (
+                                            <span className="ml-1 text-amber-700">(auto-repair off)</span>
+                                        ) : null}
+                                    </span>
+                                ) : (
+                                    '—'
+                                )}
+                            </p>
+                        </div>
+
+                        {i.message ? (
+                            <div>
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Message</h4>
+                                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-100 bg-gray-50 p-3 text-xs text-gray-800">
+                                    {i.message}
+                                </pre>
+                            </div>
+                        ) : null}
+
+                        <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-4">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600">Playbook</h4>
+                            <p className="mt-1 text-xs text-gray-500">
+                                Chip = whether manual resolve is reasonable vs. fix the underlying issue first.
+                            </p>
+                            <div className="mt-2">
+                                <PlaybookResolveBadge kind={i.playbook_resolve_kind} />
+                            </div>
+                            <div className="mt-3 grid gap-4 sm:grid-cols-1">
+                                <div>
+                                    <p className="text-xs font-medium text-gray-700">Why still open</p>
+                                    <p className="mt-1 text-sm leading-relaxed text-gray-800">
+                                        {i.playbook_why ? i.playbook_why : <span className="text-gray-400">—</span>}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium text-gray-700">What to do</p>
+                                    <p className="mt-1 text-sm leading-relaxed text-gray-800">
+                                        {i.playbook_action ? i.playbook_action : <span className="text-gray-400">—</span>}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/90 px-5 py-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="inline-flex rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
+                        >
+                            Close
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!!loading}
+                            onClick={() => handle('attempt-repair')}
+                            className="inline-flex rounded-md px-3 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                            {loading === 'attempt-repair' ? '…' : 'Attempt Repair'}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!!loading}
+                            onClick={() => handle('create-ticket')}
+                            className="inline-flex rounded-md px-3 py-2 text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                        >
+                            {loading === 'create-ticket' ? '…' : 'Create Ticket'}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!!loading}
+                            onClick={() => handle('resolve')}
+                            className="inline-flex rounded-md px-3 py-2 text-sm font-medium bg-gray-200 text-gray-900 hover:bg-gray-300 disabled:opacity-50"
+                        >
+                            {loading === 'resolve' ? '…' : 'Resolve (Manual)'}
+                        </button>
+                    </div>
+                </DialogPanel>
+            </div>
+        </Dialog>
+    )
+}
+
+function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick, onOpenDetails }) {
+    const [loading, setLoading] = useState(null)
+    const handle = async (action) => {
+        setLoading(action)
+        try {
+            await executeIncidentAction(i, action, onAction)
+        } catch (e) {
+            console.error(e)
+            if (action === 'create-ticket') {
+                const msg = e?.response?.data?.error || e?.message || 'Failed to create ticket. Please try again.'
+                alert(msg)
+            }
+        } finally {
+            setLoading(null)
+        }
+    }
+    const sourceFull = i.source_type === 'asset' && i.source_id ? `asset/${i.source_id}` : `${i.source_type}/${i.source_id || '—'}`
     return (
         <tr>
             {onSelect != null && (
@@ -102,22 +297,24 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                     i.severity === 'error' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-800'
                 }`}>{i.severity}</span>
             </td>
-            <td className="py-3 px-3 text-sm text-gray-900">{i.title}</td>
-            <td className="py-3 px-3 text-sm">
+            <td className="max-w-[14rem] py-3 px-3 text-sm text-gray-900">
+                <AdminTruncatedCell title={i.title}>{i.title}</AdminTruncatedCell>
+            </td>
+            <td className="max-w-[10rem] py-3 px-3 text-sm" title={sourceFull}>
                 {i.source_type === 'asset' && i.source_id ? (
                     <button
                         type="button"
                         onClick={() => onSourceClick?.(i.source_id)}
-                        className="text-indigo-600 hover:text-indigo-900 font-medium hover:underline"
+                        className="block max-w-full truncate text-left font-mono text-xs text-indigo-600 hover:text-indigo-900 hover:underline"
                     >
-                        asset/{i.source_id}
+                        {i.source_id}
                     </button>
                 ) : (
-                    <span className="text-gray-500">{i.source_type}/{i.source_id || '—'}</span>
+                    <span className="block max-w-full truncate font-mono text-xs text-gray-500">{sourceFull}</span>
                 )}
             </td>
-            <td className="py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
-            <td className="py-3 px-3 text-sm text-gray-500">
+            <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">{new Date(i.detected_at).toLocaleString()}</td>
+            <td className="whitespace-nowrap py-3 px-3 text-sm text-gray-500">
                 {i.repair_attempts > 0 ? (
                     <span
                         title={[
@@ -133,34 +330,24 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                     </span>
                 ) : '—'}
             </td>
-            <td className="py-3 px-3 text-xs text-gray-700 max-w-xs align-top">
-                <PlaybookResolveBadge kind={i.playbook_resolve_kind} />
-                {i.playbook_why ? (
-                    <p className="line-clamp-4" title={i.playbook_why}>
-                        {i.playbook_why}
-                    </p>
-                ) : (
-                    <span className="text-gray-400">—</span>
-                )}
-            </td>
-            <td className="py-3 px-3 text-xs text-gray-700 max-w-xs align-top">
-                {i.playbook_action ? (
-                    <p className="line-clamp-4" title={i.playbook_action}>
-                        {i.playbook_action}
-                    </p>
-                ) : (
-                    <span className="text-gray-400">—</span>
-                )}
+            <td className="whitespace-nowrap py-3 px-2 text-center">
+                <button
+                    type="button"
+                    onClick={() => onOpenDetails?.(i)}
+                    className="text-sm font-medium text-indigo-600 hover:text-indigo-900 hover:underline"
+                >
+                    Details
+                </button>
             </td>
             <td className="py-3 px-3 text-right">
-                <div className="flex justify-end gap-1">
+                <div className="flex flex-wrap justify-end gap-1">
                     <button
                         type="button"
                         disabled={loading}
                         onClick={() => handle('attempt-repair')}
                         className="inline-flex rounded px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-800 hover:bg-indigo-200 disabled:opacity-50"
                     >
-                        {loading === 'attempt-repair' ? '…' : 'Attempt Repair'}
+                        {loading === 'attempt-repair' ? '…' : 'Repair'}
                     </button>
                     <button
                         type="button"
@@ -168,7 +355,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                         onClick={() => handle('create-ticket')}
                         className="inline-flex rounded px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50"
                     >
-                        {loading === 'create-ticket' ? '…' : 'Create Ticket'}
+                        {loading === 'create-ticket' ? '…' : 'Ticket'}
                     </button>
                     <button
                         type="button"
@@ -176,7 +363,7 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick 
                         onClick={() => handle('resolve')}
                         className="inline-flex rounded px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 disabled:opacity-50"
                     >
-                        {loading === 'resolve' ? '…' : 'Resolve (Manual)'}
+                        {loading === 'resolve' ? '…' : 'Resolve'}
                     </button>
                 </div>
             </td>
@@ -219,6 +406,7 @@ export default function OperationsCenterIndex({
     const studioExportSelectAllRef = useRef(null)
     const [quickViewData, setQuickViewData] = useState(null)
     const [quickViewLoading, setQuickViewLoading] = useState(false)
+    const [incidentDetail, setIncidentDetail] = useState(null)
     const selectAllRef = useRef(null)
 
     const openAssetQuickView = (assetId) => {
@@ -781,11 +969,7 @@ export default function OperationsCenterIndex({
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Source</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Detected</th>
                                                 <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900">Repair attempts</th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">
-                                                    Why still open
-                                                    <span className="mt-0.5 block text-xs font-normal text-gray-500">(chip = manual resolve vs. fix first)</span>
-                                                </th>
-                                                <th className="py-3.5 px-3 text-left text-sm font-semibold text-gray-900 max-w-xs">What to do</th>
+                                                <th className="py-3.5 px-2 text-center text-sm font-semibold text-gray-900">Details</th>
                                                 <th className="py-3.5 px-3 text-right text-sm font-semibold text-gray-900">Actions</th>
                                             </tr>
                                         </thead>
@@ -798,6 +982,7 @@ export default function OperationsCenterIndex({
                                                     selected={selectedIds.has(i.id)}
                                                     onSelect={(checked) => toggleSelect(i.id, checked)}
                                                     onSourceClick={openAssetQuickView}
+                                                    onOpenDetails={setIncidentDetail}
                                                 />
                                             ))}
                                         </tbody>
@@ -1283,6 +1468,17 @@ export default function OperationsCenterIndex({
                     </div>
                 </div>
             )}
+
+            <IncidentDetailModal
+                open={incidentDetail !== null}
+                incident={incidentDetail}
+                onClose={() => setIncidentDetail(null)}
+                onReload={() => {
+                    setIncidentDetail(null)
+                    router.reload({ only: ['incidents'] })
+                }}
+                onSourceClick={openAssetQuickView}
+            />
 
             {/* Asset Quick View Modal (from source click in Incidents) */}
             {(quickViewData !== null || quickViewLoading) && (

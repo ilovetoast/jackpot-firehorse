@@ -14,7 +14,7 @@ use App\Models\User;
  * ABSOLUTE RULES:
  * - Owner must never be assignable via UI or invite
  * - No automatic role conversion
- * - All validation must reference this registry
+ * - All validation must reference this registry (tenant/brand: {@see tenantRoles()}, {@see brandRoles()}; platform staff Spatie names: {@see siteRoles()})
  * - Invalid role assignments must return 422 errors
  */
 class RoleRegistry
@@ -334,5 +334,44 @@ class RoleRegistry
                 "Invalid brand role: {$role}. Valid roles are: ".implode(', ', self::brandRoles())
             );
         }
+    }
+
+    /**
+     * Site-wide Spatie role names (Command Center / internal staff), **not** tenant or brand RBAC.
+     *
+     * Canonical engineering key is `site_engineering` — never `site_engineer` (typo).
+     * Keep aligned with {@see \Database\Seeders\PermissionSeeder} and admin UI role options.
+     *
+     * @return list<string>
+     */
+    public static function siteRoles(): array
+    {
+        return ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
+    }
+
+    public static function isSiteRole(string $role): bool
+    {
+        return in_array(strtolower($role), self::siteRoles(), true);
+    }
+
+    /**
+     * Who may start internal support impersonation from Command Center.
+     * {@code site_engineering} is intentionally excluded until assisted mode exists.
+     *
+     * @return list<string>
+     */
+    public static function siteRolesThatMayStartInternalImpersonation(): array
+    {
+        return ['site_support', 'site_admin', 'site_owner'];
+    }
+
+    /**
+     * Who may start a **full** (non-read-only) impersonation session.
+     *
+     * @return list<string>
+     */
+    public static function siteRolesThatMayUseFullImpersonationMode(): array
+    {
+        return ['site_admin', 'site_owner'];
     }
 }

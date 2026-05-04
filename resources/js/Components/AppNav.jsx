@@ -8,6 +8,7 @@ import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
 import AgencyStripBrandSelect from './agency/AgencyStripBrandSelect'
 import GlobalUserControls from './Layout/GlobalUserControls'
+import ImpersonationBanner from './ImpersonationBanner'
 import {
     AdjustmentsHorizontalIcon,
     ArrowDownTrayIcon,
@@ -961,6 +962,7 @@ export default function AppNav({
                 data-collection-only={isExternalCollectionChrome ? 'true' : undefined}
                 aria-label={isExternalCollectionChrome ? 'Collection-only access — some links disabled' : undefined}
             >
+                {auth?.impersonation?.active ? <ImpersonationBanner impersonation={auth.impersonation} /> : null}
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 min-w-0 justify-between gap-2 overflow-visible">
                     <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-3">

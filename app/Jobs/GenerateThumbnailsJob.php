@@ -172,6 +172,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             $pipelineTimer = null;
             $version = AssetVersion::find($this->assetVersionId);
             if ($version) {
+                $version->loadMissing('asset');
+                if (! $version->asset) {
+                    Log::info('[GenerateThumbnailsJob] Skipping — parent asset missing (likely deleted during processing)', [
+                        'version_id' => $version->id,
+                    ]);
+
+                    return;
+                }
                 // Phase 7: Idempotent - skip if version already failed
                 if ($version->pipeline_status === 'failed') {
                     Log::info('[GenerateThumbnailsJob] Skipping - version pipeline_status is failed', [
@@ -240,7 +248,14 @@ class GenerateThumbnailsJob implements ShouldQueue
                 ]);
             } else {
                 // Legacy fallback: treat ID as asset ID
-                $asset = Asset::findOrFail($this->assetVersionId);
+                $asset = Asset::query()->find($this->assetVersionId);
+                if (! $asset) {
+                    Log::info('[GenerateThumbnailsJob] Skipping — asset no longer exists (likely deleted during processing)', [
+                        'asset_id' => $this->assetVersionId,
+                    ]);
+
+                    return;
+                }
                 $sourcePath = $asset->storage_root_path;
                 Log::info('[GenerateThumbnailsJob] Legacy mode (no version)', [
                     'asset_id' => $asset->id,

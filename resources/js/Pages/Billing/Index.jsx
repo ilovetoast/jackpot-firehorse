@@ -52,7 +52,7 @@ const PLAN_HIGHLIGHTS = {
         { text: 'Private categories', included: true },
         { text: 'Public collection share links (optional password)', included: true },
         { text: 'ZIP downloads from public collection pages', included: true },
-        { text: 'Creator Module available', included: true, addon: true },
+        { text: 'Creator Module add-on (base + extra seat packs)', included: true, addon: true },
         { text: 'All add-ons available', included: true },
     ],
     business: [
@@ -103,7 +103,23 @@ const PLAN_KEY_LIMITS = {
     ],
 }
 
-export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages, ai_credits_addon_packages, credit_weights, creator_addon_config, available_addons }) {
+export default function BillingIndex({
+    tenant,
+    current_plan,
+    plans,
+    subscription,
+    payment_method,
+    current_usage,
+    current_plan_limits,
+    site_primary_color,
+    storage_info,
+    storage_addon_packages,
+    ai_credits_addon_packages,
+    credit_weights,
+    creator_addon_config,
+    creator_billing_state,
+    available_addons,
+}) {
     const page = usePage()
     const { auth, errors, flash } = page.props
     const inertiaUrl =
@@ -220,6 +236,13 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
 
     const isPaid = (planId) => ['starter', 'pro', 'business', 'premium'].includes(planId)
     const canBuyAddons = isPaid(current_plan) && subscription?.status === 'active'
+
+    const showCreatorAddonCard = Boolean(creator_billing_state?.show_card)
+    const addonGridClass = showCreatorAddonCard ? 'md:grid-cols-3' : 'md:grid-cols-2'
+
+    const baseCreator = creator_addon_config?.base || {}
+    const baseCreatorPrice = Number(baseCreator.monthly_price ?? 99)
+    const baseIncludedSeats = Number(baseCreator.included_seats ?? 25)
 
     return (
         <div className="min-h-full bg-gray-50">
@@ -475,7 +498,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             </div>
                         )}
 
-                        <div className="grid gap-6 md:grid-cols-3">
+                        <div className={`grid gap-6 grid-cols-1 ${addonGridClass}`}>
                             {/* Storage Add-ons */}
                             <div className="rounded-xl border border-gray-200 bg-white p-5">
                                 <div className="flex items-center gap-2 mb-3">
@@ -564,40 +587,120 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                             </div>
 
                             {/* Creator Module */}
-                            <div className="rounded-xl border border-gray-200 bg-white p-5">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <div className="rounded-lg bg-amber-50 p-2">
-                                        <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                                        </svg>
+                            {showCreatorAddonCard ? (
+                                <div className="rounded-xl border border-gray-200 bg-white p-5">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="rounded-lg bg-amber-50 p-2">
+                                                <svg className="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                                                </svg>
+                                            </div>
+                                            <h3 className="text-sm font-semibold text-gray-900">Creator Module</h3>
+                                        </div>
+                                        {creator_billing_state?.plan_includes_module ? (
+                                            <span className="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-800">
+                                                Included
+                                            </span>
+                                        ) : null}
                                     </div>
-                                    <h3 className="text-sm font-semibold text-gray-900">Creator Module</h3>
-                                </div>
 
-                                <p className="text-xs text-gray-500 mb-3">
-                                    Give freelancers and external creators scoped upload access with their own portal. Track performance and manage seats.
-                                </p>
+                                    <p className="text-xs text-gray-500 mb-3">
+                                        Give freelancers and external creators scoped upload access with their own portal. Track performance and manage seats.
+                                    </p>
 
-                                {available_addons?.creator_module ? (
-                                    <div className="space-y-2">
+                                    {creator_billing_state?.plan_includes_module ? (
+                                        <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+                                            <p className="text-xs font-medium text-green-800">
+                                                Included in {currentPlanData?.name || 'your plan'} — no extra charge for the module.
+                                            </p>
+                                            {creator_billing_state?.seats_limit != null ? (
+                                                <p className="mt-1 text-xs text-green-700">
+                                                    {creator_billing_state.seats_limit} creator seats included
+                                                    {creator_billing_state.active_seat_pack_id ? ' (with add-on)' : ''}.
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                    ) : (
+                                        <div className="mb-3 space-y-0.5">
+                                            <p className="text-sm font-semibold text-gray-900">
+                                                Starts at ${baseCreatorPrice.toFixed(0)}/mo
+                                            </p>
+                                            <p className="text-xs text-gray-500">Includes {baseIncludedSeats} creator seats</p>
+                                        </div>
+                                    )}
+
+                                    {creator_billing_state?.can_purchase_base_module &&
+                                    !creator_billing_state?.stripe_base_subscription_active ? (
                                         <button
+                                            type="button"
                                             onClick={() => handleAddonAction('/app/billing/creator-module', {})}
                                             disabled={addonSubmitting !== null}
-                                            className="w-full flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 hover:border-amber-300 hover:bg-amber-50/50 transition disabled:opacity-50"
+                                            className="mb-3 w-full rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
                                         >
-                                            <span className="text-sm font-medium text-gray-900">Add Creator Module</span>
-                                            <span className="text-sm font-semibold text-amber-600">${creator_addon_config?.base?.monthly_price || 99}/mo</span>
+                                            {addonSubmitting === '/app/billing/creator-module' ? 'Adding…' : 'Add Creator Module'}
                                         </button>
-                                        <p className="text-xs text-gray-400">Includes {creator_addon_config?.base?.included_seats || 25} creator seats</p>
-                                    </div>
-                                ) : current_plan === 'business' || current_plan === 'premium' || current_plan === 'enterprise' ? (
-                                    <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2">
-                                        <p className="text-xs font-medium text-green-700">Included in your plan</p>
-                                    </div>
-                                ) : (
-                                    <p className="text-xs text-gray-400">Available on the Pro plan as an add-on, or included with Business.</p>
-                                )}
-                            </div>
+                                    ) : null}
+
+                                    {creator_billing_state?.stripe_base_subscription_active &&
+                                    !creator_billing_state?.plan_includes_module ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAddonAction('/app/billing/creator-module', null, 'delete')}
+                                            disabled={addonSubmitting !== null}
+                                            className="mb-3 w-full rounded-lg border border-gray-200 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                        >
+                                            {addonSubmitting === '/app/billing/creator-module' ? 'Removing…' : 'Remove Creator Module'}
+                                        </button>
+                                    ) : null}
+
+                                    <details className="group rounded-lg border border-gray-100 bg-gray-50/80">
+                                        <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-gray-800 marker:content-none [&::-webkit-details-marker]:hidden flex items-center justify-between">
+                                            <span>Add more creator seats</span>
+                                            <span className="text-gray-400 transition group-open:rotate-90">›</span>
+                                        </summary>
+                                        <div className="space-y-2 border-t border-gray-100 px-3 pb-3 pt-2">
+                                            {!creator_billing_state?.can_manage_seat_packs ? (
+                                                <p className="text-xs text-gray-500">
+                                                    Add the Creator Module (or use a plan that includes it) to purchase extra seat packs.
+                                                </p>
+                                            ) : (creator_addon_config?.seat_packs || []).length === 0 ? (
+                                                <p className="text-xs text-gray-400">Seat pack prices are not configured.</p>
+                                            ) : (
+                                                (creator_addon_config.seat_packs || []).map((pack) => (
+                                                    <button
+                                                        key={pack.id}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            handleAddonAction('/app/billing/creator-seats', {
+                                                                pack_id: pack.id,
+                                                            })
+                                                        }
+                                                        disabled={addonSubmitting !== null}
+                                                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition disabled:opacity-50 ${
+                                                            creator_billing_state?.active_seat_pack_id === pack.id
+                                                                ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200'
+                                                                : 'border-gray-200 hover:border-amber-300 hover:bg-amber-50/40'
+                                                        }`}
+                                                    >
+                                                        <span className="text-sm font-medium text-gray-900">
+                                                            +{pack.seats} seats
+                                                        </span>
+                                                        <span className="text-sm font-semibold text-amber-600">
+                                                            ${Number(pack.monthly_price).toFixed(0)}/mo
+                                                        </span>
+                                                    </button>
+                                                ))
+                                            )}
+                                            {creator_billing_state?.active_seat_pack_id ? (
+                                                <p className="text-[11px] text-gray-500">
+                                                    You have a seat pack subscription. Choosing another option updates your add-on (prorated).
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                    </details>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 )}

@@ -74,6 +74,7 @@ return [
     | Recurring monthly Stripe subscription items that add credits on top of
     | the plan base. Only one credit add-on active at a time per tenant.
     | available_plans controls which plan tiers can purchase each pack.
+    | Stripe Price IDs: config/billing_stripe.php (addons.ai_credits_*).
     |
     */
 
@@ -81,21 +82,21 @@ return [
         [
             'id' => 'credits_500',
             'credits' => 500,
-            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_500'),
+            'stripe_price_id' => config('billing_stripe.stripe_prices.addons.ai_credits_500'),
             'monthly_price' => 29,
             'available_plans' => ['starter', 'pro', 'business'],
         ],
         [
             'id' => 'credits_2000',
             'credits' => 2000,
-            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_2000'),
+            'stripe_price_id' => config('billing_stripe.stripe_prices.addons.ai_credits_2000'),
             'monthly_price' => 89,
             'available_plans' => ['pro', 'business'],
         ],
         [
             'id' => 'credits_10000',
             'credits' => 10000,
-            'stripe_price_id' => env('STRIPE_PRICE_CREDITS_10000'),
+            'stripe_price_id' => config('billing_stripe.stripe_prices.addons.ai_credits_10000'),
             'monthly_price' => 349,
             'available_plans' => ['business'],
         ],

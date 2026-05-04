@@ -10,7 +10,6 @@ import UserRow from '../../Components/Company/UserRow'
 import PlanLimitCallout from '../../Components/PlanLimitCallout'
 import BrandRoleSelector from '../../Components/BrandRoleSelector'
 import ConfirmDialog from '../../Components/ConfirmDialog'
-
 function useDebounce(value, delay) {
     const [debouncedValue, setDebouncedValue] = useState(value)
     useEffect(() => {

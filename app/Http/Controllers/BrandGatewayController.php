@@ -638,6 +638,12 @@ class BrandGatewayController extends Controller
             ->where('tenant_id', $tenantId)
             ->firstOrFail();
 
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isElevatedTenantUser = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
+        if (! $isElevatedTenantUser && ! $user->hasActiveBrandUserAssignment($brand)) {
+            abort(403, 'You do not have access to this brand.');
+        }
+
         $planService = app(\App\Services\PlanService::class);
 
         if ($planService->isBrandDisabledByPlanLimit($brand, $tenant)) {

@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Enums\DownloadStatus;
 use App\Models\Download;
+use App\Models\TenantModule;
 use App\Services\AiUsageService;
 use App\Services\BillingService;
+use App\Services\FeatureGate;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -225,8 +227,12 @@ class BillingController extends Controller
             'credit_weights' => config('ai_credits.weights', []),
             'creator_addon_config' => [
                 'base' => config('creator_addon.base'),
-                'seat_packs' => config('creator_addon.seat_packs'),
+                'seat_packs' => collect(config('creator_addon.seat_packs', []))
+                    ->filter(fn ($p) => ! empty($p['stripe_price_id'] ?? null))
+                    ->values()
+                    ->all(),
             ],
+            'creator_billing_state' => $this->buildCreatorBillingState($tenant, $currentPlan, $subscription),
             'available_addons' => $planService->getAvailableAddons($tenant),
         ]);
     }
@@ -680,8 +686,12 @@ class BillingController extends Controller
                 ->all(),
             'creator_addon_config' => [
                 'base' => config('creator_addon.base'),
-                'seat_packs' => config('creator_addon.seat_packs'),
+                'seat_packs' => collect(config('creator_addon.seat_packs', []))
+                    ->filter(fn ($p) => ! empty($p['stripe_price_id'] ?? null))
+                    ->values()
+                    ->all(),
             ],
+            'creator_billing_state' => $this->buildCreatorBillingState($tenant, $planService->getCurrentPlan($tenant), $subscription),
             'available_addons' => $planService->getAvailableAddons($tenant),
         ]);
     }
@@ -1162,5 +1172,60 @@ class BillingController extends Controller
                 'payment' => 'Failed to process payment confirmation: ' . $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * @param  \Laravel\Cashier\Subscription|null  $subscription
+     * @return array{
+     *     show_card: bool,
+     *     plan_includes_module: bool,
+     *     stripe_base_subscription_active: bool,
+     *     active_seat_pack_id: string|null,
+     *     seats_limit: int|null,
+     *     can_purchase_base_module: bool,
+     *     can_manage_seat_packs: bool,
+     * }
+     */
+    protected function buildCreatorBillingState(\App\Models\Tenant $tenant, string $currentPlanKey, $subscription): array
+    {
+        $plan = config("plans.{$currentPlanKey}", config('plans.free'));
+        $addons = $plan['addons_available'] ?? [];
+        $planIncludes = (bool) ($plan['creator_module_included'] ?? false);
+        $canPurchaseBase = ($addons['creator_module'] ?? false) === true && ! $planIncludes;
+
+        $module = TenantModule::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('module_key', TenantModule::KEY_CREATOR)
+            ->first();
+
+        $stripeBase = $module && ! empty($module->stripe_subscription_item_id);
+        $activeSeatPackId = null;
+        if ($module && ! empty($module->seat_pack_stripe_price_id)) {
+            foreach (config('creator_addon.seat_packs', []) as $p) {
+                if (($p['stripe_price_id'] ?? null) === $module->seat_pack_stripe_price_id) {
+                    $activeSeatPackId = $p['id'] ?? null;
+                    break;
+                }
+            }
+        }
+
+        $featureGate = app(FeatureGate::class);
+        $canManageSeatPacks = $planIncludes || $stripeBase;
+
+        $subscriptionActive = $subscription && $subscription->stripe_status === 'active';
+
+        $eligibleForCard = $planIncludes
+            || ($addons['creator_module'] ?? false) === true
+            || $stripeBase;
+
+        return [
+            'show_card' => $subscriptionActive && $eligibleForCard,
+            'plan_includes_module' => $planIncludes,
+            'stripe_base_subscription_active' => $stripeBase,
+            'active_seat_pack_id' => $activeSeatPackId,
+            'seats_limit' => $featureGate->getCreatorSeatsLimit($tenant),
+            'can_purchase_base_module' => $canPurchaseBase,
+            'can_manage_seat_packs' => $canManageSeatPacks,
+        ];
     }
 }

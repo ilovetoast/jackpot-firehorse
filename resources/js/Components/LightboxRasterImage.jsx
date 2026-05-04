@@ -26,13 +26,18 @@ export default function LightboxRasterImage({
     const src = gif.displaySrc || trimmed
 
     return (
-        <div className="relative flex max-h-full max-w-full items-center justify-center">
+        <div className="relative flex h-full w-full min-h-0 min-w-0 items-center justify-center">
             <img
                 key={`${asset?.id}-lb-${trimmed.slice(0, 96)}-${gif.playing ? 'anim' : 'poster'}`}
                 src={src}
                 alt={alt}
-                className="h-auto w-auto max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
+                className="max-h-full max-w-full object-contain transition-all duration-300 ease-in-out"
                 style={{
+                    // Fit inside the absolute-filled stage; width/height auto + max 100% keeps aspect ratio.
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain',
+                    objectPosition: 'center',
                     transform:
                         transitionDirection === 'left'
                             ? 'translateX(30px)'

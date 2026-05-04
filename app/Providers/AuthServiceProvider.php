@@ -50,6 +50,16 @@ class AuthServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->registerPolicies();
+
+        Gate::before(function ($user, string $ability) {
+            if (! $user instanceof \App\Models\User) {
+                return null;
+            }
+
+            return \App\Support\Authorization\ImpersonationReadOnlyEnforcer::gateBefore($user, $ability);
+        });
+
         /*
          * Gate: brand-intelligence.view-decision-trace
          *

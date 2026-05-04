@@ -239,7 +239,24 @@ class ProcessAssetJob implements ShouldQueue
         // Resolve version-aware or legacy: accept version ID or asset ID
         // Version path: load with lockForUpdate() for race safety
         $version = DB::transaction(fn () => AssetVersion::where('id', $this->assetId)->lockForUpdate()->first());
-        $asset = $version ? $version->asset : Asset::findOrFail($this->assetId);
+        if ($version) {
+            $version->loadMissing('asset');
+            if (! $version->asset) {
+                Log::info('[ProcessAssetJob] Skipping — parent asset missing (likely deleted during processing)', [
+                    'version_id' => $version->id,
+                ]);
+
+                return;
+            }
+        }
+        $asset = $version ? $version->asset : Asset::query()->find($this->assetId);
+        if (! $asset) {
+            Log::info('[ProcessAssetJob] Skipping — asset no longer exists (likely deleted before pipeline ran)', [
+                'asset_id' => $this->assetId,
+            ]);
+
+            return;
+        }
         // When asset ID was passed (e.g. from ProcessAssetOnUpload), resolve current version for pipeline_status updates
         if (! $version && $asset->currentVersion) {
             $version = DB::transaction(fn () => AssetVersion::where('id', $asset->currentVersion->id)->lockForUpdate()->first());

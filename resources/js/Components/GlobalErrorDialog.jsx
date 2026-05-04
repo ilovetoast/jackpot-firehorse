@@ -98,7 +98,9 @@ export default function GlobalErrorDialog() {
                                 id="global-error-title"
                                 className="mt-1 text-lg font-semibold text-gray-900"
                             >
-                                Something went wrong
+                                {error.title?.trim()
+                                    ? error.title
+                                    : 'Something went wrong'}
                             </h2>
                             <p className="mt-2 text-sm leading-relaxed text-gray-600">
                                 {error.message}

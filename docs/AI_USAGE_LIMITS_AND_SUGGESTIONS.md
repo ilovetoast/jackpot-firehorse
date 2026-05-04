@@ -2399,7 +2399,7 @@ Updated `Asset::getMediumThumbnailUrlAttribute()` to generate signed S3 URLs ins
 
 4. **Job Error Surfacing**
    - **Status:** 📋 PLANNED
-   - **Requirement:** Surface job errors to site_engineer, site_admin, or site_owner roles
+   - **Requirement:** Surface job errors to site_engineering, site_admin, or site_owner roles
    - **Requirement:** Allow expanding collapsed errors from AI agent runs
    - **Decision Needed:** Wait for now or implement? (User requested recommendation)
 

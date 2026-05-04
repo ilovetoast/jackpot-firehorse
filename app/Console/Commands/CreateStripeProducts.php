@@ -13,6 +13,9 @@ use Stripe\Stripe;
  * Run once per Stripe environment (test / live).
  * Outputs env vars to paste into .env.
  *
+ * Prefer setting the `STRIPE_PRICE_*_MONTHLY` variables documented in docs/billing-stripe-dev.md
+ * (see config/billing_stripe.php). Legacy keys like STRIPE_PRICE_STARTER remain supported as fallbacks.
+ *
  * Usage:
  *   php artisan stripe:create-products
  *   php artisan stripe:create-products --dry-run

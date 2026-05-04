@@ -93,9 +93,13 @@ router.on('invalid', (event) => {
     const status = res.status ?? 500
     const message = messageFromInvalidResponse(res)
     const type = status >= 500 ? 'server' : 'server'
+    const raw = res?.data
+    const title =
+        raw && typeof raw === 'object' && raw.title ? String(raw.title) : undefined
 
     showGlobalError({
         message,
+        title,
         type,
         statusCode: status,
         retry: () =>

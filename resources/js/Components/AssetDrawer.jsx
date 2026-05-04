@@ -2472,15 +2472,62 @@ export default function AssetDrawer({
         return true
     }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile])
 
-    const needsDrawerRotateOriginalPreview = useMemo(
+    /**
+     * Same raster the grid uses (baked orientation). The signed ORIGINAL URL is often decoded
+     * differently in the browser (EXIF) than our thumbnail pipeline + Imagick save path,
+     * which made "rotate preview 90°" disagree with the grid and with the persisted file.
+     */
+    const drawerOrientationBaseRasterUrl = useMemo(() => {
+        if (!displayAsset) {
+            return null
+        }
+        if (displayAsset.final_thumbnail_url) {
+            return displayAsset.final_thumbnail_url
+        }
+        const ts = String(displayAsset.thumbnail_status?.value || displayAsset.thumbnail_status || '').toLowerCase()
+        if (displayAsset.thumbnail_url && ts === 'completed') {
+            return displayAsset.thumbnail_url
+        }
+        return null
+    }, [
+        displayAsset?.id,
+        displayAsset?.final_thumbnail_url,
+        displayAsset?.thumbnail_url,
+        displayAsset?.thumbnail_status,
+    ])
+
+    /** Bust browser/CDN cache after in-place rotate (URLs often unchanged until polling). */
+    const drawerOrientationPreviewRasterUrl = useMemo(() => {
+        if (!drawerOrientationBaseRasterUrl) {
+            return null
+        }
+        const url = drawerOrientationBaseRasterUrl
+        const w = displayAsset?.width
+        const h = displayAsset?.height
+        const sz = displayAsset?.size_bytes
+        const token = [w, h, sz].filter((x) => x != null).join('x')
+        if (!token) {
+            return url
+        }
+        const sep = url.includes('?') ? '&' : '?'
+        return `${url}${sep}jp_rpv=${encodeURIComponent(token)}`
+    }, [drawerOrientationBaseRasterUrl, displayAsset?.width, displayAsset?.height, displayAsset?.size_bytes])
+
+    const needsDrawerRotateOriginalSignedFetch = useMemo(
         () =>
             canRotateDrawerRasterPreview &&
+            !drawerOrientationBaseRasterUrl &&
             (drawerOrientationDetailsOpen || drawerPreviewDisplayRotation !== 0),
-        [canRotateDrawerRasterPreview, drawerOrientationDetailsOpen, drawerPreviewDisplayRotation],
+        [
+            canRotateDrawerRasterPreview,
+            drawerOrientationBaseRasterUrl,
+            drawerOrientationDetailsOpen,
+            drawerPreviewDisplayRotation,
+        ],
     )
 
     useEffect(() => {
-        if (!needsDrawerRotateOriginalPreview) {
+        if (!needsDrawerRotateOriginalSignedFetch) {
             setDrawerRotateOriginalSignedUrl(null)
             setDrawerRotateOriginalSignedUrlLoading(false)
             return undefined
@@ -2513,22 +2560,38 @@ export default function AssetDrawer({
                 }
             })
         return () => ac.abort()
-    }, [displayAsset?.id, needsDrawerRotateOriginalPreview])
+    }, [displayAsset?.id, needsDrawerRotateOriginalSignedFetch])
+
+    const drawerRasterRotationPreviewActive = Boolean(
+        canRotateDrawerRasterPreview &&
+            (drawerOrientationDetailsOpen || drawerPreviewDisplayRotation !== 0),
+    )
 
     const drawerRasterRotationAlignedForcedUrl = useMemo(() => {
-        if (!canRotateDrawerRasterPreview || !needsDrawerRotateOriginalPreview) {
+        if (!canRotateDrawerRasterPreview) {
             return drawerForcedPreviewUrl
         }
-        return drawerRotateOriginalSignedUrl || drawerForcedPreviewUrl
+        if (!drawerRasterRotationPreviewActive) {
+            return drawerForcedPreviewUrl
+        }
+        if (drawerOrientationPreviewRasterUrl) {
+            return drawerOrientationPreviewRasterUrl
+        }
+        if (needsDrawerRotateOriginalSignedFetch) {
+            return drawerRotateOriginalSignedUrl || drawerForcedPreviewUrl
+        }
+        return drawerForcedPreviewUrl
     }, [
         canRotateDrawerRasterPreview,
-        needsDrawerRotateOriginalPreview,
+        drawerRasterRotationPreviewActive,
+        drawerOrientationPreviewRasterUrl,
+        needsDrawerRotateOriginalSignedFetch,
         drawerRotateOriginalSignedUrl,
         drawerForcedPreviewUrl,
     ])
 
     const drawerPreviewRotateOriginalSpinnerOverlay = Boolean(
-        needsDrawerRotateOriginalPreview &&
+        needsDrawerRotateOriginalSignedFetch &&
             drawerRotateOriginalSignedUrlLoading &&
             !drawerRotateOriginalSignedUrl,
     )
@@ -2548,6 +2611,9 @@ export default function AssetDrawer({
 
     const orientationMiniPreviewForcedUrl = useMemo(() => {
         if (!displayAsset?.id || !canRotateDrawerRasterPreview) return null
+        if (drawerOrientationPreviewRasterUrl) {
+            return drawerOrientationPreviewRasterUrl
+        }
         if (drawerRotateOriginalSignedUrl) {
             return drawerRotateOriginalSignedUrl
         }
@@ -2558,6 +2624,7 @@ export default function AssetDrawer({
     }, [
         displayAsset?.id,
         canRotateDrawerRasterPreview,
+        drawerOrientationPreviewRasterUrl,
         drawerRotateOriginalSignedUrl,
         showExecutionPreviewChrome,
         previewStyleMode,
@@ -7244,10 +7311,15 @@ export default function AssetDrawer({
                             </button>
                         )}
 
-                    <div 
-                        className="relative flex h-full min-h-0 w-full min-w-0 flex-1 items-center justify-center overflow-hidden p-4"
+                    <div
+                        className="relative min-h-0 min-w-0 flex-1 basis-0 overflow-hidden"
                         onClick={(e) => e.stopPropagation()}
                     >
+                        {/*
+                          Fill the flex slot with a positioned box so max-h-full / object-contain on the media
+                          resolve against the real viewport, not the image's intrinsic height (flex min-height:auto).
+                        */}
+                        <div className="absolute inset-0 flex items-center justify-center overflow-hidden p-4">
                         {/* Phase V-1: Check if current asset is a video */}
                         {(() => {
                             if (currentCarouselAsset?.is_virtual_google_font) {
@@ -7355,6 +7427,8 @@ export default function AssetDrawer({
                                             tryPlayLightboxVideo(e.currentTarget)
                                         }
                                         style={{
+                                            objectFit: 'contain',
+                                            objectPosition: 'center',
                                             transform:
                                                 transitionDirection === 'left'
                                                     ? 'translateX(30px)'
@@ -7389,6 +7463,7 @@ export default function AssetDrawer({
                                 )
                             }
                         })()}
+                        </div>
                     </div>
 
                     <div className="pointer-events-none absolute bottom-8 left-1/2 z-10 -translate-x-1/2 transform">

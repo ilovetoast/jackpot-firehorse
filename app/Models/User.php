@@ -581,22 +581,19 @@ class User extends Authenticatable
     }
 
     /**
-     * Get all site-wide roles (roles that contain 'site' in the name, plus 'site_compliance').
-     * Site-wide roles are: site_owner, site_admin, site_support, site_engineering, site_compliance
-     * Note: Tenant-level roles are: owner, admin, member. All other roles are brand-scoped.
-     * Returns array_values() to ensure it's a proper array, not an object with numeric keys
+     * Site-wide Spatie roles for this user (see {@see \App\Support\Roles\RoleRegistry::siteRoles()}).
+     * Tenant-level roles (owner, admin, member, …) live on tenant_user — not included here.
      */
     public function getSiteRoles(): array
     {
         $allRoles = $this->getRoleNames()->toArray();
-        $siteRoleNames = ['site_owner', 'site_admin', 'site_support', 'site_engineering', 'site_compliance'];
+        $siteRoleNames = \App\Support\Roles\RoleRegistry::siteRoles();
 
         $filtered = array_filter(
             $allRoles,
-            fn ($role) => in_array($role, $siteRoleNames)
+            fn ($role) => in_array($role, $siteRoleNames, true)
         );
 
-        // Use array_values to ensure it's a proper array, not an object with numeric keys
         return array_values($filtered);
     }
 
@@ -631,6 +628,20 @@ class User extends Authenticatable
      *
      * @return array{role: string|null, requires_approval: bool}|null Returns null if no active membership
      */
+    /**
+     * Active brand_user row (removed_at IS NULL). Aligns with {@see EnsureGatewayEntry} and the gateway
+     * brand picker — users may appear in that list even when {@see activeBrandMembership()} is null
+     * (e.g. legacy/invalid pivot role strings).
+     */
+    public function hasActiveBrandUserAssignment(Brand $brand): bool
+    {
+        return $this->brands()
+            ->where('brands.id', $brand->id)
+            ->where('brands.tenant_id', $brand->tenant_id)
+            ->whereNull('brand_user.removed_at')
+            ->exists();
+    }
+
     public function activeBrandMembership(Brand $brand): ?array
     {
         $cacheKey = (string) $brand->id;

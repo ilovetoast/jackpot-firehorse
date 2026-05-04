@@ -36,6 +36,20 @@ test('JPG without thumbnail and pending shows generating_preview', () => {
     assert.equal(vs.badgeShort, 'Processing')
 })
 
+test('JPG pending with original URL uses ready (grid fallback for stuck derivatives)', () => {
+    const asset = {
+        id: 1021,
+        file_extension: 'jpg',
+        mime_type: 'image/jpeg',
+        thumbnail_status: 'processing',
+        original: 'https://cdn.example.com/o.jpg',
+    }
+    assert.equal(hasServerRasterThumbnail(asset), true)
+    const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
+    assert.equal(vs.kind, 'ready')
+    assert.equal(vs.badgeShort, '')
+})
+
 test('pending_finalize_client_tile with unknown MIME still gets generating_preview (animated mosaic path)', () => {
     const asset = {
         id: 'client-uuid-1',

@@ -12,7 +12,7 @@ The Jackpot DAM uses a **canonical role system** with three completely separate 
 2. **Tenant/Company Roles**: Control what a user can do at the company level (Spatie roles)
 3. **Brand Roles**: Control what a user can do for a specific brand's assets (stored as strings)
 
-These layers **MUST NOT leak into each other**. All role lists come from a single registry (`RoleRegistry`).
+These layers **MUST NOT leak into each other**. Tenant and brand role keys use `RoleRegistry`; site-wide Spatie role keys use `RoleRegistry::siteRoles()` (canonical name `site_engineering`, not `site_engineer`).
 
 **Download links:** The permission `downloads.share_public_link` controls who may set a download to **public** (unauthenticated) access. It is included for standard tenant roles (owner, admin, member, agency roles) and for brand roles admin / brand_manager / contributor—not for brand **viewer**. External collection guests are always blocked from public links in code regardless of role. See [SECURITY_DOWNLOADS_AND_EXTERNAL_ACCESS.md](./SECURITY_DOWNLOADS_AND_EXTERNAL_ACCESS.md).
 
@@ -381,19 +381,19 @@ The 'member' role is **tenant-level only**:
 
 ## Why Site Roles Are Not in PermissionMap
 
-Site roles operate at the platform level and are not tenant- or brand-scoped. They are intentionally excluded from `RoleRegistry` and `PermissionMap` to prevent scope leakage into tenant UIs, seeders, and APIs.
+Site roles operate at the platform level and are not tenant- or brand-scoped. Their **keys** are canonical in `RoleRegistry::siteRoles()` (for validation and admin UI). They remain excluded from `PermissionMap` so tenant/brand permission maps never mix with platform staff roles.
 
 This prevents:
 - Future "helpful" refactors that accidentally include site roles in tenant contexts
 - Cursor/AI hallucinating site roles into tenant/brand APIs
 - Human confusion six months from now about why site roles appear in tenant dropdowns
 
-Site roles (`site_owner`, `site_admin`, `site_support`, `site_engineering`, `site_compliance`) are managed separately in `PermissionSeeder` and are only accessible via the site admin dashboard.
+Site roles (`site_owner`, `site_admin`, `site_support`, `site_engineering`, `site_compliance`) are created in `PermissionSeeder` and assigned via the site admin dashboard.
 
 ## Related Files
 
 - **Role Registry**:
-  - `app/Support/Roles/RoleRegistry.php` - Single source of truth for all roles
+  - `app/Support/Roles/RoleRegistry.php` - Tenant/brand roles plus `siteRoles()` for platform staff keys
 
 - **Seeders**:
   - `database/seeders/RoleSeeder.php`

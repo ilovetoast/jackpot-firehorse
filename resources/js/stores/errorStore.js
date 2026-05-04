@@ -12,6 +12,7 @@ export const useErrorStore = create((set) => ({
 /**
  * @param {object} payload
  * @param {string} payload.message
+ * @param {string} [payload.title] — modal heading (defaults in GlobalErrorDialog)
  * @param {'server'|'validation'|'network'} [payload.type]
  * @param {number} [payload.statusCode]
  * @param {() => void} [payload.retry]
@@ -21,6 +22,7 @@ export function showGlobalError(payload) {
     const p = typeof payload === 'string' ? { message: payload } : payload || {}
     useErrorStore.getState().showError({
         message: p.message || 'Something went wrong.',
+        title: p.title,
         type: p.type || 'server',
         statusCode: p.statusCode,
         retry: p.retry,
@@ -100,8 +102,10 @@ export function showGlobalErrorFromAxios(error) {
 
     const data = error.response.data
     let message = 'Request failed'
+    let title
     if (data && typeof data === 'object' && data.message) {
         message = String(data.message)
+        if (data.title) title = String(data.title)
     } else if (typeof data === 'string' && data.trim().length && data.length < 2000 && !data.trim().startsWith('<')) {
         message = data.trim().slice(0, 500)
     }
@@ -111,6 +115,7 @@ export function showGlobalErrorFromAxios(error) {
 
     showGlobalError({
         message,
+        title,
         type,
         statusCode: status,
     })

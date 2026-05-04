@@ -138,7 +138,10 @@ class EnsureGatewayEntry
             || $request->is('app/profile/*')
             || $request->is('app/companies')
             || $request->is('app/companies/*')
-            || $request->is('app/logout');
+            || $request->is('app/logout')
+            // Command Center: site staff may open admin surfaces before picking a workspace.
+            || $request->is('app/admin')
+            || $request->is('app/admin/*');
     }
 
     /**

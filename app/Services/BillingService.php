@@ -719,7 +719,26 @@ class BillingService
             ->first();
 
         if (! $module) {
-            throw new \RuntimeException('Creator Module must be active to add seat packs.');
+            $planService = new PlanService();
+            $planName = $planService->getCurrentPlan($tenant);
+            $plan = config("plans.{$planName}", config('plans.free'));
+            $planIncludes = (bool) ($plan['creator_module_included'] ?? false);
+            if (! $planIncludes) {
+                throw new \RuntimeException('Creator Module must be active to add seat packs.');
+            }
+            $planSeats = (int) ($plan['creator_module_included_seats'] ?? 0);
+            $module = \App\Models\TenantModule::create([
+                'tenant_id' => $tenant->id,
+                'module_key' => \App\Models\TenantModule::KEY_CREATOR,
+                'status' => 'active',
+                'expires_at' => null,
+                'granted_by_admin' => false,
+                'seats_limit' => max(0, $planSeats),
+                'stripe_price_id' => null,
+                'stripe_subscription_item_id' => null,
+                'seat_pack_stripe_price_id' => null,
+                'seat_pack_stripe_subscription_item_id' => null,
+            ]);
         }
 
         $subscription = $tenant->subscription('default');

@@ -51,7 +51,14 @@ class FinalizeAssetJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $asset = DB::transaction(fn () => Asset::where('id', $this->assetId)->lockForUpdate()->firstOrFail());
+        $asset = DB::transaction(fn () => Asset::where('id', $this->assetId)->lockForUpdate()->first());
+        if (! $asset) {
+            Log::info('[FinalizeAssetJob] Skipping — asset no longer exists (likely deleted during processing)', [
+                'asset_id' => $this->assetId,
+            ]);
+
+            return;
+        }
         \App\Services\UploadDiagnosticLogger::jobStart('FinalizeAssetJob', $asset->id, $asset->currentVersion?->id);
 
         $currentVersion = $asset->currentVersion;

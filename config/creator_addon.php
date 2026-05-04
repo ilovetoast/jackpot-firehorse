@@ -16,7 +16,7 @@ return [
     */
 
     'base' => [
-        'stripe_price_id' => env('STRIPE_PRICE_CREATOR_MODULE'),
+        'stripe_price_id' => config('billing_stripe.stripe_prices.addons.creator_module'),
         'monthly_price' => 99,
         'included_seats' => 25,
         'available_plans' => ['pro'],
@@ -26,13 +26,13 @@ return [
         [
             'id' => 'creator_seats_25',
             'seats' => 25,
-            'stripe_price_id' => env('STRIPE_PRICE_CREATOR_SEATS_25'),
+            'stripe_price_id' => config('billing_stripe.stripe_prices.addons.creator_seats_25'),
             'monthly_price' => 49,
         ],
         [
             'id' => 'creator_seats_100',
             'seats' => 100,
-            'stripe_price_id' => env('STRIPE_PRICE_CREATOR_SEATS_100'),
+            'stripe_price_id' => config('billing_stripe.stripe_prices.addons.creator_seats_100'),
             'monthly_price' => 149,
         ],
     ],

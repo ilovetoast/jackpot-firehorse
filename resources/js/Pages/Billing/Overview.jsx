@@ -5,7 +5,25 @@ import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { RECOGNIZED_PLAN_LIMIT_REASONS } from '../../utils/planLimitEligibility'
 
-export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency, storage_info, storage_addon_packages, ai_credits, credit_weights, ai_credits_addon_packages, creator_addon_config, available_addons }) {
+export default function BillingOverview({
+    tenant,
+    current_plan,
+    subscription,
+    payment_method,
+    recent_invoices,
+    has_stripe_id,
+    on_demand_usage,
+    monthly_average,
+    currency,
+    storage_info,
+    storage_addon_packages,
+    ai_credits,
+    credit_weights,
+    ai_credits_addon_packages,
+    creator_addon_config,
+    creator_billing_state = null,
+    available_addons,
+}) {
     const page = usePage()
     const { auth } = page.props
     const inertiaUrl =

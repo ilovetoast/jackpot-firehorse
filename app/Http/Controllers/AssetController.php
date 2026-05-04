@@ -52,6 +52,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Http\Controllers\Concerns\BuildsBulkAssignCategoryOptions;
+use App\Http\Support\AssetSessionWorkspace;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -2009,7 +2010,7 @@ class AssetController extends Controller
      *
      * GET /assets/{asset}/processing-status
      */
-    public function processingStatus(Asset $asset): JsonResponse
+    public function processingStatus(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $brand = app('brand');
@@ -2018,17 +2019,8 @@ class AssetController extends Controller
             return $this->processingStatusDegradedJson($asset);
         }
 
-        // Verify asset belongs to tenant and brand
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
-        }
-
-        if ($asset->brand_id !== $brand->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
 
         try {
@@ -2124,16 +2116,13 @@ class AssetController extends Controller
      *
      * GET /assets/{asset}/activity
      */
-    public function activity(Asset $asset): JsonResponse
+    public function activity(Request $request, Asset $asset): JsonResponse
     {
-        $tenant = app('tenant');
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
+
+        $tenant = app('tenant');
 
         // Get activity events for this asset
         $events = ActivityEvent::where('tenant_id', $tenant->id)
@@ -2168,7 +2157,7 @@ class AssetController extends Controller
         Gate::authorize('view', $asset);
 
         if ($request->wantsJson() || $request->header('Accept') === 'application/json') {
-            return $this->previewUrl($asset);
+            return $this->previewUrl($request, $asset);
         }
 
         if ($this->mayStreamInlineFontPreview($asset) && $this->requestLooksLikeInlineFontFetch($request)) {
@@ -2202,6 +2191,8 @@ class AssetController extends Controller
             ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
             : null;
 
+        AssetSessionWorkspace::assertMatchesSession($request, $asset, true);
+
         $asset->load(['collections' => fn ($q) => $q->select('collections.id', 'collections.name')]);
         $payload = [
             'id' => $asset->id,
@@ -2227,14 +2218,11 @@ class AssetController extends Controller
      * Download an asset. Redirects to a signed storage URL.
      * GET /assets/{asset}/download
      */
-    public function download(Asset $asset): RedirectResponse
+    public function download(Request $request, Asset $asset): RedirectResponse
     {
         Gate::authorize('view', $asset);
 
-        $tenant = app('tenant');
-        if ($asset->tenant_id !== $tenant->id) {
-            abort(404, 'Asset not found.');
-        }
+        AssetSessionWorkspace::assertMatchesSession($request, $asset, true);
 
         $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
         if (! $url) {
@@ -2249,17 +2237,12 @@ class AssetController extends Controller
      *
      * GET /assets/{asset}/preview-url
      */
-    public function previewUrl(Asset $asset): JsonResponse
+    public function previewUrl(Request $request, Asset $asset): JsonResponse
     {
         Gate::authorize('view', $asset);
 
-        $tenant = app('tenant');
-
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
 
         // Video playback (AssetDrawer, etc.): do not require full AI/metadata completion — only that
@@ -2361,13 +2344,10 @@ class AssetController extends Controller
      *
      * GET /app/assets/{asset}/processing-status
      */
-    public function processingGuardStatus(Asset $asset): JsonResponse
+    public function processingGuardStatus(Request $request, Asset $asset): JsonResponse
     {
-        $tenant = app('tenant');
-        $brand = app('brand');
-
-        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
 
         $this->authorize('view', $asset);
@@ -2392,16 +2372,13 @@ class AssetController extends Controller
      *
      * POST /app/assets/{asset}/ai-metadata/regenerate
      */
-    public function regenerateAiMetadata(Asset $asset): JsonResponse
+    public function regenerateAiMetadata(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         if (! $user) {
@@ -2473,16 +2450,13 @@ class AssetController extends Controller
      *
      * POST /app/assets/{asset}/ai-tagging/regenerate
      */
-    public function regenerateAiTagging(Asset $asset): JsonResponse
+    public function regenerateAiTagging(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         if (! $user) {
@@ -2570,9 +2544,8 @@ class AssetController extends Controller
      */
     public function rotateOriginal(Request $request, Asset $asset): JsonResponse
     {
-        $tenant = app('tenant');
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['success' => false, 'error' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         $this->authorize('update', $asset);
@@ -2640,17 +2613,13 @@ class AssetController extends Controller
      * - dominant_colors (top 3 dominant colors from image analysis)
      * - dominant_hue_group (perceptual hue cluster for filtering)
      */
-    public function regenerateSystemMetadata(Asset $asset): JsonResponse
+    public function regenerateSystemMetadata(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
 
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         // Check permission - same as AI metadata regeneration
@@ -2718,7 +2687,7 @@ class AssetController extends Controller
      *
      * POST /assets/{asset}/publish
      */
-    public function publish(Asset $asset): JsonResponse
+    public function publish(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
@@ -2727,8 +2696,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         try {
@@ -2767,8 +2736,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
 
         $isBuilderStaged = (bool) $asset->builder_staged;
@@ -2845,8 +2814,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id || $asset->brand_id !== $brand->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
         }
 
         $validated = $request->validate([
@@ -2904,7 +2873,7 @@ class AssetController extends Controller
      *
      * POST /assets/{asset}/unpublish
      */
-    public function unpublish(Asset $asset): JsonResponse
+    public function unpublish(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
@@ -2913,8 +2882,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         try {
@@ -2938,7 +2907,7 @@ class AssetController extends Controller
      *
      * POST /assets/{asset}/archive
      */
-    public function archive(Asset $asset): JsonResponse
+    public function archive(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
@@ -2947,8 +2916,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         try {
@@ -2974,7 +2943,7 @@ class AssetController extends Controller
      *
      * POST /assets/{asset}/restore
      */
-    public function restore(Asset $asset): JsonResponse
+    public function restore(Request $request, Asset $asset): JsonResponse
     {
         $tenant = app('tenant');
         $user = auth()->user();
@@ -2983,8 +2952,8 @@ class AssetController extends Controller
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         try {
@@ -3021,8 +2990,8 @@ class AssetController extends Controller
         if (! $user) {
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
         if (! $user->hasPermissionForTenant($tenant, 'metadata.edit_post_upload')) {
             return response()->json(['message' => 'You do not have permission to edit this asset.'], 403);
@@ -3063,8 +3032,13 @@ class AssetController extends Controller
         if (! $user) {
             return response()->json(['error' => 'Unauthenticated'], 401);
         }
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json(['error' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            $data = $response->getData(true);
+            if (is_array($data) && isset($data['message'])) {
+                $data['error'] = $data['message'];
+            }
+
+            return response()->json(is_array($data) ? $data : [], $response->getStatusCode());
         }
         if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
             return response()->json(['error' => 'You do not have permission to replace files.'], 403);
@@ -3120,18 +3094,14 @@ class AssetController extends Controller
      *
      * DELETE /assets/{asset}
      */
-    public function destroy(Asset $asset): JsonResponse
+    public function destroy(Request $request, Asset $asset): JsonResponse
     {
         $this->authorize('delete', $asset);
 
-        $tenant = app('tenant');
         $user = auth()->user();
 
-        // Verify asset belongs to tenant
-        if ($asset->tenant_id !== $tenant->id) {
-            return response()->json([
-                'message' => 'Asset not found',
-            ], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, false)) {
+            return $response;
         }
 
         // Verify asset is not already deleted
@@ -3162,9 +3132,8 @@ class AssetController extends Controller
      *
      * POST /assets/{asset}/restore-from-trash
      */
-    public function restoreFromTrash(string $asset): JsonResponse
+    public function restoreFromTrash(Request $request, string $asset): JsonResponse
     {
-        $tenant = app('tenant');
         $user = auth()->user();
 
         if (! $user) {
@@ -3173,8 +3142,8 @@ class AssetController extends Controller
 
         $assetModel = Asset::withTrashed()->findOrFail($asset);
 
-        if ($assetModel->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $assetModel, false)) {
+            return $response;
         }
 
         if (! $assetModel->trashed()) {
@@ -3201,9 +3170,8 @@ class AssetController extends Controller
      * Phase B2: Permanently delete a soft-deleted asset (force delete from trash).
      * DELETE /assets/{asset}/force-delete
      */
-    public function forceDelete(string $asset): JsonResponse
+    public function forceDelete(Request $request, string $asset): JsonResponse
     {
-        $tenant = app('tenant');
         $user = auth()->user();
 
         if (! $user) {
@@ -3212,8 +3180,8 @@ class AssetController extends Controller
 
         $assetModel = Asset::withTrashed()->findOrFail($asset);
 
-        if ($assetModel->tenant_id !== $tenant->id) {
-            return response()->json(['message' => 'Asset not found'], 404);
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $assetModel, false)) {
+            return $response;
         }
 
         if (! $assetModel->trashed()) {

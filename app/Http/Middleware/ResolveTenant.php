@@ -109,8 +109,7 @@ class ResolveTenant
             if ($brand && $user) {
                 // Phase MI-1: Verify user has active brand membership (unless owner/admin)
                 if (! $isTenantOwnerOrAdmin) {
-                    $membership = $user->activeBrandMembership($brand);
-                    $hasBrandAccess = $membership !== null;
+                    $hasBrandAccess = $user->hasActiveBrandUserAssignment($brand);
 
                     \Log::info('ResolveTenant - Active membership check', [
                         'user_id' => $user->id,
@@ -130,8 +129,11 @@ class ResolveTenant
                         ]);
                         // Phase MI-1: User doesn't have active membership - find a brand they do have access to
                         $userBrand = null;
-                        foreach ($tenant->brands as $tenantBrand) {
-                            if ($user->activeBrandMembership($tenantBrand)) {
+                        foreach ($tenant->brands->sortBy([
+                            fn ($b) => ($b->is_default ?? false) ? 0 : 1,
+                            fn ($b) => strtolower((string) ($b->name ?? '')),
+                        ]) as $tenantBrand) {
+                            if ($user->hasActiveBrandUserAssignment($tenantBrand)) {
                                 $userBrand = $tenantBrand;
                                 break;
                             }
@@ -176,8 +178,11 @@ class ResolveTenant
             // Phase MI-1: No brand in session, try to use a brand the user has active membership for
             if ($user && ! $isTenantOwnerOrAdmin) {
                 $userBrand = null;
-                foreach ($tenant->brands as $tenantBrand) {
-                    if ($user->activeBrandMembership($tenantBrand)) {
+                foreach ($tenant->brands->sortBy([
+                    fn ($b) => ($b->is_default ?? false) ? 0 : 1,
+                    fn ($b) => strtolower((string) ($b->name ?? '')),
+                ]) as $tenantBrand) {
+                    if ($user->hasActiveBrandUserAssignment($tenantBrand)) {
                         $userBrand = $tenantBrand;
                         break;
                     }
@@ -229,12 +234,16 @@ class ResolveTenant
                 $hasBrandAccess = $user->brands()
                     ->where('brands.id', $brand->id)
                     ->where('tenant_id', $tenant->id)
+                    ->whereNull('brand_user.removed_at')
                     ->exists();
 
                 if (! $hasBrandAccess) {
                     // User doesn't have access - find a brand they do have access to
                     $userBrand = $user->brands()
                         ->where('tenant_id', $tenant->id)
+                        ->whereNull('brand_user.removed_at')
+                        ->orderByDesc('is_default')
+                        ->orderBy('name')
                         ->first();
 
                     if ($userBrand) {

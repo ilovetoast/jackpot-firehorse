@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use App\Services\ImpersonationService;
 use Illuminate\Support\Facades\Auth;
 
 class LoginController extends Controller
@@ -92,6 +93,10 @@ class LoginController extends Controller
      */
     public function destroy(Request $request)
     {
+        if ($request->user()) {
+            app(ImpersonationService::class)->endSession($request);
+        }
+
         Auth::logout();
 
         $request->session()->invalidate();

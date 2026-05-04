@@ -44,6 +44,7 @@
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
+import { originalImageGridFallbackUrl } from '../utils/originalImageGridFallbackUrl'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { trackImageLoad } from '../utils/performanceTracking'
 import { analyzeLogoLightOnWhiteRisk } from '../utils/imageUtils'
@@ -101,7 +102,7 @@ function resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector) {
     if (asset.thumbnail_url && ts === 'completed') {
         return asset.thumbnail_url
     }
-    return null
+    return originalImageGridFallbackUrl(asset)
 }
 
 export default function ThumbnailPreview({
@@ -890,21 +891,18 @@ export default function ThumbnailPreview({
         // HARD TERMINAL STATE: Spinner may ONLY render when actively processing
         // Spinner must NEVER render for terminal states (COMPLETED, FAILED, SKIPPED)
         // Spinner must NEVER render when final thumbnail exists
-        const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
+        const tsNorm = String(asset?.thumbnail_status?.value ?? asset?.thumbnail_status ?? '').toLowerCase()
         const hasFinalThumbnail = !!asset?.final_thumbnail_url
         const hasThumbnailError = !!asset?.thumbnail_error
-        
-        // Explicit terminal state guard - spinner must never render for these
-        const isTerminalState = thumbnailStatus === 'COMPLETED' || 
-                               thumbnailStatus === 'FAILED' || 
-                               thumbnailStatus === 'SKIPPED'
-        
-        // Strict condition: spinner ONLY when actively processing
-        const isActivelyProcessing = thumbnailStatus === 'PROCESSING' &&
-                                     !hasFinalThumbnail &&
-                                     !hasThumbnailError &&
-                                     !isTerminalState
-        
+
+        const isTerminalState = tsNorm === 'completed' || tsNorm === 'failed' || tsNorm === 'skipped'
+
+        const isActivelyProcessing =
+            (tsNorm === 'processing' || tsNorm === 'pending') &&
+            !hasFinalThumbnail &&
+            !hasThumbnailError &&
+            !isTerminalState
+
         return (
             <div
                 className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}
@@ -963,29 +961,18 @@ export default function ThumbnailPreview({
        urlKnownFailed: skip img render for URLs we've seen 404 - show placeholder
     ------------------------------------------------------------ */
     if (lockedIsPreview && lockedUrl && !urlKnownFailed) {
-        // HARD TERMINAL STATE: Spinner may ONLY render when actively processing
-        // Spinner must NEVER render for terminal states (COMPLETED, FAILED, SKIPPED)
-        // Spinner must NEVER render when final thumbnail exists
-        const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
+        const tsNorm = String(asset?.thumbnail_status?.value ?? asset?.thumbnail_status ?? '').toLowerCase()
         const hasFinalThumbnail = !!asset?.final_thumbnail_url
         const hasThumbnailError = !!asset?.thumbnail_error
-        
-        // Explicit terminal state guard - spinner must never render for these
-        const isTerminalState = thumbnailStatus === 'COMPLETED' || 
-                               thumbnailStatus === 'FAILED' || 
-                               thumbnailStatus === 'SKIPPED'
-        
-        // Strict condition: spinner ONLY when actively processing
-        // ALL of these must be true:
-        // 1. thumbnail_status is PROCESSING (not terminal)
-        // 2. No final thumbnail exists yet (final means processing is done)
-        // 3. No thumbnail error exists (error means processing failed)
-        // 4. Not in a terminal state (explicit guard)
-        const isActivelyProcessing = thumbnailStatus === 'PROCESSING' &&
-                                     !hasFinalThumbnail &&
-                                     !hasThumbnailError &&
-                                     !isTerminalState
-        
+
+        const isTerminalState = tsNorm === 'completed' || tsNorm === 'failed' || tsNorm === 'skipped'
+
+        const isActivelyProcessing =
+            (tsNorm === 'processing' || tsNorm === 'pending') &&
+            !hasFinalThumbnail &&
+            !hasThumbnailError &&
+            !isTerminalState
+
         return (
             <div
                 className={`relative flex w-full min-h-0 items-center justify-center ${className} ${contrastBackdropClass}`}

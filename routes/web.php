@@ -189,8 +189,9 @@ Route::post('/app/admin/performance/client-metric', $performanceClientMetric)->m
 Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
     ->name('test-push');
 
-Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
+Route::middleware(['auth', 'ensure.account.active', 'impersonation', 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
+    Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 
     // Company management (no tenant middleware - can access when no tenant selected)
     // These routes should be accessible even if user is disabled for current tenant
@@ -235,6 +236,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
         Route::post('/companies/{tenant}/team/{user}/add-to-brand', [\App\Http\Controllers\TeamController::class, 'addToBrand'])->name('companies.team.add-to-brand');
         Route::delete('/companies/{tenant}/team/{user}', [\App\Http\Controllers\TeamController::class, 'remove'])->name('companies.team.remove');
         Route::delete('/companies/{tenant}/team/{user}/delete-from-company', [\App\Http\Controllers\TeamController::class, 'deleteFromCompany'])->name('companies.team.delete-from-company');
+        Route::post('/impersonation/start', [\App\Http\Controllers\ImpersonationController::class, 'start'])->name('impersonation.start');
         Route::get('/companies/activity', [\App\Http\Controllers\CompanyController::class, 'activity'])->name('companies.activity');
         Route::get('/companies/managed', [\App\Http\Controllers\CompanyController::class, 'managedCompanies'])->name('companies.managed');
 
@@ -388,6 +390,11 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
     Route::get('/admin/organization', [\App\Http\Controllers\SiteAdminController::class, 'organization'])->name('admin.organization.index');
     Route::get('/admin/platform', [\App\Http\Controllers\Admin\AdminPlatformHubController::class, 'index'])->name('admin.platform.index');
     Route::get('/admin/support', [\App\Http\Controllers\Admin\AdminSupportHubController::class, 'index'])->name('admin.support.hub');
+    Route::get('/admin/impersonation/enter', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'enter'])->name('admin.impersonation.enter');
+    Route::post('/admin/impersonation/enter', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'start'])->name('admin.impersonation.start');
+    Route::get('/admin/impersonation', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'index'])->name('admin.impersonation.index');
+    Route::get('/admin/impersonation/{impersonation_session}', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'show'])->name('admin.impersonation.show');
+    Route::post('/admin/impersonation/{impersonation_session}/end', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'end'])->name('admin.impersonation.end');
 
     // Admin API endpoints (AJAX)
     Route::get('/admin/api/stats', [\App\Http\Controllers\SiteAdminController::class, 'stats'])->name('admin.api.stats');
