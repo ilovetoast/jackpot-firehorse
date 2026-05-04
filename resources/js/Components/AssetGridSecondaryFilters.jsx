@@ -39,6 +39,7 @@ import {
     AdjustmentsHorizontalIcon,
     SwatchIcon,
     RectangleStackIcon,
+    EllipsisHorizontalCircleIcon,
 } from '@heroicons/react/24/outline'
 import SortDropdown from './SortDropdown'
 import { normalizeFilterConfig } from '../utils/normalizeFilterConfig'
@@ -498,7 +499,9 @@ export default function AssetGridSecondaryFilters({
     const [sectionAssetOpen, setSectionAssetOpen] = useState(false)
     const [sectionAiOpen, setSectionAiOpen] = useState(false)
     const [sectionCustomOpen, setSectionCustomOpen] = useState(false)
+    const [sectionOtherOpen, setSectionOtherOpen] = useState(false)
     const [customFieldsExpanded, setCustomFieldsExpanded] = useState(false)
+    const [otherFieldsExpanded, setOtherFieldsExpanded] = useState(false)
 
     function normalizeIncomingFilters(raw) {
         const out = {}
@@ -868,9 +871,12 @@ export default function AssetGridSecondaryFilters({
                             )
                         }
 
+                        const layoutCustom = layoutBuckets.custom || []
+                        const layoutOther = layoutBuckets.other || []
                         const customSlice = customFieldsExpanded
-                            ? layoutBuckets.custom
-                            : layoutBuckets.custom.slice(0, 5)
+                            ? layoutCustom
+                            : layoutCustom.slice(0, 5)
+                        const otherSlice = otherFieldsExpanded ? layoutOther : layoutOther.slice(0, 5)
 
                         const hasAssetSection =
                             layoutBuckets.assetProps.length > 0 ||
@@ -1302,7 +1308,7 @@ export default function AssetGridSecondaryFilters({
                                         </FilterCollapsibleSection>
                                     ) : null}
 
-                                    {layoutBuckets.custom.length > 0 ? (
+                                    {layoutCustom.length > 0 ? (
                                         <FilterCollapsibleSection
                                             title="Custom fields"
                                             icon={RectangleStackIcon}
@@ -1312,7 +1318,7 @@ export default function AssetGridSecondaryFilters({
                                             <div className={FILTER_GRID_CLASS}>
                                                 {customSlice.map(renderMetadataField)}
                                             </div>
-                                            {layoutBuckets.custom.length > 5 ? (
+                                            {layoutCustom.length > 5 ? (
                                                 <button
                                                     type="button"
                                                     onClick={() => setCustomFieldsExpanded((v) => !v)}
@@ -1320,7 +1326,31 @@ export default function AssetGridSecondaryFilters({
                                                 >
                                                     {customFieldsExpanded
                                                         ? 'Show less'
-                                                        : `Show more (${layoutBuckets.custom.length - 5} hidden)`}
+                                                        : `Show more (${layoutCustom.length - 5} hidden)`}
+                                                </button>
+                                            ) : null}
+                                        </FilterCollapsibleSection>
+                                    ) : null}
+
+                                    {layoutOther.length > 0 ? (
+                                        <FilterCollapsibleSection
+                                            title="Other fields"
+                                            icon={EllipsisHorizontalCircleIcon}
+                                            open={sectionOtherOpen}
+                                            onToggle={() => setSectionOtherOpen((v) => !v)}
+                                        >
+                                            <div className={FILTER_GRID_CLASS}>
+                                                {otherSlice.map(renderMetadataField)}
+                                            </div>
+                                            {layoutOther.length > 5 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setOtherFieldsExpanded((v) => !v)}
+                                                    className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    {otherFieldsExpanded
+                                                        ? 'Show less'
+                                                        : `Show more (${layoutOther.length - 5} hidden)`}
                                                 </button>
                                             ) : null}
                                         </FilterCollapsibleSection>

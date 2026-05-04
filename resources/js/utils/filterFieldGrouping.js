@@ -1,6 +1,9 @@
 /**
  * Classify filterable metadata fields into layout buckets for AssetGridSecondaryFilters.
  * Heuristics only — no URL or filter semantics changed.
+ *
+ * "Custom" here means tenant fields (`custom__` key prefix). System text/textarea/boolean filters
+ * land in `other`, not `custom`, so the grid UI matches Manage → Fields terminology.
  */
 
 import { resolve, CONTEXT, WIDGET } from './widgetResolver'
@@ -109,6 +112,7 @@ export function mergeVisibleFields(visiblePrimary, visibleSecondary) {
  *   assetProps: object[],
  *   aiScene: object[],
  *   custom: object[],
+ *   other: object[],
  * }}
  */
 export function partitionFilterLayoutFields(visiblePrimary, visibleSecondary) {
@@ -143,7 +147,10 @@ export function partitionFilterLayoutFields(visiblePrimary, visibleSecondary) {
     const basic = []
     const assetProps = []
     const aiScene = []
+    /** Tenant-defined fields (keys must start with `custom__` per TenantMetadataFieldService). */
     const custom = []
+    /** System + remaining field types (e.g. text, textarea, boolean) — not tenant "custom fields". */
+    const other = []
 
     for (const f of remainder) {
         if (isAiOrSceneField(f)) {
@@ -158,7 +165,12 @@ export function partitionFilterLayoutFields(visiblePrimary, visibleSecondary) {
             basic.push(f)
             continue
         }
-        custom.push(f)
+        const k = getFieldKey(f)
+        if (k.startsWith('custom__')) {
+            custom.push(f)
+        } else {
+            other.push(f)
+        }
     }
 
     return {
@@ -169,5 +181,6 @@ export function partitionFilterLayoutFields(visiblePrimary, visibleSecondary) {
         assetProps,
         aiScene,
         custom,
+        other,
     }
 }

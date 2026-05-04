@@ -118,6 +118,34 @@ class ThumbnailImageOrientationTest extends TestCase
         $m->invoke($svc);
     }
 
+    public function test_gd_exif_flat_png_swaps_dimensions_for_orientation_6(): void
+    {
+        if (! extension_loaded('gd') || ! function_exists('exif_read_data')) {
+            $this->markTestSkipped('GD and exif required');
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'jp_gd_exif6_').'.jpg';
+        $this->writeJpegOrientation6($path);
+
+        $rm = new ReflectionMethod(ImageOrientationNormalizer::class, 'tryGdExifFlatPng');
+        $rm->setAccessible(true);
+        $exif = ImageOrientationNormalizer::readExifOrientationTag($path);
+        if ($exif === null) {
+            $this->markTestSkipped('Test JPEG has no readable EXIF Orientation');
+        }
+        $base = ['pipeline' => 'test', 'exif_orientation_tag' => $exif];
+        $out = $rm->invoke(null, $path, $exif, $base);
+        $this->assertIsArray($out);
+        $this->assertTrue($out['cleanup']);
+        $dim = getimagesize($out['path']);
+        $this->assertIsArray($dim);
+        $this->assertSame(50, $dim[0]);
+        $this->assertSame(80, $dim[1]);
+
+        @unlink($out['path']);
+        @unlink($path);
+    }
+
     private function writeJpegOrientation6(string $path): void
     {
         $im = new Imagick;

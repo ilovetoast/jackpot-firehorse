@@ -435,7 +435,7 @@ export default function MetadataCandidateReview({
 
         const badge = badges[producer] || { label: producer, class: 'bg-gray-100 text-gray-800' }
         return (
-            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${badge.class}`}>
+            <span className={`inline-flex items-center rounded px-1.5 py-0 text-[10px] font-medium ${badge.class}`}>
                 {badge.label}
             </span>
         )
@@ -465,26 +465,26 @@ export default function MetadataCandidateReview({
     }
 
     const list = (
-        <div className="space-y-3">
+        <div className="space-y-2">
             {reviewItems.map((item) => (
                 <div
                     key={item.metadata_field_id}
                     className={
                         compactDrawerReview
-                            ? 'rounded-md border border-gray-200 bg-white p-3'
-                            : 'rounded-md border border-gray-200 bg-white p-2.5'
+                            ? 'rounded-md border border-gray-200 bg-white p-2'
+                            : 'rounded-md border border-gray-200 bg-white p-2'
                     }
                 >
                             <div>
-                                <dt className="text-xs font-medium text-gray-900 mb-1.5">
+                                <dt className="text-xs font-medium text-gray-900 mb-1">
                                     {item.field_label}
                                 </dt>
-                                
+
                                 {/* Current Resolved Value */}
                                 {item.current_resolved_value !== null && (
-                                    <div className="mb-2 p-1.5 bg-white rounded border border-gray-200">
-                                        <div className="text-[10px] text-gray-500 mb-0.5">Current Value:</div>
-                                        <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="mb-1.5 rounded border border-gray-200 bg-white p-1.5">
+                                        <div className="mb-0.5 text-[10px] text-gray-500">Current</div>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                             <span className="text-xs text-gray-900">
                                                 {formatValue(item.field_type, item.current_resolved_value, item.options || [])}
                                             </span>
@@ -493,7 +493,7 @@ export default function MetadataCandidateReview({
                                                     {formatProducer(item.current_resolved_producer)}
                                                     {item.current_resolved_confidence && (
                                                         <span className="text-[10px] text-gray-500">
-                                                            {formatConfidence(item.current_resolved_confidence)} confidence
+                                                            {formatConfidence(item.current_resolved_confidence)}
                                                         </span>
                                                     )}
                                                 </>
@@ -502,73 +502,69 @@ export default function MetadataCandidateReview({
                                     </div>
                                 )}
 
-                                {/* Candidates */}
                                 <div className="space-y-1.5">
-                                    <div className="text-[10px] text-gray-500">Candidates for Review:</div>
                                     {item.candidates.map((candidate) => (
                                         <div
                                             key={candidate.id}
-                                            className="p-2 bg-white rounded border border-gray-200"
+                                            className="rounded border border-gray-200 bg-white px-2 py-1.5"
                                         >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex-1 min-w-0 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 sm:flex-wrap">
+                                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                <div className="min-w-0 flex-1 basis-[min(100%,12rem)]">
                                                     {item.field_type === 'select' &&
                                                     Array.isArray(item.options) &&
                                                     item.options.length > 0 ? (
-                                                        <label className="flex flex-col gap-0.5 min-w-0 w-full sm:w-auto sm:max-w-[14rem]">
-                                                            <span className="text-[10px] text-gray-500">Value to approve</span>
-                                                            <select
-                                                                className="text-xs border border-gray-300 rounded-md px-1.5 py-1 text-gray-900 bg-white w-full"
-                                                                value={
-                                                                    getSelectValueForCandidate(item.field_type, candidate) ??
-                                                                    ''
-                                                                }
-                                                                onChange={(e) =>
-                                                                    setSelectOverrides((prev) => ({
-                                                                        ...prev,
-                                                                        [candidate.id]: e.target.value,
-                                                                    }))
-                                                                }
-                                                                disabled={processing.has(candidate.id)}
-                                                            >
-                                                                {(() => {
-                                                                    const optVals = new Set(
-                                                                        item.options.map((o) => String(o.value))
-                                                                    )
-                                                                    const sug = candidate.value
-                                                                    const sugStr =
-                                                                        sug === null || sug === undefined
-                                                                            ? ''
-                                                                            : String(sug)
-                                                                    const missing =
-                                                                        sugStr !== '' && !optVals.has(sugStr)
-                                                                    return (
-                                                                        <>
-                                                                            {missing && (
-                                                                                <option value={sugStr}>
-                                                                                    {formatValue(
-                                                                                        item.field_type,
-                                                                                        candidate.value,
-                                                                                        item.options || []
-                                                                                    )}{' '}
-                                                                                    (suggested)
-                                                                                </option>
-                                                                            )}
-                                                                            {item.options.map((opt) => (
-                                                                                <option
-                                                                                    key={String(opt.value)}
-                                                                                    value={String(opt.value)}
-                                                                                >
-                                                                                    {opt.display_label ??
-                                                                                        opt.label ??
-                                                                                        opt.value}
-                                                                                </option>
-                                                                            ))}
-                                                                        </>
-                                                                    )
-                                                                })()}
-                                                            </select>
-                                                        </label>
+                                                        <select
+                                                            aria-label={`Suggested value for ${item.field_label}`}
+                                                            className="w-full rounded-md border border-gray-300 bg-white px-1.5 py-1 text-xs text-gray-900"
+                                                            value={
+                                                                getSelectValueForCandidate(item.field_type, candidate) ??
+                                                                ''
+                                                            }
+                                                            onChange={(e) =>
+                                                                setSelectOverrides((prev) => ({
+                                                                    ...prev,
+                                                                    [candidate.id]: e.target.value,
+                                                                }))
+                                                            }
+                                                            disabled={processing.has(candidate.id)}
+                                                        >
+                                                            {(() => {
+                                                                const optVals = new Set(
+                                                                    item.options.map((o) => String(o.value))
+                                                                )
+                                                                const sug = candidate.value
+                                                                const sugStr =
+                                                                    sug === null || sug === undefined
+                                                                        ? ''
+                                                                        : String(sug)
+                                                                const missing =
+                                                                    sugStr !== '' && !optVals.has(sugStr)
+                                                                return (
+                                                                    <>
+                                                                        {missing && (
+                                                                            <option value={sugStr}>
+                                                                                {formatValue(
+                                                                                    item.field_type,
+                                                                                    candidate.value,
+                                                                                    item.options || []
+                                                                                )}{' '}
+                                                                                (suggested)
+                                                                            </option>
+                                                                        )}
+                                                                        {item.options.map((opt) => (
+                                                                            <option
+                                                                                key={String(opt.value)}
+                                                                                value={String(opt.value)}
+                                                                            >
+                                                                                {opt.display_label ??
+                                                                                    opt.label ??
+                                                                                    opt.value}
+                                                                            </option>
+                                                                        ))}
+                                                                    </>
+                                                                )
+                                                            })()}
+                                                        </select>
                                                     ) : (
                                                         <span className="text-xs font-medium text-gray-900">
                                                             {formatValue(
@@ -578,40 +574,25 @@ export default function MetadataCandidateReview({
                                                             )}
                                                         </span>
                                                     )}
-                                                    {formatProducer(candidate.producer)}
-                                                    {candidate.confidence != null && (
-                                                        <span className="text-[10px] text-gray-500 max-w-[11rem] leading-snug">
-                                                            {formatConfidence(candidate.confidence)} model estimate — not
-                                                            calibrated; pick another value above if needed.
-                                                        </span>
-                                                    )}
-                                                    <span className="text-[10px] text-gray-400">
-                                                        Source: {candidate.source}
-                                                    </span>
-                                                    {candidate.evidence && (
-                                                        <span className="text-[10px] text-gray-400" title="Detection basis">
-                                                            · {String(candidate.evidence).replace(/_/g, ' ')}
-                                                        </span>
-                                                    )}
                                                 </div>
                                                 {canApplySuggestions && (
-                                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                    <div className="flex shrink-0 items-center gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={() => handleApprove(candidate, item)}
                                                             disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-white bg-green-600 hover:bg-green-700 rounded focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
-                                                            <CheckIcon className="h-2.5 w-2.5 mr-0.5" />
+                                                            <CheckIcon className="mr-0.5 h-2.5 w-2.5" />
                                                             Approve
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowConfirmReject(candidate)}
                                                             disabled={processing.has(candidate.id)}
-                                                            className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-red-600 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
-                                                            <XMarkIcon className="h-2.5 w-2.5 mr-0.5" />
+                                                            <XMarkIcon className="mr-0.5 h-2.5 w-2.5" />
                                                             Reject
                                                         </button>
                                                         {!candidate.ephemeral && (
@@ -619,13 +600,30 @@ export default function MetadataCandidateReview({
                                                                 type="button"
                                                                 onClick={() => handleDefer(candidate)}
                                                                 disabled={processing.has(candidate.id)}
-                                                                className="inline-flex items-center px-2 py-1 text-[11px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                             >
-                                                                <ClockIcon className="h-2.5 w-2.5 mr-0.5" />
+                                                                <ClockIcon className="mr-0.5 h-2.5 w-2.5" />
                                                                 Defer
                                                             </button>
                                                         )}
                                                     </div>
+                                                )}
+                                            </div>
+                                            <div className="mt-1 flex w-full flex-wrap items-center gap-x-2 gap-y-0 leading-tight text-[10px] text-gray-500">
+                                                {formatProducer(candidate.producer)}
+                                                {candidate.confidence != null && (
+                                                    <span title="Model-reported confidence (not calibrated)">
+                                                        ~{formatConfidence(candidate.confidence)} est.
+                                                    </span>
+                                                )}
+                                                <span className="text-gray-400">Source: {candidate.source}</span>
+                                                {candidate.evidence && (
+                                                    <span
+                                                        className="text-gray-400"
+                                                        title="Detection basis"
+                                                    >
+                                                        · {String(candidate.evidence).replace(/_/g, ' ')}
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>
@@ -668,12 +666,12 @@ export default function MetadataCandidateReview({
 
     return (
         <>
-            <div className="px-4 py-3 border-t border-gray-200">
+            <div className="px-4 py-2 border-t border-gray-200">
                 <h3 className="text-xs font-semibold text-gray-900 mb-1 flex items-center gap-1.5">
                     <InformationCircleIcon className="h-3.5 w-3.5 flex-shrink-0" style={{ color: brandColor }} />
                     Metadata Candidate Review
                 </h3>
-                <p className="text-[11px] text-gray-500 mb-3">
+                <p className="text-[11px] text-gray-500 mb-2">
                     Review and approve or reject metadata suggestions (AI or embedded file metadata). Approved values are
                     written to the asset; source is recorded where applicable.
                 </p>

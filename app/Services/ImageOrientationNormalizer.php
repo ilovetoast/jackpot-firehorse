@@ -38,6 +38,172 @@ final class ImageOrientationNormalizer
     }
 
     /**
+     * EXIF orientations 5–8 transpose the stored raster vs display (width/height swap when corrected).
+     */
+    private static function exifOrientationSwapsDimensions(int $tag): bool
+    {
+        return $tag >= 5 && $tag <= 8;
+    }
+
+    /**
+     * True when Imagick likely left pixels unrotated while EXIF says otherwise (browser blob looked
+     * correct; GD raw decode + server thumb looked wrong).
+     *
+     * @param  array<int, mixed>|false  $srcSize  getimagesize() of original
+     * @param  array<int, mixed>|false  $flatSize  getimagesize() of flat PNG from Imagick
+     * @param  array<string, mixed>  $diag  {@see imagickAutoOrientAndResetOrientation()}
+     */
+    private static function imagickFlatLikelyWrong(?int $exifTag, array|false $srcSize, array|false $flatSize, array $diag): bool
+    {
+        if ($exifTag === null || $exifTag === 1) {
+            return false;
+        }
+        if (! (bool) ($diag['applied'] ?? false)) {
+            return true;
+        }
+        if (! self::exifOrientationSwapsDimensions($exifTag)) {
+            return false;
+        }
+        if (! is_array($srcSize) || ! is_array($flatSize)) {
+            return true;
+        }
+
+        return (int) $flatSize[0] === (int) $srcSize[0]
+            && (int) $flatSize[1] === (int) $srcSize[1];
+    }
+
+    /**
+     * Apply standard EXIF orientation (1–8) to a GD image (JPEG decode; ignores embedded EXIF for pixels).
+     * Mapping matches WordPress {@see \WP_Image_Editor::maybe_exif_rotate()} (angle = degrees CCW).
+     *
+     * @return \GdImage|false  Upright image, or false on failure
+     */
+    private static function applyExifOrientationToGdImage(\GdImage $im, int $orientation): \GdImage|false
+    {
+        if ($orientation < 2 || $orientation > 8) {
+            return $im;
+        }
+        if (! function_exists('imagerotate')) {
+            return false;
+        }
+
+        $rotateCcw = function (\GdImage $g, float $angleCcw): \GdImage|false {
+            $bg = imagecolorallocatealpha($g, 255, 255, 255, 127);
+            if ($bg === false) {
+                return false;
+            }
+            $out = imagerotate($g, $angleCcw, $bg);
+            imagedestroy($g);
+
+            return $out instanceof \GdImage ? $out : false;
+        };
+
+        $cur = $im;
+
+        switch ($orientation) {
+            case 2:
+                imageflip($cur, IMG_FLIP_HORIZONTAL);
+
+                return $cur;
+            case 3:
+                if (defined('IMG_FLIP_BOTH')) {
+                    imageflip($cur, IMG_FLIP_BOTH);
+                } else {
+                    imageflip($cur, IMG_FLIP_HORIZONTAL);
+                    imageflip($cur, IMG_FLIP_VERTICAL);
+                }
+
+                return $cur;
+            case 4:
+                imageflip($cur, IMG_FLIP_VERTICAL);
+
+                return $cur;
+            case 5:
+                $cur = $rotateCcw($cur, 90.0);
+                if ($cur === false) {
+                    return false;
+                }
+                imageflip($cur, IMG_FLIP_VERTICAL);
+
+                return $cur;
+            case 6:
+                return $rotateCcw($cur, 270.0);
+            case 7:
+                $cur = $rotateCcw($cur, 90.0);
+                if ($cur === false) {
+                    return false;
+                }
+                imageflip($cur, IMG_FLIP_HORIZONTAL);
+
+                return $cur;
+            case 8:
+                return $rotateCcw($cur, 90.0);
+        }
+
+        return $cur;
+    }
+
+    /**
+     * JPEG-only: bake EXIF orientation into pixels via GD, then PNG for the GD thumbnail pipeline.
+     *
+     * @param  array<string, mixed>  $baseProfile
+     * @return array{path: string, cleanup: bool, imagetype: int, profile: array<string, mixed>}|null
+     */
+    private static function tryGdExifFlatPng(string $sourcePath, ?int $exifTag, array $baseProfile): ?array
+    {
+        if (! extension_loaded('gd') || ! function_exists('imagecreatefromjpeg') || ! function_exists('imagepng')) {
+            return null;
+        }
+        if ($exifTag === null || $exifTag === 1) {
+            return null;
+        }
+        if (! function_exists('imageflip')) {
+            return null;
+        }
+
+        $info = @getimagesize($sourcePath);
+        if (! is_array($info) || (int) $info[2] !== IMAGETYPE_JPEG) {
+            return null;
+        }
+
+        $im = @imagecreatefromjpeg($sourcePath);
+        if (! $im instanceof \GdImage) {
+            return null;
+        }
+
+        $out = self::applyExifOrientationToGdImage($im, $exifTag);
+        if ($out === false) {
+            return null;
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'jp_gd_orient_').'.png';
+        if (! imagepng($out, $tmp, 6)) {
+            imagedestroy($out);
+
+            return null;
+        }
+        imagedestroy($out);
+
+        $dims = @getimagesize($tmp);
+        $profile = array_merge($baseProfile, [
+            'pipeline' => 'gd_exif_flat_png',
+            'method' => 'gd_exif_png',
+            'auto_orient_applied' => true,
+        ]);
+        if (is_array($dims)) {
+            $profile['width_after'] = (int) $dims[0];
+            $profile['height_after'] = (int) $dims[1];
+        }
+
+        return [
+            'path' => $tmp,
+            'cleanup' => true,
+            'imagetype' => IMAGETYPE_PNG,
+            'profile' => $profile,
+        ];
+    }
+
+    /**
      * Apply Imagick auto-orientation, then reset orientation metadata to top-left so downstream
      * encoders and browsers do not double-rotate.
      *
@@ -103,8 +269,9 @@ final class ImageOrientationNormalizer
     /**
      * Decode a raster file to a flat, upright PNG suitable for GD thumbnail sizing.
      *
-     * When Imagick is available, uses autoOrient + TOPLEFT + strip (preferred). On failure or
-     * missing Imagick, returns the original path and type for legacy GD decode (JPEG EXIF may be ignored).
+     * When Imagick is available, uses autoOrient + TOPLEFT + strip (preferred). If Imagick fails,
+     * auto-orient did not run, or swap orientations (5-8) still match raw dimensions, JPEGs fall back to
+     * a GD+EXIF bake into a flat PNG. Otherwise returns the original path for legacy GD decode.
      *
      * @return array{
      *   path: string,
@@ -131,6 +298,10 @@ final class ImageOrientationNormalizer
         }
 
         if (! extension_loaded('imagick') || ! is_readable($sourcePath)) {
+            $gdFlat = self::tryGdExifFlatPng($sourcePath, $exifTag, $baseProfile);
+            if ($gdFlat !== null) {
+                return $gdFlat;
+            }
             $type = is_array($info) ? (int) $info[2] : IMAGETYPE_JPEG;
 
             return [
@@ -168,6 +339,16 @@ final class ImageOrientationNormalizer
             $m->destroy();
             $m = null;
 
+            $flatInfo = @getimagesize($tmp);
+            if (self::imagickFlatLikelyWrong($exifTag, $info, $flatInfo, $diag)) {
+                $gdFlat = self::tryGdExifFlatPng($sourcePath, $exifTag, $baseProfile);
+                if ($gdFlat !== null) {
+                    @unlink($tmp);
+
+                    return $gdFlat;
+                }
+            }
+
             $profile = array_merge($baseProfile, $diag, [
                 'pipeline' => 'imagick_flat_png_for_gd',
                 'method' => 'imagick_flat_png',
@@ -187,6 +368,10 @@ final class ImageOrientationNormalizer
                     $m->destroy();
                 } catch (\Throwable) {
                 }
+            }
+            $gdFlat = self::tryGdExifFlatPng($sourcePath, $exifTag, $baseProfile);
+            if ($gdFlat !== null) {
+                return $gdFlat;
             }
             $type = is_array($info) ? (int) $info[2] : IMAGETYPE_JPEG;
 
