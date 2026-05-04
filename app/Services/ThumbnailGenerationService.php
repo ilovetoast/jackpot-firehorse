@@ -228,9 +228,6 @@ class ThumbnailGenerationService
         }
 
         try {
-            if (defined('Imagick::COLORSPACE_SRGB')) {
-                $frame->setImageColorspace(\Imagick::COLORSPACE_SRGB);
-            }
             if (method_exists($frame, 'transformImageColorspace') && defined('Imagick::COLORSPACE_SRGB')) {
                 $frame->transformImageColorspace(\Imagick::COLORSPACE_SRGB);
             }
@@ -2368,13 +2365,6 @@ class ThumbnailGenerationService
     protected function normalizeDecodedRawImageColors(\Imagick $imagick): void
     {
         $this->imagickNormalizeThumbnailOrientation($imagick, 'cr2_raw_decode');
-
-        try {
-            if (defined('Imagick::COLORSPACE_SRGB')) {
-                $imagick->setImageColorspace(\Imagick::COLORSPACE_SRGB);
-            }
-        } catch (\Throwable) {
-        }
 
         try {
             $imagick->transformImageColorspace(\Imagick::COLORSPACE_SRGB);

@@ -968,6 +968,9 @@ export default function UploadAssetDialog({
                 const error = new Error(errorMessage)
                 error.status = response.status
                 error.response = response
+                if (errorData && typeof errorData === 'object') {
+                    error.responseData = errorData
+                }
                 throw error
             }
             
@@ -1128,6 +1131,7 @@ export default function UploadAssetDialog({
                                 message: normalizedError.message,
                                 stage: 'upload',
                                 code: normalizedError.error_code,
+                                plan_limit: normalizedError.plan_limit,
                                 // Normalized shape preserved for AI agents and future aggregation
                                 normalized: normalizedError,
                             }
@@ -1221,6 +1225,7 @@ export default function UploadAssetDialog({
                                     message: first.message || 'This file cannot be uploaded.',
                                     stage: 'preflight',
                                     code: first.code || 'preflight_rejected',
+                                    plan_limit: first.plan_limit,
                                 },
                             }
                         }
@@ -5144,6 +5149,8 @@ export default function UploadAssetDialog({
     }, [v2UploadManager.items, batchStatus, postFinalizeSummary])
 
     const trayFileRows = useMemo(() => {
+        const canManageBilling =
+            Array.isArray(auth.effective_permissions) && auth.effective_permissions.includes('billing.manage')
         const rows = v2UploadManager.items.map((it) => {
             const name = it.originalFilename || it.file?.name || 'File'
             const life = it.lifecycle || ''
@@ -5155,21 +5162,24 @@ export default function UploadAssetDialog({
             if (failed) rowKind = 'failed'
             else if (finalizedDone) rowKind = 'complete'
             const err = it.error
+            const pl = err?.plan_limit || err?.normalized?.plan_limit
             const detail =
                 failed && err
-                    ? typeof err.message === 'string'
-                        ? err.message
-                        : err.normalized?.message || 'Upload failed'
+                    ? pl
+                        ? `This file is ${pl.attempted_value_label}. Your ${pl.current_plan_name} plan allows files up to ${pl.allowed_value_label}.`
+                        : typeof err.message === 'string'
+                          ? err.message
+                          : err.normalized?.message || 'Upload failed'
                     : null
             const progress =
                 rowKind === 'active' && it.uploadStatus === 'uploading'
                     ? Math.min(100, Math.round(Number(it.progress) || 0))
                     : null
-            return { id: it.clientId, name, rowKind, detail, progress }
+            return { id: it.clientId, name, rowKind, detail, progress, planLimit: pl || null, canManageBilling }
         })
         const order = { failed: 0, active: 1, complete: 2 }
         return rows.sort((a, b) => order[a.rowKind] - order[b.rowKind])
-    }, [v2UploadManager.items])
+    }, [v2UploadManager.items, auth.effective_permissions])
 
     const trayShowDismiss =
         !hasUploadingItems &&

@@ -2,6 +2,7 @@
 
 namespace App\Http\Responses;
 
+use App\Support\Billing\PlanLimitUpgradePayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
@@ -71,6 +72,9 @@ class UploadErrorResponse
     public const CODE_SERVER_ERROR = 'UPLOAD_SERVER_ERROR';
     public const CODE_UNKNOWN = 'UPLOAD_UNKNOWN_ERROR';
 
+    /** Subscription / plan cap hit (structured upgrade payload). */
+    public const CODE_PLAN_LIMIT_EXCEEDED = 'plan_limit_exceeded';
+
     /**
      * Create a normalized upload error response
      * 
@@ -116,6 +120,45 @@ class UploadErrorResponse
         ]);
 
         return response()->json($payload, $httpStatus);
+    }
+
+    /**
+     * Max per-file upload size exceeded — includes structured plan-limit fields for billing UX.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    public static function planLimitExceededMaxUpload(
+        \App\Models\Tenant $tenant,
+        \App\Exceptions\PlanLimitExceededException $exception,
+        array $context = []
+    ): JsonResponse {
+        $upgrade = PlanLimitUpgradePayload::buildForUploadSizeExceeded($tenant, $exception->currentCount);
+        $category = self::getCategoryFromErrorCode(self::CODE_PLAN_LIMIT_EXCEEDED);
+        $payload = array_merge(
+            [
+                'error_code' => self::CODE_PLAN_LIMIT_EXCEEDED,
+                'message' => $exception->getMessage(),
+                'category' => $category,
+                'context' => [
+                    'upload_session_id' => $context['upload_session_id'] ?? null,
+                    'asset_id' => $context['asset_id'] ?? null,
+                    'file_type' => $context['file_type'] ?? null,
+                    'pipeline_stage' => $context['pipeline_stage'] ?? null,
+                ],
+            ],
+            $upgrade
+        );
+
+        Log::warning('[Upload Error Response]', [
+            'error_code' => $payload['error_code'],
+            'category' => $category,
+            'http_status' => 403,
+            'context' => $payload['context'],
+            'message' => $payload['message'],
+            'limit_key' => $payload['limit_key'] ?? null,
+        ]);
+
+        return response()->json($payload, 403);
     }
 
     /**
@@ -174,6 +217,13 @@ class UploadErrorResponse
 
         // Plan limit exceeded (special case)
         if ($exception instanceof \App\Exceptions\PlanLimitExceededException) {
+            if ($exception->limitType === 'upload_size' && app()->bound('tenant')) {
+                /** @var \App\Models\Tenant $tenant */
+                $tenant = app('tenant');
+
+                return self::planLimitExceededMaxUpload($tenant, $exception, $context);
+            }
+
             return self::error(
                 self::CODE_VALIDATION_FAILED, // Treat as validation (plan limits)
                 $exception->getMessage(),
@@ -331,6 +381,7 @@ class UploadErrorResponse
 
         // Validation-related codes
         if (in_array($errorCode, [
+            self::CODE_PLAN_LIMIT_EXCEEDED,
             self::CODE_FILE_TOO_LARGE,
             self::CODE_VALIDATION_FAILED,
             self::CODE_FINALIZE_VALIDATION_FAILED,

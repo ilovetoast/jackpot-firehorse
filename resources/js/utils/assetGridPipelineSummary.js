@@ -13,6 +13,13 @@ function hasServerRasterThumbnail(a) {
     return !!(a?.thumbnail_url && ts === 'completed')
 }
 
+/** Matches {@link computeThumbnailPipelineGridSummary} “attention” count (current page only). */
+export function assetNeedsThumbnailPipelineAttention(a) {
+    if (!a?.id) return false
+    const ts = String(a?.thumbnail_status?.value ?? a.thumbnail_status ?? '').toLowerCase()
+    return ts === 'failed' || Boolean(a?.thumbnail_error) || a?.health_status === 'critical'
+}
+
 /**
  * Subtle toolbar counts: assets still waiting on server previews vs. terminal problems.
  * @param {Array<object>|null|undefined} assets
@@ -29,7 +36,7 @@ export function computeThumbnailPipelineGridSummary(assets) {
         const mime = a.mime_type || ''
         const ts = String(a?.thumbnail_status?.value ?? a.thumbnail_status ?? '').toLowerCase()
 
-        if (ts === 'failed' || a?.thumbnail_error || a?.health_status === 'critical') {
+        if (assetNeedsThumbnailPipelineAttention(a)) {
             attention += 1
             continue
         }

@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, memo, useSyncExternalStore, useCallback } from 'react';
+import { usePage } from '@inertiajs/react';
 import { formatBytesHuman } from '../utils/formatBytesHuman';
 import {
     CheckCircleIcon,
@@ -275,6 +276,10 @@ function deriveBadgeKey(item, displayStatus) {
 }
 
 function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = false, containPerformance = false, brandPrimary = null }) {
+    const { auth } = usePage().props
+    const canManageBilling =
+        Array.isArray(auth?.effective_permissions) && auth.effective_permissions.includes('billing.manage')
+    const planLimit = item.error?.plan_limit || item.error?.normalized?.plan_limit
 
     // CLEAN UPLOADER V2: DEV warning for failed files
     // Phase 2.5 Step 4: Use centralized environment detection - no prod logging noise
@@ -572,6 +577,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
         badgeKey === 'processing_preview';
     const isComplete = badgeKey === 'ready' || badgeKey === 'uploaded_bytes';
     const isFailed = badgeKey === 'failed';
+    const isPlanLimitRow = Boolean(planLimit) && item.uploadStatus === 'failed';
     const isWarning = badgeKey === 'warning';
 
     const showByteProgress =
@@ -655,6 +661,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                 className={`px-4 py-3 transition-colors ${
                     isActive ? 'bg-slate-50/80 hover:bg-slate-50' :
                     isComplete ? 'bg-white hover:bg-gray-50/80' :
+                    isPlanLimitRow ? 'bg-amber-50/45 hover:bg-amber-50/65' :
                     isFailed ? 'bg-red-50/40 hover:bg-red-50/60' :
                     isWarning ? 'bg-amber-50/50 hover:bg-amber-50/70' :
                     'hover:bg-gray-50'
@@ -852,15 +859,41 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                     <div className="mt-2 ml-8">
                         <div className="flex items-start">
                             <ExclamationCircleIcon className={`h-4 w-4 mr-2 flex-shrink-0 mt-0.5 ${
-                                item.error?.stage === 'finalize' ? 'text-amber-500' : 'text-red-500'
+                                planLimit
+                                    ? 'text-amber-500'
+                                    : item.error?.stage === 'finalize'
+                                      ? 'text-amber-500'
+                                      : 'text-red-500'
                             }`} />
                             <div className="flex-1">
                                 {/* Phase 2.5 Step 1: Use normalized error message if available, fallback to legacy */}
                                 <p className={`text-sm font-medium ${
-                                    item.error?.stage === 'finalize' ? 'text-amber-700' : 'text-red-600'
+                                    planLimit
+                                        ? 'text-amber-900'
+                                        : item.error?.stage === 'finalize'
+                                          ? 'text-amber-700'
+                                          : 'text-red-600'
                                 }`}>
-                                    {item.error?.normalized?.message || item.error?.message || 'Upload failed'}
+                                    {planLimit
+                                        ? `This file is ${planLimit.attempted_value_label}. Your ${planLimit.current_plan_name} plan allows files up to ${planLimit.allowed_value_label}.`
+                                        : item.error?.normalized?.message || item.error?.message || 'Upload failed'}
                                 </p>
+                                {planLimit ? (
+                                    canManageBilling ? (
+                                        <a
+                                            href={planLimit.upgrade_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="mt-2 inline-block text-sm font-semibold text-amber-800 underline decoration-amber-300 underline-offset-2 hover:text-amber-950"
+                                        >
+                                            View upgrade options →
+                                        </a>
+                                    ) : (
+                                        <p className="mt-2 text-xs font-medium text-amber-800/90">
+                                            Ask a workspace admin to upgrade for larger uploads.
+                                        </p>
+                                    )
+                                ) : null}
                                 
                                 {/* Phase 2.5 Step 5: Enhanced retry-state clarity - prominent visual indicator */}
                                 {item.error?.normalized && item.error.normalized.retryable !== undefined && (
@@ -1189,7 +1222,8 @@ export default memo(UploadItemRow, (prevProps, nextProps) => {
         ((!prev.error && !next.error) ||
             (prev.error?.message === next.error?.message &&
                 prev.error?.stage === next.error?.stage &&
-                prev.error?.type === next.error?.type)) &&
+                prev.error?.type === next.error?.type &&
+                (prev.error?.plan_limit?.upgrade_url || '') === (next.error?.plan_limit?.upgrade_url || ''))) &&
         prevIsActive === nextIsActive &&
         prevProps.disabled === nextProps.disabled &&
         prev.file === next.file;

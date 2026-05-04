@@ -27,6 +27,7 @@ use App\Services\UploadCompletionService;
 use App\Services\UploadInitiationService;
 use App\Services\UploadMetadataSchemaResolver;
 use App\Services\UploadPreflightService;
+use App\Support\Billing\PlanLimitUpgradePayload;
 use App\Support\Metadata\CategoryTypeResolver;
 use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
@@ -266,6 +267,7 @@ class UploadController extends Controller
                     $errors[] = [
                         'type' => 'file_size_limit',
                         'message' => 'File size ('.round($fileSize / 1024 / 1024, 2).' MB) exceeds maximum upload size ('.round($maxUploadSizeBytes / 1024 / 1024, 2).' MB) for your plan.',
+                        'plan_limit' => PlanLimitUpgradePayload::buildForUploadSizeExceeded($tenant, $fileSize),
                     ];
                 }
 

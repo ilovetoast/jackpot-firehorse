@@ -251,6 +251,10 @@ export default function AssetsIndex({
         () => computeThumbnailPipelineGridSummary(safeAssetsList),
         [safeAssetsList],
     )
+    const scrollToPipelineAttentionAsset = useCallback(() => {
+        if (typeof document === 'undefined') return
+        document.querySelector('[data-pipeline-attention="1"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, [])
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
@@ -1357,6 +1361,7 @@ export default function AssetsIndex({
                                 gridImageFit={gridImageFit}
                                 onGridImageFitChange={setGridImageFit}
                                 thumbnailPipelineSummary={thumbnailPipelineSummary}
+                                onPipelineAttentionClick={scrollToPipelineAttentionAsset}
                                 primaryColor={workspaceAccentColor}
                                 selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}

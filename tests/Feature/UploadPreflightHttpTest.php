@@ -117,4 +117,43 @@ class UploadPreflightHttpTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+
+    public function test_preflight_rejects_oversized_file_with_plan_limit_payload(): void
+    {
+        $this->tenant->update(['manual_plan_override' => 'free']);
+        $this->tenant->refresh();
+
+        $id = (string) Str::uuid();
+        $tooLarge = 11 * 1024 * 1024;
+
+        $response = $this->actingAs($this->user)
+            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
+            ->postJson('/app/uploads/preflight', [
+                'brand_id' => $this->brand->id,
+                'files' => [
+                    [
+                        'client_file_id' => $id,
+                        'name' => 'big.bin',
+                        'size' => $tooLarge,
+                        'mime_type' => 'application/octet-stream',
+                        'extension' => 'bin',
+                    ],
+                ],
+            ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('batch_summary.rejected_count', 1);
+        $rejected = $response->json('rejected');
+        $this->assertIsArray($rejected);
+        $this->assertSame($id, $rejected[0]['client_file_id'] ?? null);
+        $reasons = $rejected[0]['reasons'] ?? [];
+        $this->assertSame('file_size_limit', $reasons[0]['code'] ?? null);
+        $pl = $reasons[0]['plan_limit'] ?? null;
+        $this->assertIsArray($pl);
+        $this->assertSame('plan_limit_exceeded', $pl['error_code'] ?? null);
+        $this->assertSame('max_upload_size', $pl['limit_key'] ?? null);
+        $this->assertSame('free', $pl['current_plan_key'] ?? null);
+        $this->assertArrayHasKey('upgrade_url', $pl);
+    }
 }

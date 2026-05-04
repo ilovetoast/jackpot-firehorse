@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Billing\PlanLimitUpgradePayload;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
@@ -143,6 +144,7 @@ class UploadPreflightService
                     $reasons[] = [
                         'code' => 'file_size_limit',
                         'message' => 'This file exceeds the maximum upload size for your plan.',
+                        'plan_limit' => PlanLimitUpgradePayload::buildForUploadSizeExceeded($tenant, $size),
                     ];
                 }
 

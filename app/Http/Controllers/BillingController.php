@@ -123,6 +123,7 @@ class BillingController extends Controller
                 'selectable' => $plan['selectable'] ?? true,
                 'requires_contact' => $plan['requires_contact'] ?? false,
                 'limits' => $plan['limits'],
+                'max_versions_per_asset' => $plan['max_versions_per_asset'] ?? null,
                 'features' => $plan['features'],
                 'download_features' => $plan['download_features'] ?? null,
                 'download_management' => $plan['download_management'] ?? null,

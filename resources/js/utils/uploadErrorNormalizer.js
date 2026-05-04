@@ -121,6 +121,57 @@ export function normalizeUploadError(error, context = {}) {
     }
     resolvedFileType = resolvedFileType || 'unknown';
 
+    let resolvedHttpStatusEarly = httpStatus;
+    if (!resolvedHttpStatusEarly && error?.response?.status) {
+        resolvedHttpStatusEarly = error.response.status;
+    } else if (!resolvedHttpStatusEarly && error?.status) {
+        resolvedHttpStatusEarly = error.status;
+    }
+
+    const apiBodyEarly = error?.responseData ?? error?.response?.data;
+    if (apiBodyEarly?.error_code === 'plan_limit_exceeded') {
+        const planLimit = {
+            error_code: apiBodyEarly.error_code,
+            limit_key: apiBodyEarly.limit_key,
+            current_plan_key: apiBodyEarly.current_plan_key,
+            current_plan_name: apiBodyEarly.current_plan_name,
+            attempted_value: apiBodyEarly.attempted_value,
+            attempted_value_label: apiBodyEarly.attempted_value_label,
+            allowed_value: apiBodyEarly.allowed_value,
+            allowed_value_label: apiBodyEarly.allowed_value_label,
+            upgrade_url: apiBodyEarly.upgrade_url,
+        };
+        const base = {
+            category: 'VALIDATION',
+            error_code: 'plan_limit_exceeded',
+            message: humanizeBytesInMessage(apiBodyEarly.message || 'Plan limit exceeded'),
+            http_status: resolvedHttpStatusEarly || undefined,
+            upload_session_id: uploadSessionId || null,
+            asset_id: assetId || null,
+            file_name: fileName || 'unknown',
+            file_type: resolvedFileType,
+            retryable: false,
+            plan_limit: planLimit,
+            raw: allowDiagnostics()
+                ? {
+                      originalError: error,
+                      originalMessage: apiBodyEarly.message,
+                      stage,
+                      context: {
+                          httpStatus: resolvedHttpStatusEarly,
+                          uploadSessionId,
+                          fileName,
+                          fileType: resolvedFileType,
+                      },
+                  }
+                : {},
+        };
+        if (allowDiagnostics()) {
+            console.debug('[Upload Error Normalized]', base);
+        }
+        return base;
+    }
+
     // Extract error message — prefer API response body when available (e.g. 403 plan limit with formatted message)
     let errorMessage = 'Unknown upload error';
     if (error?.response?.data?.message) {

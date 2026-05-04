@@ -8,7 +8,7 @@ export default function AssetMetadataCollectionField({
     readOnly = false,
     workspaceMode = false,
     brandPrimary = '#6366f1',
-    /** 'metadataRow' = dt/dd row inside <dl>; 'drawerColumn' = stacked block for grid beside tags */
+    /** 'metadataRow' = dt/dd row inside <dl>; 'drawerColumn' = stacked block in drawer (e.g. above tags) */
     variant = 'metadataRow',
 }) {
     if (

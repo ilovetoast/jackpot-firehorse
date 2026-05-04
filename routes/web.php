@@ -587,6 +587,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
 
     // Billing routes (no tenant middleware - billing is company-level)
     Route::get('/billing', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing');
+    Route::get('/billing/plans', [\App\Http\Controllers\BillingController::class, 'index'])->name('billing.plans');
     Route::get('/billing/overview', [\App\Http\Controllers\BillingController::class, 'overview'])->name('billing.overview');
     Route::post('/billing/subscribe', [\App\Http\Controllers\BillingController::class, 'subscribe'])->name('billing.subscribe');
     Route::post('/billing/update-subscription', [\App\Http\Controllers\BillingController::class, 'updateSubscription'])->name('billing.update-subscription');

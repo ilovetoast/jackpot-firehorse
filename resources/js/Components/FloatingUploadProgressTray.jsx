@@ -137,7 +137,12 @@ export function FloatingUploadProgressTray({
                             key={row.id}
                             className={cn(
                                 'rounded-md px-2 py-1.5 text-[11px] leading-snug',
-                                row.rowKind === 'failed' && 'border-l-2 border-red-400 bg-red-50/90 text-red-950',
+                                row.rowKind === 'failed' &&
+                                    row.planLimit &&
+                                    'border-l-2 border-amber-300 bg-amber-50/95 text-amber-950',
+                                row.rowKind === 'failed' &&
+                                    !row.planLimit &&
+                                    'border-l-2 border-red-400 bg-red-50/90 text-red-950',
                                 row.rowKind === 'active' && 'bg-gray-50/80 text-gray-900',
                                 row.rowKind === 'complete' && 'text-gray-400',
                             )}
@@ -158,7 +163,30 @@ export function FloatingUploadProgressTray({
                                 ) : null}
                             </div>
                             {row.rowKind === 'failed' && row.detail ? (
-                                <p className="mt-0.5 line-clamp-2 text-[10px] text-red-800/90">{row.detail}</p>
+                                <p
+                                    className={cn(
+                                        'mt-0.5 line-clamp-3 text-[10px]',
+                                        row.planLimit ? 'text-amber-900/90' : 'text-red-800/90',
+                                    )}
+                                >
+                                    {row.detail}
+                                </p>
+                            ) : null}
+                            {row.rowKind === 'failed' && row.planLimit ? (
+                                row.canManageBilling ? (
+                                    <a
+                                        href={row.planLimit.upgrade_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mt-1 inline-block text-[10px] font-semibold text-amber-800 underline decoration-amber-300 underline-offset-2 hover:text-amber-950"
+                                    >
+                                        View upgrade options →
+                                    </a>
+                                ) : (
+                                    <p className="mt-1 text-[10px] leading-snug text-amber-900/85">
+                                        Ask a workspace admin to upgrade for larger uploads.
+                                    </p>
+                                )
                             ) : null}
                             {row.rowKind === 'failed' && typeof onRetryFile === 'function' ? (
                                 <button

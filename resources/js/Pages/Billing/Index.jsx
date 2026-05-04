@@ -1,8 +1,10 @@
 import { router, Link, usePage } from '@inertiajs/react'
-import { Fragment, useState } from 'react'
+import { Fragment, useState, useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
+import PlanCardLimitsPanel from '../../Components/Billing/PlanCardLimitsPanel'
+import { findFirstUpgradePlanThatSolves, RECOGNIZED_PLAN_LIMIT_REASONS } from '../../utils/planLimitEligibility'
 
 const PLAN_ORDER = ['free', 'starter', 'pro', 'business']
 
@@ -102,7 +104,11 @@ const PLAN_KEY_LIMITS = {
 }
 
 export default function BillingIndex({ tenant, current_plan, plans, subscription, payment_method, current_usage, current_plan_limits, site_primary_color, storage_info, storage_addon_packages, ai_credits_addon_packages, credit_weights, creator_addon_config, available_addons }) {
-    const { auth, errors, flash } = usePage().props
+    const page = usePage()
+    const { auth, errors, flash } = page.props
+    const inertiaUrl =
+        page.props.url ||
+        (typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '')
     const [processingPlanId, setProcessingPlanId] = useState(null)
     const [addonSubmitting, setAddonSubmitting] = useState(null)
     const [addonError, setAddonError] = useState(null)
@@ -110,6 +116,43 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
     const sitePrimaryColor = site_primary_color || '#7c3aed'
     const currentPlanData = plans?.find((p) => p.id === current_plan)
     const visiblePlans = plans?.filter(p => PLAN_ORDER.includes(p.id)).sort((a, b) => PLAN_ORDER.indexOf(a.id) - PLAN_ORDER.indexOf(b.id)) || []
+
+    const canManageBilling =
+        Array.isArray(auth?.effective_permissions) && auth.effective_permissions.includes('billing.manage')
+
+    const limitQuery = useMemo(() => {
+        const pageUrl = inertiaUrl || ''
+        const q = pageUrl.includes('?') ? pageUrl.slice(pageUrl.indexOf('?')) : ''
+        const params = new URLSearchParams(q)
+        return {
+            reason: params.get('reason') || '',
+            current_plan: params.get('current_plan') || '',
+            attempted: params.get('attempted') || '',
+            limit: params.get('limit') || '',
+        }
+    }, [inertiaUrl])
+
+    const firstSolverPlanId = useMemo(
+        () =>
+            findFirstUpgradePlanThatSolves(
+                visiblePlans,
+                limitQuery.current_plan,
+                limitQuery.reason,
+                limitQuery.attempted,
+            ),
+        [visiblePlans, limitQuery.current_plan, limitQuery.reason, limitQuery.attempted],
+    )
+
+    const limitBannerCopy = useMemo(() => {
+        if (!limitQuery.reason || !RECOGNIZED_PLAN_LIMIT_REASONS.has(limitQuery.reason)) return null
+        if (limitQuery.reason !== 'max_upload_size') return null
+        const planMeta = plans?.find((p) => p.id === limitQuery.current_plan)
+        const name = planMeta?.name || limitQuery.current_plan
+        const attemptedLabel = limitQuery.attempted ? `${limitQuery.attempted} MB` : ''
+        const allowedLabel = limitQuery.limit ? `${limitQuery.limit} MB` : ''
+        if (!attemptedLabel || !allowedLabel || !name) return null
+        return { name, attemptedLabel, allowedLabel }
+    }, [limitQuery, plans])
 
     const handleSubscribe = (priceId, planId) => {
         if (!priceId || priceId === 'price_free' || priceId === 'price_FREE') return
@@ -224,6 +267,23 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                     </div>
                 </div>
 
+
+                {limitBannerCopy ? (
+                    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+                            <p className="font-semibold">You hit your {limitBannerCopy.name} plan&apos;s upload limit.</p>
+                            <p className="mt-1 text-amber-900/95">
+                                Your file was {limitBannerCopy.attemptedLabel}. {limitBannerCopy.name} allows files up to {limitBannerCopy.allowedLabel}. Upgrade to a plan with larger uploads or reduce the file size.
+                            </p>
+                            {!canManageBilling ? (
+                                <p className="mt-2 text-xs font-medium text-amber-900/90">
+                                    Ask a workspace admin to upgrade for larger uploads.
+                                </p>
+                            ) : null}
+                        </div>
+                    </div>
+                ) : null}
+
                 {errors?.subscription && (
                     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
                         <div className="rounded-md bg-yellow-50 p-4 border border-yellow-200">
@@ -316,6 +376,15 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                             ))}
                                         </ul>
 
+                                        <PlanCardLimitsPanel
+                                            plan={plan}
+                                            autoExpand={Boolean(limitQuery.reason && RECOGNIZED_PLAN_LIMIT_REASONS.has(limitQuery.reason))}
+                                            reason={limitQuery.reason}
+                                            queryCurrentPlan={limitQuery.current_plan}
+                                            firstSolverPlanId={firstSolverPlanId}
+                                        />
+
+
                                         {/* CTA */}
                                         <div className="mt-auto">
                                             {isCurrent ? (
@@ -348,6 +417,12 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                 >
                                                     {processingPlanId === plan.id ? 'Processing...' : 'Switch to this plan'}
                                                 </button>
+                                            ) : limitQuery.reason === 'max_upload_size' &&
+                                              plan.id === firstSolverPlanId &&
+                                              !canManageBilling ? (
+                                                <p className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-center text-sm font-medium text-gray-600 px-2">
+                                                    Ask a workspace admin to upgrade for larger uploads.
+                                                </p>
                                             ) : (
                                                 <button
                                                     onClick={() => {
@@ -361,7 +436,7 @@ export default function BillingIndex({ tenant, current_plan, plans, subscription
                                                             : 'bg-gray-900 text-white hover:bg-gray-800'
                                                     }`}
                                                 >
-                                                    {processingPlanId === plan.id ? 'Processing...' : getButtonLabel(plan)}
+                                                    {processingPlanId === plan.id ? 'Processing...' : limitQuery.reason === 'max_upload_size' && plan.id === firstSolverPlanId && canManageBilling ? 'Upgrade for larger uploads' : getButtonLabel(plan)}
                                                 </button>
                                             )}
                                         </div>

@@ -1,11 +1,37 @@
 import { Link, router, usePage } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
+import { RECOGNIZED_PLAN_LIMIT_REASONS } from '../../utils/planLimitEligibility'
 
 export default function BillingOverview({ tenant, current_plan, subscription, payment_method, recent_invoices, has_stripe_id, on_demand_usage, monthly_average, currency, storage_info, storage_addon_packages, ai_credits, credit_weights, ai_credits_addon_packages, creator_addon_config, available_addons }) {
-    const { auth } = usePage().props
+    const page = usePage()
+    const { auth } = page.props
+    const inertiaUrl =
+        page.props.url ||
+        (typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '')
+
+    const limitOverviewCard = useMemo(() => {
+        const pageUrl = inertiaUrl || ''
+        const q = pageUrl.includes('?') ? pageUrl.slice(pageUrl.indexOf('?')) : ''
+        const params = new URLSearchParams(q)
+        const reason = params.get('reason') || ''
+        if (!reason || !RECOGNIZED_PLAN_LIMIT_REASONS.has(reason)) return null
+        if (reason !== 'max_upload_size') return null
+        const currentPlanKey = params.get('current_plan') || ''
+        const attempted = params.get('attempted') || ''
+        const limit = params.get('limit') || ''
+        const attemptedLabel = attempted ? `${attempted} MB` : ''
+        const allowedLabel = limit ? `${limit} MB` : ''
+        if (!attemptedLabel || !allowedLabel) return null
+        const base = route('billing.plans')
+        const plansHref = q ? `${base}${q}` : base
+        return { attemptedLabel, allowedLabel, plansHref, currentPlanKey }
+    }, [inertiaUrl])
+
+    const canManageBilling =
+        Array.isArray(auth?.effective_permissions) && auth.effective_permissions.includes('billing.manage')
     const [storageAddonSubmitting, setStorageAddonSubmitting] = useState(false)
     const [storageAddonError, setStorageAddonError] = useState(null)
 
@@ -77,6 +103,28 @@ export default function BillingOverview({ tenant, current_plan, subscription, pa
             <main>
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
+
+                    {limitOverviewCard ? (
+                        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3">
+                            <h2 className="text-sm font-semibold text-amber-950">You hit a plan limit</h2>
+                            <p className="mt-1 text-sm text-amber-900/95">
+                                Your file was {limitOverviewCard.attemptedLabel}. This workspace allows files up to {limitOverviewCard.allowedLabel}.
+                            </p>
+                            {canManageBilling ? (
+                                <Link
+                                    href={limitOverviewCard.plansHref}
+                                    className="mt-3 inline-flex items-center rounded-md bg-amber-800 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-900"
+                                >
+                                    View upgrade options
+                                </Link>
+                            ) : (
+                                <p className="mt-2 text-xs font-medium text-amber-900/90">
+                                    Ask a workspace admin to upgrade for larger uploads.
+                                </p>
+                            )}
+                        </div>
+                    ) : null}
+
                     <div className="mb-8">
                         <Link href="/app/billing" className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block">
                             ← Back to Plans

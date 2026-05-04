@@ -42,7 +42,7 @@
  * @param {Array} props.assets - Array of all assets (for carousel navigation)
  * @param {number|null} props.currentAssetIndex - Current asset index in carousel
  */
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { XMarkIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDownIcon, ExclamationTriangleIcon, EyeIcon, ArrowDownTrayIcon, CheckCircleIcon, CheckIcon, ArrowUturnLeftIcon, ClockIcon, XCircleIcon, CloudArrowUpIcon, RectangleStackIcon, TicketIcon, InformationCircleIcon, PhotoIcon, SparklesIcon, TagIcon } from '@heroicons/react/24/outline'
 import { usePage, router, Link } from '@inertiajs/react'
@@ -426,6 +426,14 @@ export default function AssetDrawer({
     /** Display-only rotation (0/90/180/270) for mis-oriented previews; does not re-encode files. */
     const [drawerPreviewDisplayRotation, setDrawerPreviewDisplayRotation] = useState(0)
     const [drawerPreviewRotateSaving, setDrawerPreviewRotateSaving] = useState(false)
+    const [drawerOrientationDetailsOpen, setDrawerOrientationDetailsOpen] = useState(false)
+    /**
+     * Signed URL for the stored original file (GET /assets/{id}/view JSON) — same bytes the server rotates.
+     * Thumbnail pipeline URLs can disagree with EXIF/orientation handling on disk; we fetch this only while
+     * the user is adjusting orientation (non-zero rotation or expanded Orientation section).
+     */
+    const [drawerRotateOriginalSignedUrl, setDrawerRotateOriginalSignedUrl] = useState(null)
+    const [drawerRotateOriginalSignedUrlLoading, setDrawerRotateOriginalSignedUrlLoading] = useState(false)
     const [executionTripleCompareOpen, setExecutionTripleCompareOpen] = useState(false)
     // Thumbnail retry state
     const [showRetryModal, setShowRetryModal] = useState(false)
@@ -2433,9 +2441,12 @@ export default function AssetDrawer({
         })
     }, [showPreferredPreviewOption, showEnhancedPreviewRadio, showPresentationCssOption, showAiViewOption])
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         setPreviewSidebarActionsExpanded(false)
         setDrawerPreviewDisplayRotation(0)
+        setDrawerOrientationDetailsOpen(false)
+        setDrawerRotateOriginalSignedUrl(null)
+        setDrawerRotateOriginalSignedUrlLoading(false)
     }, [displayAsset?.id])
 
     useEffect(() => {
@@ -2461,6 +2472,99 @@ export default function AssetDrawer({
         return true
     }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile])
 
+    const needsDrawerRotateOriginalPreview = useMemo(
+        () =>
+            canRotateDrawerRasterPreview &&
+            (drawerOrientationDetailsOpen || drawerPreviewDisplayRotation !== 0),
+        [canRotateDrawerRasterPreview, drawerOrientationDetailsOpen, drawerPreviewDisplayRotation],
+    )
+
+    useEffect(() => {
+        if (!needsDrawerRotateOriginalPreview) {
+            setDrawerRotateOriginalSignedUrl(null)
+            setDrawerRotateOriginalSignedUrlLoading(false)
+            return undefined
+        }
+        if (!displayAsset?.id) {
+            return undefined
+        }
+        const ac = new AbortController()
+        setDrawerRotateOriginalSignedUrlLoading(true)
+        fetch(`/app/assets/${displayAsset.id}/view`, {
+            signal: ac.signal,
+            headers: { Accept: 'application/json' },
+        })
+            .then((res) => (res.ok ? res.json() : Promise.reject(new Error('view url'))))
+            .then((data) => {
+                if (typeof data?.url === 'string' && data.url) {
+                    setDrawerRotateOriginalSignedUrl(data.url)
+                } else {
+                    setDrawerRotateOriginalSignedUrl(null)
+                }
+            })
+            .catch(() => {
+                if (!ac.signal.aborted) {
+                    setDrawerRotateOriginalSignedUrl(null)
+                }
+            })
+            .finally(() => {
+                if (!ac.signal.aborted) {
+                    setDrawerRotateOriginalSignedUrlLoading(false)
+                }
+            })
+        return () => ac.abort()
+    }, [displayAsset?.id, needsDrawerRotateOriginalPreview])
+
+    const drawerRasterRotationAlignedForcedUrl = useMemo(() => {
+        if (!canRotateDrawerRasterPreview || !needsDrawerRotateOriginalPreview) {
+            return drawerForcedPreviewUrl
+        }
+        return drawerRotateOriginalSignedUrl || drawerForcedPreviewUrl
+    }, [
+        canRotateDrawerRasterPreview,
+        needsDrawerRotateOriginalPreview,
+        drawerRotateOriginalSignedUrl,
+        drawerForcedPreviewUrl,
+    ])
+
+    const drawerPreviewRotateOriginalSpinnerOverlay = Boolean(
+        needsDrawerRotateOriginalPreview &&
+            drawerRotateOriginalSignedUrlLoading &&
+            !drawerRotateOriginalSignedUrl,
+    )
+
+    const drawerPreviewRotateInnerSpinnerOverlay = Boolean(
+        drawerForcedModeSpinnerOverlay || drawerPreviewRotateOriginalSpinnerOverlay,
+    )
+
+    const drawerPreviewRotationStyle = useMemo(() => {
+        const rot = drawerPreviewDisplayRotation
+        if (rot === 0) return undefined
+        return {
+            transform:
+                rot % 180 !== 0 ? `rotate(${rot}deg) scale(0.88)` : `rotate(${rot}deg)`,
+        }
+    }, [drawerPreviewDisplayRotation])
+
+    const orientationMiniPreviewForcedUrl = useMemo(() => {
+        if (!displayAsset?.id || !canRotateDrawerRasterPreview) return null
+        if (drawerRotateOriginalSignedUrl) {
+            return drawerRotateOriginalSignedUrl
+        }
+        if (showExecutionPreviewChrome && previewStyleMode === 'presentation') {
+            return executionDrawerOriginalUrl
+        }
+        return drawerForcedPreviewUrl || executionDrawerOriginalUrl || null
+    }, [
+        displayAsset?.id,
+        canRotateDrawerRasterPreview,
+        drawerRotateOriginalSignedUrl,
+        showExecutionPreviewChrome,
+        previewStyleMode,
+        executionDrawerOriginalUrl,
+        drawerForcedPreviewUrl,
+    ])
+
     const handlePersistDrawerRotation = useCallback(async () => {
         const deg = drawerPreviewDisplayRotation
         if (!displayAsset?.id || ![90, 180, 270].includes(deg)) {
@@ -2473,6 +2577,7 @@ export default function AssetDrawer({
             })
             if (data?.success) {
                 setDrawerPreviewDisplayRotation(0)
+                setDrawerRotateOriginalSignedUrl(null)
                 if (onAssetUpdate && data.asset) {
                     onAssetUpdate({ ...displayAsset, ...data.asset })
                 }
@@ -4449,8 +4554,8 @@ export default function AssetDrawer({
                                                     shouldAnimateThumbnail={shouldAnimateThumbnail}
                                                     preferLargeForVector
                                                     forceObjectFit={drawerPreviewForceObjectFit}
-                                                    forcedImageUrl={drawerForcedPreviewUrl}
-                                                    forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
+                                                    forcedImageUrl={drawerRasterRotationAlignedForcedUrl}
+                                                    forcedImageSpinnerOverlay={drawerPreviewRotateInnerSpinnerOverlay}
                                                     ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
                                                     gifPlaybackControl
                                                 />
@@ -4458,21 +4563,11 @@ export default function AssetDrawer({
                                         if (!canRotateDrawerRasterPreview) {
                                             return drawerRasterPreviewInner
                                         }
-                                        const rot = drawerPreviewDisplayRotation
-                                        const rotStyle =
-                                            rot !== 0
-                                                ? {
-                                                      transform:
-                                                          rot % 180 !== 0
-                                                              ? `rotate(${rot}deg) scale(0.88)`
-                                                              : `rotate(${rot}deg)`,
-                                                  }
-                                                : undefined
                                         return (
                                             <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden">
                                                 <div
                                                     className="flex h-full w-full max-h-full max-w-full min-h-0 min-w-0 flex-1 items-center justify-center origin-center transition-transform duration-200 ease-out"
-                                                    style={rotStyle}
+                                                    style={drawerPreviewRotationStyle}
                                                 >
                                                     {drawerRasterPreviewInner}
                                                 </div>
@@ -5693,7 +5788,7 @@ export default function AssetDrawer({
                             />
 
                             <div
-                                className={`mt-4 grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 md:grid-cols-2 md:gap-6 ${
+                                className={`mt-4 grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 ${
                                     can('metadata.edit_post_upload') ? 'pb-4' : ''
                                 }`}
                             >
@@ -5739,7 +5834,11 @@ export default function AssetDrawer({
                             >
                                 <div className="space-y-2">
                                     {canRotateDrawerRasterPreview ? (
-                                        <details className="group rounded-md border border-slate-200/80 bg-slate-50/50">
+                                        <details
+                                            key={`drawer-orientation-${displayAsset?.id || 'none'}`}
+                                            className="group rounded-md border border-slate-200/80 bg-slate-50/50"
+                                            onToggle={(e) => setDrawerOrientationDetailsOpen(e.currentTarget.open)}
+                                        >
                                             <summary className="cursor-pointer list-none px-2.5 py-2 text-[11px] font-semibold text-slate-700 marker:content-none [&::-webkit-details-marker]:hidden">
                                                 <span className="inline-flex items-center gap-1">
                                                     <ChevronRightIcon className="h-3.5 w-3.5 text-slate-500 transition-transform group-open:rotate-90" />
@@ -5753,6 +5852,41 @@ export default function AssetDrawer({
                                                     EXIF orientation is normalized, and thumbnails refresh. Requires Imagick on the
                                                     server. GIFs are not supported.
                                                 </p>
+                                                {drawerOrientationDetailsOpen ? (
+                                                    <div className="relative w-full max-h-[11rem] min-h-[6.5rem] overflow-hidden rounded-lg border border-gray-200 bg-gray-50 aspect-video">
+                                                        <div className="absolute inset-0 flex items-center justify-center p-2">
+                                                            <div
+                                                                className="flex max-h-full max-w-full flex-1 items-center justify-center origin-center transition-transform duration-200 ease-out"
+                                                                style={drawerPreviewRotationStyle}
+                                                            >
+                                                                <ThumbnailPreview
+                                                                    asset={displayAsset}
+                                                                    alt={
+                                                                        displayAsset.title ||
+                                                                        displayAsset.original_filename ||
+                                                                        'Rotation preview'
+                                                                    }
+                                                                    className="max-h-[9.5rem] w-full max-w-full object-contain"
+                                                                    retryCount={thumbnailRetryCount}
+                                                                    onRetry={() => {
+                                                                        if (thumbnailRetryCount < 2) {
+                                                                            setThumbnailRetryCount((prev) => prev + 1)
+                                                                        }
+                                                                    }}
+                                                                    size="md"
+                                                                    thumbnailVersion={thumbnailVersion}
+                                                                    liveThumbnailUpdates
+                                                                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                                                    preferLargeForVector
+                                                                    forceObjectFit={drawerPreviewForceObjectFit}
+                                                                    forcedImageUrl={orientationMiniPreviewForcedUrl}
+                                                                    forcedImageSpinnerOverlay={drawerPreviewRotateInnerSpinnerOverlay}
+                                                                    ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : null}
                                                 <div className="flex flex-wrap items-center gap-1">
                                                     <button
                                                         type="button"
