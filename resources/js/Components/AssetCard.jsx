@@ -532,8 +532,17 @@ export default function AssetCard({
     
     const isCinematic = cardVariant === 'cinematic'
     const isGuidelines = cardStyle === 'guidelines'
-    const cardBgClass = isGuidelines ? 'bg-transparent' : isCinematic ? 'bg-white/10 backdrop-blur-md' : 'bg-transparent'
-    // Default: outline around image only, not title. Guidelines/cinematic keep full-card styling.
+    /** Public share: frosted chrome on the image only; filename row sits on the page (no grey caption tray). */
+    const cinematicThumbOnly = isCinematic && splitTitleFooter
+    const showOuterCinematicChrome = isCinematic && !cinematicThumbOnly
+    const cardBgClass = isGuidelines
+        ? 'bg-transparent'
+        : cinematicThumbOnly
+          ? 'bg-transparent'
+          : isCinematic
+            ? 'bg-white/10 backdrop-blur-md'
+            : 'bg-transparent'
+    // Default: outline wraps image only, not title. Guidelines + full-bleed cinematic wrap the whole card.
     const cardBorderClass = isGuidelines
         ? 'border-0'
         : isCinematic
@@ -544,10 +553,18 @@ export default function AssetCard({
         : isCinematic ? 'shadow-lg hover:shadow-xl' : 'shadow-none'
     const imageBorderClass = !isGuidelines && !isCinematic
         ? `rounded-2xl border transition-all duration-200 ${cardBorderClass}`
-        : (isGuidelines && isSelected ? 'rounded-2xl border-2 transition-all duration-200' : '')
+        : isGuidelines && isSelected
+          ? 'rounded-2xl border-2 transition-all duration-200'
+          : cinematicThumbOnly
+            ? `rounded-2xl border transition-all duration-200 ${cardBorderClass}`
+            : ''
     const imageShadowClass = !isGuidelines && !isCinematic
         ? (isSelected ? '' : 'shadow-md group-hover:shadow-lg')
-        : isGuidelines ? 'shadow-none group-hover:shadow-lg' : ''
+        : isGuidelines
+          ? 'shadow-none group-hover:shadow-lg'
+          : cinematicThumbOnly
+            ? cardShadowClass
+            : ''
     const aspectRatio = isGuidelines ? 'aspect-[5/3]' : 'aspect-[4/3]' // More elongated for guidelines
     const isMasonry = layoutMode === 'masonry'
     /** Masonry: min thumbnail height matches grid tile (same column width × same aspect ratio). */
@@ -561,7 +578,7 @@ export default function AssetCard({
     /** Applies in both grid styles: "impact" (default card) and "clean" (guidelines — white tile would hide white logos). */
     const isLogoOrGraphicCategory = categorySlug === 'logos' || categorySlug === 'graphics'
     const checkerboardThumbnailStyle =
-        isLogoOrGraphicCategory && !isCinematic
+        isLogoOrGraphicCategory && !isCinematic && !cinematicThumbOnly
             ? {
                   backgroundColor: '#f3f4f6',
                   backgroundImage:
@@ -583,19 +600,21 @@ export default function AssetCard({
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            className={`group relative select-none ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${!isGuidelines && !isCinematic ? '' : `border ${cardBorderClass} ${cardShadowClass}`}`}
+            className={`group relative select-none ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${
+                !isGuidelines && !isCinematic ? '' : isGuidelines || showOuterCinematicChrome ? `border ${cardBorderClass} ${cardShadowClass}` : ''
+            }`}
             style={{
-                ...(isCinematic ? shadowStyle : {}),
+                ...(isCinematic && !cinematicThumbOnly ? shadowStyle : {}),
                 '--primary-color': primaryColor,
             }}
         >
             {/* Phase 3.1: Thumbnail — uniform aspect (grid) or natural height capped (masonry) */}
-            {/* Default + guidelines: outline wraps image only. Cinematic: border on outer card. */}
+            {/* Default + guidelines: outline wraps image only. Full cinematic: border on outer card; public share + splitTitleFooter: border on this thumb only. */}
             <div 
                 className={`${
                     /* Masonry: center content vertically in min-height tile (short logos vs tall neighbors) */
                     isMasonry ? 'w-full flex flex-col items-center justify-center' : aspectRatio
-                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${executionEnhancedChromeClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
+                } relative overflow-hidden rounded-2xl transition-all duration-200 ${imageBorderClass} ${imageShadowClass} ${executionEnhancedChromeClass} ${isGuidelines ? (isLogoOrGraphicCategory ? 'bg-transparent shadow-none group-hover:shadow-lg' : 'bg-white shadow-none group-hover:shadow-lg') : isCinematic ? 'bg-black/20 backdrop-blur-[2px]' : isLogoOrGraphicCategory ? 'bg-transparent' : 'bg-gray-50'}`}
                 style={{
                     ...(isMasonry
                         ? {
@@ -603,7 +622,7 @@ export default function AssetCard({
                               minHeight: masonryThumbnailMinHeightPx,
                           }
                         : {}),
-                    ...((!isGuidelines && !isCinematic) || isGuidelines ? shadowStyle : {}),
+                    ...((!isGuidelines && !isCinematic) || isGuidelines || cinematicThumbOnly ? shadowStyle : {}),
                     ...checkerboardThumbnailStyle,
                 }}
                 onMouseEnter={() => !isMobile && isVideo && setIsHovering(true)}

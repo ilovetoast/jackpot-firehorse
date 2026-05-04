@@ -26,6 +26,30 @@ import { JACKPOT_WORDMARK_INVERTED_SRC } from '../../Components/Brand/LogoMark'
 /** Show a “may take a while” notice in the ZIP modal above this file count (full collection or selected). */
 const LARGE_PUBLIC_ZIP_WARNING_THRESHOLD = 25
 
+/**
+ * Begin a signed ZIP GET without opening a tab first. Pre-opening `about:blank` leaves an empty window
+ * during long ZIP builds, and assigning `location` (or `target=_blank` links) after `await fetch` is
+ * commonly blocked as a popup. A hidden iframe navigation usually triggers the browser download UI.
+ */
+function startSignedZipDownloadFromIframe(zipUrl) {
+    const u = String(zipUrl || '').trim()
+    if (!u) return
+    const iframe = document.createElement('iframe')
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.setAttribute('title', 'Download')
+    iframe.style.cssText =
+        'position:absolute;width:1px;height:1px;left:-10000px;top:0;border:none;opacity:0;pointer-events:none'
+    iframe.src = u
+    document.body.appendChild(iframe)
+    window.setTimeout(() => {
+        try {
+            iframe.remove()
+        } catch {
+            /* ignore */
+        }
+    }, 15 * 60 * 1000)
+}
+
 function formatBytes(n) {
     if (n == null || Number.isNaN(Number(n))) return ''
     const v = Number(n)
@@ -181,7 +205,7 @@ export default function PublicCollection({
             : '')
 
     const runZipDownload = useCallback(
-        async (assetIds, downloadTab) => {
+        async (assetIds) => {
             setDownloadError(null)
             setDownloadSubmitting(true)
             try {
@@ -206,7 +230,6 @@ export default function PublicCollection({
                 })
                 const data = await res.json().catch(() => ({}))
                 if (!res.ok) {
-                    downloadTab?.close?.()
                     const msg =
                         typeof data.message === 'string' && data.message.trim()
                             ? data.message
@@ -217,24 +240,11 @@ export default function PublicCollection({
                 }
                 const zipUrl = typeof data.zip_url === 'string' ? data.zip_url.trim() : ''
                 if (!zipUrl) {
-                    downloadTab?.close?.()
                     throw new Error('No download link was returned. Please try again.')
                 }
-                /** Popup blockers allow a tab opened on the click; opening only after `fetch` is often blocked. */
-                if (downloadTab && !downloadTab.closed) {
-                    downloadTab.location.href = zipUrl
-                } else {
-                    const a = document.createElement('a')
-                    a.href = zipUrl
-                    a.target = '_blank'
-                    a.rel = 'noopener noreferrer'
-                    document.body.appendChild(a)
-                    a.click()
-                    a.remove()
-                }
+                startSignedZipDownloadFromIframe(zipUrl)
                 setDownloadPanelOpen(false)
             } catch (err) {
-                downloadTab?.close?.()
                 setDownloadError(err.message || 'Failed to prepare download. Please try again.')
             } finally {
                 setDownloadSubmitting(false)
@@ -250,19 +260,12 @@ export default function PublicCollection({
     }
 
     const handleDownloadPanelConfirm = () => {
-        const downloadTab =
-            typeof window !== 'undefined'
-                ? window.open('about:blank', '_blank', 'noopener,noreferrer')
-                : null
         if (downloadPanelMode === 'selected') {
             const ids = [...selectedIds]
-            if (ids.length === 0) {
-                downloadTab?.close?.()
-                return
-            }
-            runZipDownload(ids, downloadTab)
+            if (ids.length === 0) return
+            runZipDownload(ids)
         } else {
-            runZipDownload(null, downloadTab)
+            runZipDownload(null)
         }
     }
 
@@ -747,8 +750,8 @@ export default function PublicCollection({
                                             role="status"
                                         >
                                             {downloadPanelMode === 'all'
-                                                ? `This collection has ${collectionAssetTotal.toLocaleString()} files. Building the ZIP can take a little while—please stay on this step until the download begins.`
-                                                : `You are downloading ${selectedIds.size.toLocaleString()} files. Building the ZIP can take a little while—please stay on this step until the download begins.`}
+                                                ? `This collection has ${collectionAssetTotal.toLocaleString()} files. Building the ZIP can take a little while—keep this page open until your browser shows the download (progress bar or save prompt).`
+                                                : `You are downloading ${selectedIds.size.toLocaleString()} files. Building the ZIP can take a little while—keep this page open until your browser shows the download (progress bar or save prompt).`}
                                         </p>
                                     ) : null}
                                     {downloadError && <p className="mt-3 text-sm text-red-300">{downloadError}</p>}

@@ -329,16 +329,24 @@ export default function PublicShareAssetLightbox({
                                                 <button
                                                     type="button"
                                                     onClick={onToggleZipSelection}
-                                                    className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-semibold transition ${
+                                                    aria-label={
+                                                        zipSelectionIncludesAsset
+                                                            ? 'Remove this file from your ZIP selection'
+                                                            : 'Add this file to your ZIP selection'
+                                                    }
+                                                    title={
+                                                        zipSelectionIncludesAsset
+                                                            ? 'Remove this file from your ZIP selection (gallery checkmarks)'
+                                                            : 'Add this file to your ZIP selection for Download selected'
+                                                    }
+                                                    className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold leading-tight transition ${
                                                         zipSelectionIncludesAsset
                                                             ? 'border-white/35 bg-white/10 text-white hover:bg-white/15'
                                                             : 'border-white/20 bg-transparent text-white/90 hover:bg-white/10'
                                                     }`}
                                                 >
                                                     <Square2StackIcon className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                                                    {zipSelectionIncludesAsset
-                                                        ? 'Remove from multi-file download'
-                                                        : 'Include in multi-file download'}
+                                                    {zipSelectionIncludesAsset ? 'Exclude from ZIP' : 'Include in ZIP'}
                                                 </button>
                                                 <p className="mt-2 text-[11px] leading-snug text-white/45">
                                                     {zipSelectionIncludesAsset
