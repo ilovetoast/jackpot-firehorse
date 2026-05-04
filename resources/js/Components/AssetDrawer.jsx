@@ -50,6 +50,7 @@ import AssetImage from './AssetImage'
 import AssetTimeline from './AssetTimeline'
 import AssetTagManager from './AssetTagManager'
 import AssetMetadataDisplay from './AssetMetadataDisplay'
+import AssetMetadataCollectionField from './AssetMetadataCollectionField'
 import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
@@ -422,6 +423,9 @@ export default function AssetDrawer({
     const [previewModeDownloadLoading, setPreviewModeDownloadLoading] = useState(null)
     /** Preview & Styles sidebar: “Actions” (thumbnail rebuild) collapsed by default. */
     const [previewSidebarActionsExpanded, setPreviewSidebarActionsExpanded] = useState(false)
+    /** Display-only rotation (0/90/180/270) for mis-oriented previews; does not re-encode files. */
+    const [drawerPreviewDisplayRotation, setDrawerPreviewDisplayRotation] = useState(0)
+    const [drawerPreviewRotateSaving, setDrawerPreviewRotateSaving] = useState(false)
     const [executionTripleCompareOpen, setExecutionTripleCompareOpen] = useState(false)
     // Thumbnail retry state
     const [showRetryModal, setShowRetryModal] = useState(false)
@@ -943,6 +947,49 @@ export default function AssetDrawer({
             }
         },
         [displayAsset?.id, addToCollectionLoading, assetCollections, collectionContext],
+    )
+
+    const drawerCollectionDisplay = useMemo(
+        () => ({
+            collections: assetCollections,
+            loading: assetCollectionsLoading,
+            showEditButton: can('metadata.edit_post_upload') && !collectionFieldVisible,
+            onEdit:
+                can('metadata.edit_post_upload') && !collectionFieldVisible
+                    ? () => setShowCollectionsModal(true)
+                    : undefined,
+            inlineContent:
+                can('metadata.edit_post_upload') && collectionFieldVisible ? (
+                    dropdownCollectionsLoading ? (
+                        <span className="text-sm font-normal text-gray-400">Loading collections…</span>
+                    ) : (
+                        <CollectionSelector
+                            collections={dropdownCollections}
+                            selectedIds={(assetCollections || [])
+                                .filter(Boolean)
+                                .map((c) => c?.id)
+                                .filter(Boolean)}
+                            maxHeight="240px"
+                            onChange={handleDrawerCollectionsChange}
+                            disabled={addToCollectionLoading || dropdownCollectionsLoading}
+                            placeholder="Select collections…"
+                            showCreateButton
+                            onCreateClick={() => setShowCreateCollectionModal(true)}
+                            compact
+                        />
+                    )
+                ) : undefined,
+        }),
+        [
+            assetCollections,
+            assetCollectionsLoading,
+            collectionFieldVisible,
+            dropdownCollections,
+            dropdownCollectionsLoading,
+            addToCollectionLoading,
+            handleDrawerCollectionsChange,
+            can,
+        ],
     )
 
     const [processingGuardStatus, setProcessingGuardStatus] = useState(null)
@@ -2388,6 +2435,7 @@ export default function AssetDrawer({
 
     useEffect(() => {
         setPreviewSidebarActionsExpanded(false)
+        setDrawerPreviewDisplayRotation(0)
     }, [displayAsset?.id])
 
     useEffect(() => {
@@ -2398,6 +2446,54 @@ export default function AssetDrawer({
     }, [isExecutionDrawer, displayAsset?.id])
 
     const isFontFile = useMemo(() => isUploadedFontFileAsset(displayAsset), [displayAsset])
+
+    const canRotateDrawerRasterPreview = useMemo(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont || isVideo || isPdf || isFontFile) {
+            return false
+        }
+        const m = displayAsset.mime_type || ''
+        if (!m.startsWith('image/')) {
+            return false
+        }
+        if (m.includes('gif')) {
+            return false
+        }
+        return true
+    }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile])
+
+    const handlePersistDrawerRotation = useCallback(async () => {
+        const deg = drawerPreviewDisplayRotation
+        if (!displayAsset?.id || ![90, 180, 270].includes(deg)) {
+            return
+        }
+        setDrawerPreviewRotateSaving(true)
+        try {
+            const { data } = await window.axios.post(`/app/assets/${displayAsset.id}/original/rotate`, {
+                degrees_clockwise: deg,
+            })
+            if (data?.success) {
+                setDrawerPreviewDisplayRotation(0)
+                if (onAssetUpdate && data.asset) {
+                    onAssetUpdate({ ...displayAsset, ...data.asset })
+                }
+                setToastMessage(data.message || 'Rotation saved to file.')
+                setToastType('success')
+                setTimeout(() => setToastMessage(null), 4000)
+            } else {
+                setToastMessage(data?.error || 'Could not save rotation')
+                setToastType('error')
+                setTimeout(() => setToastMessage(null), 5000)
+            }
+        } catch (err) {
+            const msg =
+                err.response?.data?.error || err.response?.data?.message || 'Could not save rotation'
+            setToastMessage(msg)
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 5000)
+        } finally {
+            setDrawerPreviewRotateSaving(false)
+        }
+    }, [displayAsset, drawerPreviewDisplayRotation, onAssetUpdate])
 
     // Grid double-click: jump straight to fullscreen zoom (same modal as "Click to zoom" in drawer)
     // Search moment match: same path + seek once the /view URL is ready (pendingLightboxSeekSeconds effect)
@@ -3967,8 +4063,48 @@ export default function AssetDrawer({
                 )}
                 
                 {/* Large Preview */}
-                <div className="space-y-3">                    
-                    
+                <div className="space-y-3">
+                    {canRotateDrawerRasterPreview && drawerPreviewDisplayRotation !== 0 ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200/90 bg-amber-50/95 px-2.5 py-2 text-[11px] text-amber-950 shadow-sm">
+                            <span className="font-semibold">Preview rotated {drawerPreviewDisplayRotation}°</span>
+                            <span className="text-amber-800/90">— save to update the stored file and downloads.</span>
+                            <div className="ml-auto flex flex-wrap items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setDrawerPreviewDisplayRotation((r) => (r + 90) % 360)}
+                                    disabled={drawerPreviewRotateSaving}
+                                    className="inline-flex items-center rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                                >
+                                    +90°
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setDrawerPreviewDisplayRotation(0)}
+                                    disabled={drawerPreviewRotateSaving}
+                                    className="inline-flex items-center gap-0.5 rounded border border-amber-300 bg-white px-2 py-0.5 font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                                >
+                                    <ArrowUturnLeftIcon className="h-3.5 w-3.5" aria-hidden />
+                                    Reset
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void handlePersistDrawerRotation()}
+                                    disabled={drawerPreviewRotateSaving || ![90, 180, 270].includes(drawerPreviewDisplayRotation)}
+                                    className="inline-flex items-center rounded border border-amber-600 bg-amber-600 px-2 py-0.5 font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                                >
+                                    {drawerPreviewRotateSaving ? (
+                                        <>
+                                            <ArrowPathIcon className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                                            Saving…
+                                        </>
+                                    ) : (
+                                        'Save to file'
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    ) : null}
+
                     {/* Phase 3.0C: Thumbnail preview with state machine and fade-in — responsive width */}
                     <div
                         className={`w-full max-w-full min-w-0 rounded-lg overflow-hidden border border-gray-200 relative ${
@@ -4279,44 +4415,70 @@ export default function AssetDrawer({
                                             </div>
                                         )
                                     })()}
-                                    {showExecutionPreviewChrome &&
-                                    previewStyleMode === 'presentation' &&
-                                    executionPresentationBaseUrl ? (
-                                        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-                                            <ExecutionPresentationFrame
-                                                imageUrl={executionPresentationBaseUrl}
-                                                preset={presentationCssPreset}
-                                                className="min-h-0 flex-1 rounded-lg"
-                                            />
-                                            {drawerForcedModeSpinnerOverlay ? (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-white/60">
-                                                    <ArrowPathIcon className="h-8 w-8 animate-spin text-gray-500" />
+                                    {(() => {
+                                        const drawerRasterPreviewInner =
+                                            showExecutionPreviewChrome &&
+                                            previewStyleMode === 'presentation' &&
+                                            executionPresentationBaseUrl ? (
+                                                <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+                                                    <ExecutionPresentationFrame
+                                                        imageUrl={executionPresentationBaseUrl}
+                                                        preset={presentationCssPreset}
+                                                        className="min-h-0 flex-1 rounded-lg"
+                                                    />
+                                                    {drawerForcedModeSpinnerOverlay ? (
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-white/60">
+                                                            <ArrowPathIcon className="h-8 w-8 animate-spin text-gray-500" />
+                                                        </div>
+                                                    ) : null}
                                                 </div>
-                                            ) : null}
-                                        </div>
-                                    ) : (
-                                        <ThumbnailPreview
-                                            asset={displayAsset}
-                                            alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
-                                            className="w-full h-full"
-                                            retryCount={thumbnailRetryCount}
-                                            onRetry={() => {
-                                                if (thumbnailRetryCount < 2) {
-                                                    setThumbnailRetryCount((prev) => prev + 1)
-                                                }
-                                            }}
-                                            size="lg"
-                                            thumbnailVersion={thumbnailVersion}
-                                            liveThumbnailUpdates
-                                            shouldAnimateThumbnail={shouldAnimateThumbnail}
-                                            preferLargeForVector
-                                            forceObjectFit={drawerPreviewForceObjectFit}
-                                            forcedImageUrl={drawerForcedPreviewUrl}
-                                            forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
-                                            ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
-                                            gifPlaybackControl
-                                        />
-                                    )}
+                                            ) : (
+                                                <ThumbnailPreview
+                                                    asset={displayAsset}
+                                                    alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
+                                                    className="w-full h-full"
+                                                    retryCount={thumbnailRetryCount}
+                                                    onRetry={() => {
+                                                        if (thumbnailRetryCount < 2) {
+                                                            setThumbnailRetryCount((prev) => prev + 1)
+                                                        }
+                                                    }}
+                                                    size="lg"
+                                                    thumbnailVersion={thumbnailVersion}
+                                                    liveThumbnailUpdates
+                                                    shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                                    preferLargeForVector
+                                                    forceObjectFit={drawerPreviewForceObjectFit}
+                                                    forcedImageUrl={drawerForcedPreviewUrl}
+                                                    forcedImageSpinnerOverlay={drawerForcedModeSpinnerOverlay}
+                                                    ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
+                                                    gifPlaybackControl
+                                                />
+                                            )
+                                        if (!canRotateDrawerRasterPreview) {
+                                            return drawerRasterPreviewInner
+                                        }
+                                        const rot = drawerPreviewDisplayRotation
+                                        const rotStyle =
+                                            rot !== 0
+                                                ? {
+                                                      transform:
+                                                          rot % 180 !== 0
+                                                              ? `rotate(${rot}deg) scale(0.88)`
+                                                              : `rotate(${rot}deg)`,
+                                                  }
+                                                : undefined
+                                        return (
+                                            <div className="flex h-full w-full min-h-0 min-w-0 items-center justify-center overflow-hidden">
+                                                <div
+                                                    className="flex h-full w-full max-h-full max-w-full min-h-0 min-w-0 flex-1 items-center justify-center origin-center transition-transform duration-200 ease-out"
+                                                    style={rotStyle}
+                                                >
+                                                    {drawerRasterPreviewInner}
+                                                </div>
+                                            </div>
+                                        )
+                                    })()}
                                     {/* Zoom overlay (only shown when thumbnail is available) */}
                                     {(displayAsset.thumbnail_url ||
                                         displayAsset.final_thumbnail_url ||
@@ -5526,58 +5688,36 @@ export default function AssetDrawer({
                                         )
                                     }
                                 }}
-                                collectionDisplay={{
-                                    collections: assetCollections,
-                                    loading: assetCollectionsLoading,
-                                    showEditButton:
-                                        can('metadata.edit_post_upload') && !collectionFieldVisible,
-                                    onEdit:
-                                        can('metadata.edit_post_upload') && !collectionFieldVisible
-                                            ? () => setShowCollectionsModal(true)
-                                            : undefined,
-                                    inlineContent:
-                                        can('metadata.edit_post_upload') && collectionFieldVisible ? (
-                                            dropdownCollectionsLoading ? (
-                                                <span className="text-sm font-normal text-gray-400">
-                                                    Loading collections…
-                                                </span>
-                                            ) : (
-                                                <CollectionSelector
-                                                    collections={dropdownCollections}
-                                                    selectedIds={(assetCollections || [])
-                                                        .filter(Boolean)
-                                                        .map((c) => c?.id)
-                                                        .filter(Boolean)}
-                                                    maxHeight="240px"
-                                                    onChange={handleDrawerCollectionsChange}
-                                                    disabled={
-                                                        addToCollectionLoading || dropdownCollectionsLoading
-                                                    }
-                                                    placeholder="Select collections…"
-                                                    showCreateButton
-                                                    onCreateClick={() => setShowCreateCollectionModal(true)}
-                                                    compact
-                                                />
-                                            )
-                                        ) : undefined,
-                                }}
+                                collectionDisplay={drawerCollectionDisplay}
+                                omitCollectionRow
                             />
 
                             <div
-                                className={`mt-4 pt-4 border-t border-gray-100 ${
+                                className={`mt-4 grid grid-cols-1 gap-4 border-t border-gray-100 pt-4 md:grid-cols-2 md:gap-6 ${
                                     can('metadata.edit_post_upload') ? 'pb-4' : ''
                                 }`}
                             >
-                                <AssetTagManager
-                                    key={`tag-manager-${displayAsset.id}`}
-                                    asset={displayAsset}
-                                    showTitle
-                                    showInput={can('metadata.edit_post_upload')}
-                                    readOnly={!can('metadata.edit_post_upload')}
-                                    compact
-                                    inline
-                                    primaryColor={brandPrimary}
-                                />
+                                <div className="min-w-0">
+                                    <AssetMetadataCollectionField
+                                        collectionDisplay={drawerCollectionDisplay}
+                                        readOnly={!can('metadata.edit_post_upload')}
+                                        workspaceMode={false}
+                                        brandPrimary={brandPrimary}
+                                        variant="drawerColumn"
+                                    />
+                                </div>
+                                <div className="min-w-0">
+                                    <AssetTagManager
+                                        key={`tag-manager-${displayAsset.id}`}
+                                        asset={displayAsset}
+                                        showTitle
+                                        showInput={can('metadata.edit_post_upload')}
+                                        readOnly={!can('metadata.edit_post_upload')}
+                                        compact
+                                        inline
+                                        primaryColor={brandPrimary}
+                                    />
+                                </div>
                             </div>
                             </div>
                             {assetDataTab === 'embedded' && (
@@ -5598,6 +5738,67 @@ export default function AssetDrawer({
                                 defaultExpanded={false}
                             >
                                 <div className="space-y-2">
+                                    {canRotateDrawerRasterPreview ? (
+                                        <details className="group rounded-md border border-slate-200/80 bg-slate-50/50">
+                                            <summary className="cursor-pointer list-none px-2.5 py-2 text-[11px] font-semibold text-slate-700 marker:content-none [&::-webkit-details-marker]:hidden">
+                                                <span className="inline-flex items-center gap-1">
+                                                    <ChevronRightIcon className="h-3.5 w-3.5 text-slate-500 transition-transform group-open:rotate-90" />
+                                                    Orientation (preview &amp; save to file)
+                                                </span>
+                                            </summary>
+                                            <div className="space-y-2 border-t border-slate-200/70 px-2.5 pb-2.5 pt-2">
+                                                <p className="text-[11px] leading-snug text-slate-600">
+                                                    Step the preview, then use <span className="font-medium">Save to file</span> (also
+                                                    above the preview when rotated) to rewrite the stored image: pixels are rotated,
+                                                    EXIF orientation is normalized, and thumbnails refresh. Requires Imagick on the
+                                                    server. GIFs are not supported.
+                                                </p>
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setDrawerPreviewDisplayRotation((r) => (r + 90) % 360)
+                                                        }
+                                                        disabled={drawerPreviewRotateSaving}
+                                                        className="inline-flex items-center rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                                                    >
+                                                        Rotate preview 90°
+                                                    </button>
+                                                    {drawerPreviewDisplayRotation !== 0 ? (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setDrawerPreviewDisplayRotation(0)}
+                                                                disabled={drawerPreviewRotateSaving}
+                                                                className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                                                            >
+                                                                <ArrowUturnLeftIcon className="h-3.5 w-3.5" aria-hidden />
+                                                                Reset preview
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void handlePersistDrawerRotation()}
+                                                                disabled={
+                                                                    drawerPreviewRotateSaving ||
+                                                                    ![90, 180, 270].includes(drawerPreviewDisplayRotation)
+                                                                }
+                                                                className="inline-flex items-center rounded border border-indigo-600 bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                                                            >
+                                                                {drawerPreviewRotateSaving ? (
+                                                                    <>
+                                                                        <ArrowPathIcon className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />
+                                                                        Saving…
+                                                                    </>
+                                                                ) : (
+                                                                    'Save rotation to file'
+                                                                )}
+                                                            </button>
+                                                        </>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        </details>
+                                    ) : null}
                                     {(canRegeneratePreviewInProcessingSection || showExecutionPreviewChrome) && (
                                         <div className="space-y-2">
                                             {showExecutionPreviewChrome && (

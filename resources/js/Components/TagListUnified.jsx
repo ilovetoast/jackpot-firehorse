@@ -17,9 +17,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import { XMarkIcon } from '@heroicons/react/24/outline'
-import ConfirmDialog from './ConfirmDialog'
 
 // Source styling configuration. When primaryColor is set, manual/default tags use brand primary.
 const getTagStyle = (source, primaryColor = null, darkSurface = false) => {
@@ -122,7 +120,6 @@ export default function TagListUnified({
     const [loadedTags, setLoadedTags] = useState([])
     const [loading, setLoading] = useState(mode === 'full')
     const [removing, setRemoving] = useState(new Set())
-    const [confirmRemove, setConfirmRemove] = useState({ open: false, tagId: null, tagName: null })
 
     // Fetch tags for full mode
     const fetchTags = async () => {
@@ -171,17 +168,8 @@ export default function TagListUnified({
         return () => window.removeEventListener('metadata-updated', handleMetadataUpdate)
     }, [mode])
 
-    // Open confirm dialog for tag removal
-    const requestRemoveTag = (tagId, tagName) => {
-        if (removing.has(tagId) || !showRemoveButtons) return
-        setConfirmRemove({ open: true, tagId, tagName })
-    }
-
-    // Handle tag removal (after confirm)
     const removeTag = async (tagId, tagName) => {
         if (removing.has(tagId) || !showRemoveButtons) return
-
-        setConfirmRemove({ open: false, tagId: null, tagName: null })
 
         if (mode === 'full') {
             // API removal for full mode
@@ -324,7 +312,7 @@ export default function TagListUnified({
                                 {showRemoveButtons && (
                                     <button
                                         type="button"
-                                        onClick={() => requestRemoveTag(tag.id, tag.tag)}
+                                        onClick={() => removeTag(tag.id, tag.tag)}
                                         disabled={isRemoving}
                                         className={`${darkSurface ? 'ml-0.5' : 'ml-3'} inline-flex shrink-0 items-center p-1 rounded focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed ${style.button}`}
                                         title="Remove tag"
@@ -380,7 +368,7 @@ export default function TagListUnified({
                                 {showRemoveButtons && (
                                     <button
                                         type="button"
-                                        onClick={() => requestRemoveTag(tag.id, tag.tag)}
+                                        onClick={() => removeTag(tag.id, tag.tag)}
                                         disabled={isRemoving}
                                         className={`inline-flex items-center p-0.5 rounded focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed ${style.button}`}
                                         title="Remove tag"
@@ -398,28 +386,6 @@ export default function TagListUnified({
                     })}
                 </div>
             )}
-
-            {typeof document !== 'undefined' &&
-                createPortal(
-                    <ConfirmDialog
-                        open={confirmRemove.open}
-                        onClose={() => setConfirmRemove({ open: false, tagId: null, tagName: null })}
-                        onConfirm={() =>
-                            confirmRemove.tagId != null && removeTag(confirmRemove.tagId, confirmRemove.tagName)
-                        }
-                        title="Remove tag"
-                        message={
-                            confirmRemove.tagName
-                                ? `Are you sure you want to remove the tag "${confirmRemove.tagName}"?`
-                                : ''
-                        }
-                        confirmText="Remove"
-                        cancelText="Cancel"
-                        variant="warning"
-                        zIndexClass="z-[10070]"
-                    />,
-                    document.body,
-                )}
 
             {/* Show hidden count if there are more tags (only in standard view) */}
             {!detailed && hiddenCount > 0 && (

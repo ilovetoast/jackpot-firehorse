@@ -7,9 +7,10 @@
 
 import { useState, useEffect } from 'react'
 import MetadataAnalysisRunningBanner from './MetadataAnalysisRunningBanner'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon, RectangleStackIcon, GlobeAltIcon } from '@heroicons/react/24/outline'
+import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
+import AssetMetadataCollectionField from './AssetMetadataCollectionField'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import StarRating from './StarRating'
 import { resolve, isExcludedFromGenericLoop, isDominantColorsSwatches, CONTEXT, WIDGET } from '../utils/widgetResolver'
@@ -52,6 +53,8 @@ export default function AssetMetadataDisplay({
     assetId,
     onPendingCountChange,
     collectionDisplay = null,
+    /** When true, collection is not rendered in the <dl> (parent renders it elsewhere, e.g. beside tags). */
+    omitCollectionRow = false,
     primaryColor,
     suppressAnalysisRunningBanner = false,
     /** When true: values only — no edit buttons, rating changes, or collection edit (e.g. drawer quick view). */
@@ -344,112 +347,17 @@ export default function AssetMetadataDisplay({
                             const autoFields = filtered.filter(f => isAuto(f)).sort((a, b) => 0)
                             // Order: user-managed fields (except pinned trio), Collection, system auto fields, then photo_type / usage_rights / expiration_date
                             const collectionElement =
-                                collectionDisplay &&
-                                (collectionDisplay.inlineContent ||
-                                    Array.isArray(collectionDisplay.collections)) ? (
-                                    <div
-                                        key="collection-field"
-                                        className={`flex flex-col md:flex-row ${
-                                            collectionDisplay.inlineContent
-                                                ? 'md:items-center'
-                                                : 'md:items-start'
-                                        } md:justify-between gap-1 md:gap-4 md:flex-nowrap ${
-                                            workspaceMode &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !collectionDisplay.inlineContent
-                                                ? 'cursor-pointer rounded-lg -mx-2 px-2 py-1.5 transition-colors hover:bg-gray-50'
-                                                : ''
-                                        }`}
-                                        onClick={
-                                            workspaceMode &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !collectionDisplay.inlineContent
-                                                ? (e) => {
-                                                      if (e.target.closest('button, a, input, select, [role="checkbox"]'))
-                                                          return
-                                                      collectionDisplay.onEdit()
-                                                  }
-                                                : undefined
-                                        }
-                                        role={
-                                            workspaceMode &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !collectionDisplay.inlineContent
-                                                ? 'button'
-                                                : undefined
-                                        }
-                                        tabIndex={
-                                            workspaceMode &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !collectionDisplay.inlineContent
-                                                ? 0
-                                                : undefined
-                                        }
-                                        onKeyDown={
-                                            workspaceMode &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !collectionDisplay.inlineContent
-                                                ? (e) => {
-                                                      if (e.key === 'Enter' || e.key === ' ') {
-                                                          e.preventDefault()
-                                                          collectionDisplay.onEdit()
-                                                      }
-                                                  }
-                                                : undefined
-                                        }
-                                    >
-                                        <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
-                                            <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                                <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                                    Collection
-                                                </span>
-                                            </dt>
-                                            <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words w-full min-w-0">
-                                                {collectionDisplay.inlineContent ? (
-                                                    collectionDisplay.inlineContent
-                                                ) : collectionDisplay.loading ? (
-                                                    <span className="text-gray-400">Loading…</span>
-                                                ) : collectionDisplay.collections.length > 0 ? (
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        {collectionDisplay.collections.map((c) => (
-                                                            <span
-                                                                key={c.id}
-                                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium"
-                                                                style={{ backgroundColor: badgeBg, color: brandPrimary }}
-                                                                title={c.is_public ? 'Public collection' : undefined}
-                                                            >
-                                                                <RectangleStackIcon className="h-3 w-3" aria-hidden="true" />
-                                                                {c.name}
-                                                                {c.is_public && (
-                                                                    <GlobeAltIcon className="h-3 w-3 opacity-80" aria-hidden="true" title="Public" />
-                                                                )}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-gray-400">No collections</span>
-                                                )}
-                                            </dd>
-                                        </div>
-                                        {!readOnly &&
-                                            !collectionDisplay.inlineContent &&
-                                            collectionDisplay.showEditButton !== false &&
-                                            typeof collectionDisplay.onEdit === 'function' &&
-                                            !workspaceMode && (
-                                                <div className="self-start md:self-auto ml-auto md:ml-0 flex-shrink-0 flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={collectionDisplay.onEdit}
-                                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:opacity-90"
-                                                        style={{ color: brandPrimary, ['--tw-ring-color']: brandPrimary }}
-                                                    >
-                                                        <PencilIcon className="h-3 w-3" />
-                                                        {collectionDisplay.collections.length > 0 ? 'Edit' : 'Add'}
-                                                    </button>
-                                                </div>
-                                            )}
-                                    </div>
-                                ) : null
+                                omitCollectionRow
+                                    ? null
+                                    : (
+                                          <AssetMetadataCollectionField
+                                              collectionDisplay={collectionDisplay}
+                                              readOnly={readOnly}
+                                              workspaceMode={workspaceMode}
+                                              brandPrimary={brandPrimary}
+                                              variant="metadataRow"
+                                          />
+                                      )
 
                             const renderField = (field) => {
                                 const fieldHasValue = hasValue(field.current_value)

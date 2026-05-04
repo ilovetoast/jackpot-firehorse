@@ -1,8 +1,14 @@
 import { router, useForm, usePage } from '@inertiajs/react'
 import { usePermission } from '../../hooks/usePermission'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CheckCircleIcon, XCircleIcon, XMarkIcon, CurrencyDollarIcon, ChartBarIcon, ExclamationTriangleIcon, InformationCircleIcon, TicketIcon, DocumentTextIcon, ChevronDownIcon, ChevronRightIcon, CodeBracketIcon, CheckIcon } from '@heroicons/react/24/outline'
 import BudgetStatusBadge from './BudgetStatusBadge'
+import AIReportsQuickFilters from '../Admin/AIReportsQuickFilters'
+import {
+    mergeAiReportFilters,
+    serializeAiReportFilters,
+    formatAiReportRangeSubtitle,
+} from '../../utils/aiReportsFilters'
 
 // Activity Tab Content
 export function ActivityTabContent({ runs, failedJobs = [], filterOptions, canManage, variant = 'full' }) {
@@ -352,18 +358,24 @@ export function AutomationsTabContent({ automations, environment, canManage }) {
 export function ReportsTabContent({ report, filters, filterOptions, environment }) {
     const [localFilters, setLocalFilters] = useState(filters || {})
 
-    const applyFilters = (newFilters) => {
-        const updatedFilters = { ...localFilters, ...newFilters }
-        setLocalFilters(updatedFilters)
-        router.get('/app/admin/ai/reports', updatedFilters, {
+    useEffect(() => {
+        setLocalFilters(filters || {})
+    }, [filters])
+
+    const navigateWithFilters = (next) => {
+        setLocalFilters(next)
+        router.get('/app/admin/ai/reports', serializeAiReportFilters(next), {
             preserveState: true,
             preserveScroll: true,
             only: ['report', 'filters', 'filterOptions', 'environment'],
         })
     }
 
+    const applyFilters = (patch) => {
+        navigateWithFilters(mergeAiReportFilters(localFilters, patch))
+    }
+
     const clearFilters = () => {
-        setLocalFilters({})
         router.get('/app/admin/ai/reports', {}, {
             preserveState: true,
             preserveScroll: true,
@@ -373,20 +385,46 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
 
     const hasActiveFilters = Object.values(localFilters).some((v) => v !== null && v !== '' && v !== undefined)
 
+    const rangeSubtitle = formatAiReportRangeSubtitle(report?.meta, localFilters)
+
     if (!report) return <div className="text-center py-8 text-gray-500">Loading reports...</div>
 
     return (
         <div>
-            {/* Summary Cards - Report-specific metrics (Error Rate and Avg Cost/Run only) */}
-            <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <AIReportsQuickFilters
+                localFilters={localFilters}
+                filterOptions={filterOptions}
+                activePresetId={localFilters.range_preset || null}
+                onApplyPreset={(id) => applyFilters({ range_preset: id })}
+                onAgentChange={(v) => applyFilters({ agent_id: v || null })}
+                onModelChange={(v) => applyFilters({ model_used: v || null })}
+            />
+
+            {rangeSubtitle ? (
+                <p className="-mt-1 mb-4 text-sm text-slate-600">
+                    <span className="font-medium text-slate-800">Summary period:</span> {rangeSubtitle}
+                </p>
+            ) : null}
+
+            {/* Summary Cards */}
+            <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+                    <div className="flex items-center">
+                        <CurrencyDollarIcon className="h-6 w-6 text-gray-400" />
+                        <div className="ml-4">
+                            <p className="text-sm font-medium text-gray-500">Total Cost</p>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900">
+                                ${Number(report.total_cost || 0).toFixed(4)}
+                            </p>
+                        </div>
+                    </div>
+                </div>
                 <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
                     <div className="flex items-center">
                         <ChartBarIcon className="h-6 w-6 text-gray-400" />
                         <div className="ml-4">
-                            <p className="text-sm font-medium text-gray-500">Error Rate</p>
-                            <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                {(report.error_rate || 0).toFixed(1)}%
-                            </p>
+                            <p className="text-sm font-medium text-gray-500">Total Runs</p>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900">{report.total_runs || 0}</p>
                         </div>
                     </div>
                 </div>
@@ -401,13 +439,27 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                         </div>
                     </div>
                 </div>
+                <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+                    <div className="flex items-center">
+                        <ChartBarIcon className="h-6 w-6 text-gray-400" />
+                        <div className="ml-4">
+                            <p className="text-sm font-medium text-gray-500">Error Rate</p>
+                            <p className="mt-1 text-2xl font-semibold text-gray-900">
+                                {(report.error_rate || 0).toFixed(1)}%
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {/* Filters */}
-            <div className="mb-6 bg-white shadow-sm ring-1 ring-gray-200 rounded-lg p-4">
+            {/* Advanced filters */}
+            <div className="mb-6 rounded-lg bg-white p-4 shadow-sm ring-1 ring-gray-200">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Advanced — custom date range &amp; more
+                </p>
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Start Date</label>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">Start Date</label>
                         <input
                             type="date"
                             value={localFilters.start_date || ''}
@@ -416,7 +468,7 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                         />
                     </div>
                     <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">End Date</label>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">End Date</label>
                         <input
                             type="date"
                             value={localFilters.end_date || ''}
@@ -425,37 +477,7 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                         />
                     </div>
                     <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Agent</label>
-                        <select
-                            value={localFilters.agent_id || ''}
-                            onChange={(e) => applyFilters({ agent_id: e.target.value || null })}
-                            className="block w-full min-w-[180px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                        >
-                            <option value="">All Agents</option>
-                            {filterOptions?.agents?.map((agent) => (
-                                <option key={agent.value} value={agent.value}>
-                                    {agent.label}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Model</label>
-                        <select
-                            value={localFilters.model_used || ''}
-                            onChange={(e) => applyFilters({ model_used: e.target.value || null })}
-                            className="block w-full min-w-[180px] rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                        >
-                            <option value="">All Models</option>
-                            {filterOptions?.models?.map((model) => (
-                                <option key={model.value} value={model.value}>
-                                    {model.label}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Task Type</label>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">Task Type</label>
                         <select
                             value={localFilters.task_type || ''}
                             onChange={(e) => applyFilters({ task_type: e.target.value || null })}
@@ -470,7 +492,7 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                         </select>
                     </div>
                     <div className="flex-shrink-0">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Context</label>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">Context</label>
                         <select
                             value={localFilters.triggering_context || ''}
                             onChange={(e) => applyFilters({ triggering_context: e.target.value || null })}
@@ -487,6 +509,7 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                     {hasActiveFilters && (
                         <div className="flex-shrink-0">
                             <button
+                                type="button"
                                 onClick={clearFilters}
                                 className="mt-6 rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
                             >
@@ -502,28 +525,28 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                 {/* By Agent */}
                 {report.aggregations?.by_agent && report.aggregations.by_agent.length > 0 && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                        <div className="border-b border-gray-200 px-6 py-4">
                             <h2 className="text-lg font-semibold text-gray-900">Cost by Agent</h2>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Agent</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tokens</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Success Rate</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Agent</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Runs</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Total Cost</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Tokens</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Success Rate</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
+                                <tbody className="divide-y divide-gray-200 bg-white">
                                     {report.aggregations.by_agent.map((item, idx) => (
                                         <tr key={idx}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.agent_id}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_runs}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">{item.agent_id}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_runs}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
                                                 {item.total_runs > 0 ? `${Math.round((item.successful_runs / item.total_runs) * 100)}%` : 'N/A'}
                                             </td>
                                         </tr>
@@ -537,26 +560,26 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                 {/* By Model */}
                 {report.aggregations?.by_model && report.aggregations.by_model.length > 0 && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                        <div className="border-b border-gray-200 px-6 py-4">
                             <h2 className="text-lg font-semibold text-gray-900">Cost by Model</h2>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Model</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Cost/Run</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Model</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Runs</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Total Cost</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Avg Cost/Run</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
+                                <tbody className="divide-y divide-gray-200 bg-white">
                                     {report.aggregations.by_model.map((item, idx) => (
                                         <tr key={idx}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.model_used}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_runs}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${Number(item.average_cost_per_run || 0).toFixed(4)}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">{item.model_used}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_runs}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">${Number(item.average_cost_per_run || 0).toFixed(4)}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -568,26 +591,26 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                 {/* By Task Type */}
                 {report.aggregations?.by_task_type && report.aggregations.by_task_type.length > 0 && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                        <div className="border-b border-gray-200 px-6 py-4">
                             <h2 className="text-lg font-semibold text-gray-900">Cost by Task Type</h2>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task Type</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tokens</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Task Type</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Runs</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Total Cost</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Tokens</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
+                                <tbody className="divide-y divide-gray-200 bg-white">
                                     {report.aggregations.by_task_type.map((item, idx) => (
                                         <tr key={idx}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.task_type}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_runs}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">{item.task_type}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_runs}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -599,26 +622,26 @@ export function ReportsTabContent({ report, filters, filterOptions, environment 
                 {/* By Context */}
                 {report.aggregations?.by_context && report.aggregations.by_context.length > 0 && (
                     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                        <div className="border-b border-gray-200 px-6 py-4">
                             <h2 className="text-lg font-semibold text-gray-900">Cost by Context</h2>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-50">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Context</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Runs</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tokens</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Context</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Runs</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Total Cost</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Tokens</th>
                                     </tr>
                                 </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
+                                <tbody className="divide-y divide-gray-200 bg-white">
                                     {report.aggregations.by_context.map((item, idx) => (
                                         <tr key={idx}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.triggering_context}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_runs}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">{item.triggering_context}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_runs}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">${Number(item.total_cost || 0).toFixed(4)}</td>
+                                            <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">{item.total_tokens.toLocaleString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>

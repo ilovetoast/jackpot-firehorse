@@ -872,6 +872,7 @@ class AIDashboardController extends Controller
         $filters = $request->only([
             'start_date',
             'end_date',
+            'range_preset',
             'agent_id',
             'model_used',
             'task_type',
@@ -880,12 +881,19 @@ class AIDashboardController extends Controller
             'group_by',
         ]);
 
-        // Default to last 30 days if no date range specified
-        if (! isset($filters['start_date'])) {
-            $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
-        }
-        if (! isset($filters['end_date'])) {
-            $filters['end_date'] = now()->format('Y-m-d');
+        $allowedRangePresets = \App\Services\AICostReportingService::RANGE_PRESETS;
+        $rangePreset = $filters['range_preset'] ?? null;
+        if (is_string($rangePreset) && in_array($rangePreset, $allowedRangePresets, true)) {
+            unset($filters['start_date'], $filters['end_date']);
+        } else {
+            unset($filters['range_preset']);
+            // Default to last 30 days if no calendar range specified
+            if (! isset($filters['start_date'])) {
+                $filters['start_date'] = now()->subDays(30)->format('Y-m-d');
+            }
+            if (! isset($filters['end_date'])) {
+                $filters['end_date'] = now()->format('Y-m-d');
+            }
         }
 
         $report = $this->reportingService->generateReport($filters);

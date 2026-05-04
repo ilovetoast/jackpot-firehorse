@@ -185,4 +185,107 @@ final class EditorAssetOriginalBytesLoader
             'Original file is not available in storage (asset has no storage bucket; tried configured output and s3 disks).',
         );
     }
+
+    /**
+     * Overwrite an object key in the same disk/bucket resolution order as {@see loadFromStorage()}.
+     *
+     * @param  array<string, mixed>  $options  Laravel filesystem options (e.g. visibility, ContentType for S3)
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function put(Asset $asset, string $objectKey, string $body, array $options = []): void
+    {
+        $asset->loadMissing('storageBucket');
+        if (! is_string($objectKey) || $objectKey === '') {
+            throw new \InvalidArgumentException('Object key is required.');
+        }
+        if ($body === '') {
+            throw new \InvalidArgumentException('Refusing to write empty body.');
+        }
+
+        if ($asset->storageBucket !== null) {
+            self::putViaBucket($asset, $objectKey, $body, $options);
+
+            return;
+        }
+
+        self::putViaFallbackDisks($asset, $objectKey, $body, $options);
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private static function putViaBucket(Asset $asset, string $key, string $body, array $options): void
+    {
+        $bucketName = $asset->storageBucket->name;
+        $diskName = $asset->storage_disk ?? null;
+        if (is_string($diskName) && $diskName !== '' && config("filesystems.disks.{$diskName}")) {
+            try {
+                Storage::disk($diskName)->put($key, $body, $options);
+
+                return;
+            } catch (\Throwable $e) {
+                Log::error('Storage put failed', [
+                    'error' => $e->getMessage(),
+                    'asset_id' => $asset->id,
+                    'disk' => $diskName,
+                    'path' => $key,
+                ]);
+
+                throw new \InvalidArgumentException('Failed to write image to storage.', 0, $e);
+            }
+        }
+
+        $defaultBucket = config('filesystems.disks.s3.bucket');
+        try {
+            if ($defaultBucket !== null && $defaultBucket !== '' && $bucketName === $defaultBucket) {
+                Storage::disk('s3')->put($key, $body, $options);
+            } else {
+                $base = config('filesystems.disks.s3', []);
+                if (! is_array($base) || ($base['driver'] ?? '') !== 's3') {
+                    throw new \RuntimeException('S3 disk not configured.');
+                }
+                $config = array_merge($base, [
+                    'driver' => 's3',
+                    'bucket' => $bucketName,
+                    'throw' => true,
+                ]);
+                Storage::build($config)->put($key, $body, $options);
+            }
+        } catch (\Throwable $e) {
+            Log::error('Storage put failed', [
+                'error' => $e->getMessage(),
+                'asset_id' => $asset->id,
+                'bucket' => $bucketName,
+                'path' => $key,
+            ]);
+
+            throw new \InvalidArgumentException('Failed to write image to storage.', 0, $e);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private static function putViaFallbackDisks(Asset $asset, string $key, string $body, array $options): void
+    {
+        $diskName = self::resolveFallbackDiskForObjectKey($asset, $key);
+        if ($diskName === null) {
+            throw new \InvalidArgumentException(
+                'Could not resolve storage disk for write (asset has no storage bucket; no disk had this key).',
+            );
+        }
+        try {
+            Storage::disk($diskName)->put($key, $body, $options);
+        } catch (\Throwable $e) {
+            Log::error('[EditorAssetOriginalBytesLoader] fallback disk put failed', [
+                'asset_id' => $asset->id,
+                'disk' => $diskName,
+                'path' => $key,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new \InvalidArgumentException('Failed to write image to storage.', 0, $e);
+        }
+    }
 }

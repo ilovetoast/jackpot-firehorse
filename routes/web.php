@@ -983,6 +983,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::patch('/assets/{asset}/filename', [\App\Http\Controllers\AssetController::class, 'updateFilename'])->name('assets.filename.update');
             Route::patch('/assets/{asset}/focal-point', [\App\Http\Controllers\AssetFocalPointController::class, 'update'])->name('assets.focal-point.update');
             Route::post('/assets/{asset}/focal-point/ai-regenerate', [\App\Http\Controllers\AssetFocalPointController::class, 'regenerateAi'])->name('assets.focal-point.ai-regenerate');
+            Route::post('/assets/{asset}/original/rotate', [\App\Http\Controllers\AssetController::class, 'rotateOriginal'])->name('assets.original.rotate');
             Route::post('/assets/{asset}/replace-file', [\App\Http\Controllers\AssetController::class, 'initiateReplaceFile'])->name('assets.replace-file');
             // Phase L.3: Asset archive & restore actions
             Route::post('/assets/{asset}/archive', [\App\Http\Controllers\AssetController::class, 'archive'])->name('assets.archive');

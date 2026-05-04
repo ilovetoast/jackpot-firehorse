@@ -2562,6 +2562,71 @@ class AssetController extends Controller
         }
     }
 
+
+    /**
+     * Rotate the stored original raster (clockwise), bake pixels, normalize orientation metadata, re-queue thumbnails.
+     *
+     * POST /assets/{asset}/original/rotate
+     */
+    public function rotateOriginal(Request $request, Asset $asset): JsonResponse
+    {
+        $tenant = app('tenant');
+        if ($asset->tenant_id !== $tenant->id) {
+            return response()->json(['success' => false, 'error' => 'Asset not found'], 404);
+        }
+
+        $this->authorize('update', $asset);
+
+        $validated = $request->validate([
+            'degrees_clockwise' => 'required|integer|in:90,180,270',
+        ]);
+
+        try {
+            $result = app(\App\Services\AssetOriginalRasterRotationService::class)
+                ->rotateCurrentVersionClockwise($asset, (int) $validated['degrees_clockwise']);
+
+            $asset->refresh();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Image rotated and saved. Thumbnails are refreshing.',
+                'asset' => [
+                    'id' => $asset->id,
+                    'width' => $asset->width,
+                    'height' => $asset->height,
+                    'size_bytes' => $asset->size_bytes,
+                    'thumbnail_status' => $asset->thumbnail_status,
+                    'updated_at' => $asset->updated_at?->toIso8601String(),
+                ],
+                'rotation' => $result,
+            ], 200);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 422);
+        } catch (\RuntimeException $e) {
+            Log::warning('[AssetController::rotateOriginal] ' . $e->getMessage(), [
+                'asset_id' => $asset->id,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('[AssetController::rotateOriginal] Unexpected failure', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to rotate image.',
+            ], 500);
+        }
+    }
+
     /**
      * Regenerate system metadata for an asset.
      *

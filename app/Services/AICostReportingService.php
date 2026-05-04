@@ -15,10 +15,14 @@ use Illuminate\Support\Facades\DB;
  */
 class AICostReportingService
 {
+    /** @var list<string> */
+    public const RANGE_PRESETS = ['24h', '7d', '14d', '30d', '90d', '6m', '12m'];
+
     /**
      * Generate a comprehensive cost report with filters.
      *
      * @param array $filters Filters:
+     *   - range_preset: Quick window (24h|7d|14d|30d|90d|6m|12m); when set, start/end dates are ignored
      *   - start_date: Start date (Y-m-d)
      *   - end_date: End date (Y-m-d)
      *   - agent_id: Filter by agent
@@ -30,16 +34,11 @@ class AICostReportingService
      */
     public function generateReport(array $filters = []): array
     {
-        $query = AIAgentRun::query();
+        [$rangeStart, $rangeEnd] = $this->resolveReportRange($filters);
 
-        // Apply filters
-        if (isset($filters['start_date'])) {
-            $query->where('started_at', '>=', Carbon::parse($filters['start_date'])->startOfDay());
-        }
-
-        if (isset($filters['end_date'])) {
-            $query->where('started_at', '<=', Carbon::parse($filters['end_date'])->endOfDay());
-        }
+        $query = AIAgentRun::query()
+            ->where('started_at', '>=', $rangeStart)
+            ->where('started_at', '<=', $rangeEnd);
 
         if (isset($filters['agent_id'])) {
             $query->where('agent_id', $filters['agent_id']);
@@ -85,6 +84,10 @@ class AICostReportingService
         $averageCostPerRun = $totalRuns > 0 ? $totalCost / $totalRuns : 0;
         $errorRate = $totalRuns > 0 ? ($failedRuns / $totalRuns) * 100 : 0;
 
+        $rangePreset = isset($filters['range_preset']) && in_array($filters['range_preset'], self::RANGE_PRESETS, true)
+            ? $filters['range_preset']
+            : null;
+
         return [
             'total_runs' => $totalRuns,
             'successful_runs' => $successfulRuns,
@@ -95,6 +98,11 @@ class AICostReportingService
             'total_tokens' => $totalTokensIn + $totalTokensOut,
             'average_cost_per_run' => round($averageCostPerRun, 4),
             'error_rate' => round($errorRate, 2),
+            'meta' => [
+                'range_preset' => $rangePreset,
+                'range_start' => $rangeStart->toIso8601String(),
+                'range_end' => $rangeEnd->toIso8601String(),
+            ],
             'aggregations' => [
                 'by_agent' => $this->aggregateByAgent($runs),
                 'by_model' => $this->aggregateByModel($runs),
@@ -103,6 +111,44 @@ class AICostReportingService
                 'by_time_range' => $this->aggregateByTimeRange($runs, $filters['group_by'] ?? 'day'),
             ],
         ];
+    }
+
+    /**
+     * Resolve inclusive [start, end] bounds for reporting (preset or calendar dates).
+     *
+     * @return array{0: \Illuminate\Support\Carbon, 1: \Illuminate\Support\Carbon}
+     */
+    protected function resolveReportRange(array $filters): array
+    {
+        $now = Carbon::now();
+        $preset = $filters['range_preset'] ?? null;
+
+        if (is_string($preset) && in_array($preset, self::RANGE_PRESETS, true)) {
+            $end = $now->copy();
+
+            $start = match ($preset) {
+                '24h' => $end->copy()->subHours(24),
+                '7d' => $end->copy()->subDays(7)->startOfDay(),
+                '14d' => $end->copy()->subDays(14)->startOfDay(),
+                '30d' => $end->copy()->subDays(30)->startOfDay(),
+                '90d' => $end->copy()->subDays(90)->startOfDay(),
+                '6m' => $end->copy()->subMonths(6)->startOfDay(),
+                '12m' => $end->copy()->subMonths(12)->startOfDay(),
+                default => $end->copy()->subDays(30)->startOfDay(),
+            };
+
+            return [$start, $end];
+        }
+
+        $start = isset($filters['start_date'])
+            ? Carbon::parse($filters['start_date'])->startOfDay()
+            : $now->copy()->subDays(30)->startOfDay();
+
+        $end = isset($filters['end_date'])
+            ? Carbon::parse($filters['end_date'])->endOfDay()
+            : $now->copy()->endOfDay();
+
+        return [$start, $end];
     }
 
     /**
