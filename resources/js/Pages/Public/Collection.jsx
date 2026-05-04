@@ -633,7 +633,7 @@ export default function PublicCollection({
                             <p className="mt-4 font-medium text-white/80">No files match your search.</p>
                         </div>
                     ) : (view === 'grid' || view === 'masonry') && assetsList?.length > 0 ? (
-                        <div className="w-full min-w-0">
+                        <div className="public-share-asset-grid w-full min-w-0">
                             <AssetGrid
                                 assets={assetsList}
                                 onAssetClick={openLightboxForAsset}

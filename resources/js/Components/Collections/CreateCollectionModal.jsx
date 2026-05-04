@@ -10,6 +10,8 @@ import {
     UserPlusIcon,
     LockClosedIcon,
     LinkIcon,
+    EyeIcon,
+    EyeSlashIcon,
 } from '@heroicons/react/24/outline'
 import { Link } from '@inertiajs/react'
 
@@ -74,6 +76,7 @@ export default function CreateCollectionModal({
     const [shareLinkEnabled, setShareLinkEnabled] = useState(false)
     const [sharePassword, setSharePassword] = useState('')
     const [sharePasswordConfirmation, setSharePasswordConfirmation] = useState('')
+    const [showSharePassword, setShowSharePassword] = useState(false)
     const [shareDownloadsEnabled, setShareDownloadsEnabled] = useState(true)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
@@ -403,29 +406,59 @@ export default function CreateCollectionModal({
                                                         <label htmlFor="create-share-password" className="block text-xs font-medium text-gray-700">
                                                             Password <span className="text-red-500">*</span>
                                                         </label>
-                                                        <input
-                                                            id="create-share-password"
-                                                            type="password"
-                                                            autoComplete="new-password"
-                                                            value={sharePassword}
-                                                            onChange={(e) => setSharePassword(e.target.value)}
-                                                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                                            disabled={submitting}
-                                                        />
+                                                        <div className="relative mt-1">
+                                                            <input
+                                                                id="create-share-password"
+                                                                type={showSharePassword ? 'text' : 'password'}
+                                                                autoComplete="new-password"
+                                                                value={sharePassword}
+                                                                onChange={(e) => setSharePassword(e.target.value)}
+                                                                className="block w-full rounded-md border border-gray-300 py-2 pl-3 pr-10 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                disabled={submitting}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500 hover:text-gray-700"
+                                                                onClick={() => setShowSharePassword((v) => !v)}
+                                                                aria-label={showSharePassword ? 'Hide password' : 'Show password'}
+                                                                tabIndex={-1}
+                                                            >
+                                                                {showSharePassword ? (
+                                                                    <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                                                ) : (
+                                                                    <EyeIcon className="h-5 w-5" aria-hidden />
+                                                                )}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                     <div>
                                                         <label htmlFor="create-share-password2" className="block text-xs font-medium text-gray-700">
                                                             Confirm password <span className="text-red-500">*</span>
                                                         </label>
-                                                        <input
-                                                            id="create-share-password2"
-                                                            type="password"
-                                                            autoComplete="new-password"
-                                                            value={sharePasswordConfirmation}
-                                                            onChange={(e) => setSharePasswordConfirmation(e.target.value)}
-                                                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                                            disabled={submitting}
-                                                        />
+                                                        <div className="relative mt-1">
+                                                            <input
+                                                                id="create-share-password2"
+                                                                type={showSharePassword ? 'text' : 'password'}
+                                                                autoComplete="new-password"
+                                                                value={sharePasswordConfirmation}
+                                                                onChange={(e) => setSharePasswordConfirmation(e.target.value)}
+                                                                className="block w-full rounded-md border border-gray-300 py-2 pl-3 pr-10 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                disabled={submitting}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500 hover:text-gray-700"
+                                                                onClick={() => setShowSharePassword((v) => !v)}
+                                                                aria-label={showSharePassword ? 'Hide password' : 'Show password'}
+                                                                tabIndex={-1}
+                                                            >
+                                                                {showSharePassword ? (
+                                                                    <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                                                ) : (
+                                                                    <EyeIcon className="h-5 w-5" aria-hidden />
+                                                                )}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                     <label className="flex items-center gap-2">
                                                         <input

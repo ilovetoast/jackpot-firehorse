@@ -1,9 +1,9 @@
 /**
  * Password gate for password-protected collection share links (no assets until unlock).
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Head, usePage } from '@inertiajs/react'
-import { LockClosedIcon } from '@heroicons/react/24/outline'
+import { LockClosedIcon, EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
 import { useCdn403Recovery } from '../../hooks/useCdn403Recovery'
 import FilmGrainOverlay from '../../Components/FilmGrainOverlay'
 import { contrastTextOnPrimary } from '../../utils/contrastTextOnPrimary'
@@ -27,6 +27,7 @@ export default function ShareCollectionGate({
     const { color: unlockBtnText } = contrastTextOnPrimary(primaryColor)
     const { cinemaBase, noPhoto: cinemaStackNoPhoto } = publicShareCinemaLayers(primaryColor, accentColor)
     const passwordRef = useRef(null)
+    const [showPassword, setShowPassword] = useState(false)
 
     useEffect(() => {
         passwordRef.current?.focus()
@@ -84,16 +85,31 @@ export default function ShareCollectionGate({
                             <label htmlFor="share-password" className="block text-sm font-medium text-white/80">
                                 Password
                             </label>
-                            <input
-                                ref={passwordRef}
-                                id="share-password"
-                                name="password"
-                                type="password"
-                                autoComplete="off"
-                                required
-                                className="mt-2 block w-full rounded-xl border border-white/15 bg-black/35 px-3 py-2.5 text-sm text-white placeholder:text-white/35 shadow-inner focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
-                                aria-invalid={passwordError ? 'true' : 'false'}
-                            />
+                            <div className="relative mt-2">
+                                <input
+                                    ref={passwordRef}
+                                    id="share-password"
+                                    name="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    autoComplete="off"
+                                    required
+                                    className="block w-full rounded-xl border border-white/15 bg-black/35 py-2.5 pl-3 pr-11 text-sm text-white placeholder:text-white/35 shadow-inner focus:border-white/30 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                    aria-invalid={passwordError ? 'true' : 'false'}
+                                />
+                                <button
+                                    type="button"
+                                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-white/45 hover:text-white/80"
+                                    onClick={() => setShowPassword((v) => !v)}
+                                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                    tabIndex={-1}
+                                >
+                                    {showPassword ? (
+                                        <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                    ) : (
+                                        <EyeIcon className="h-5 w-5" aria-hidden />
+                                    )}
+                                </button>
+                            </div>
                             {passwordError ? (
                                 <p className="mt-2 text-sm text-red-300" role="alert">
                                     The password is incorrect.

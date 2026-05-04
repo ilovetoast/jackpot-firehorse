@@ -261,6 +261,17 @@
         margin-bottom: 1.75rem;
     }
 
+    /* Public collection share page: force two columns on small phones */
+    @media (max-width: 639px) {
+        .public-share-asset-grid .asset-grid-container {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .public-share-asset-grid .asset-grid-container-masonry {
+            column-count: 2;
+            column-width: auto;
+        }
+    }
+
     /* Download bucket: count "bump" when an asset is added (slot-machine style feedback) */
     @keyframes bucket-count-bump {
         0% {

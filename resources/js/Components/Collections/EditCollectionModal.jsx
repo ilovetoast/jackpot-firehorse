@@ -19,6 +19,8 @@ import {
     ClipboardDocumentIcon,
     CheckIcon,
     LinkIcon,
+    EyeIcon,
+    EyeSlashIcon,
 } from '@heroicons/react/24/outline'
 import { Link } from '@inertiajs/react'
 import Avatar from '../Avatar'
@@ -100,6 +102,16 @@ export default function EditCollectionModal({
     const [sharePasswordConfirmation, setSharePasswordConfirmation] = useState('')
     const [changingSharePassword, setChangingSharePassword] = useState(false)
     const [shareCopied, setShareCopied] = useState(false)
+    const [showSharePassword, setShowSharePassword] = useState(false)
+    const [shareEmailOpen, setShareEmailOpen] = useState(false)
+    const [shareEmailTo, setShareEmailTo] = useState('')
+    const [shareEmailNote, setShareEmailNote] = useState('')
+    const [shareEmailIncludePassword, setShareEmailIncludePassword] = useState(false)
+    const [shareEmailPassword, setShareEmailPassword] = useState('')
+    const [showShareEmailPassword, setShowShareEmailPassword] = useState(false)
+    const [shareEmailSending, setShareEmailSending] = useState(false)
+    const [shareEmailError, setShareEmailError] = useState(null)
+    const [shareEmailSent, setShareEmailSent] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
 
@@ -200,6 +212,16 @@ export default function EditCollectionModal({
         setSharePasswordConfirmation('')
         setChangingSharePassword(false)
         setShareCopied(false)
+        setShowSharePassword(false)
+        setShareEmailOpen(false)
+        setShareEmailTo("")
+        setShareEmailNote("")
+        setShareEmailIncludePassword(false)
+        setShareEmailPassword("")
+        setShowShareEmailPassword(false)
+        setShareEmailSending(false)
+        setShareEmailError(null)
+        setShareEmailSent(false)
         setError(null)
         setInviteError(null)
         setInternalError(null)
@@ -736,29 +758,59 @@ export default function EditCollectionModal({
                                                                 <label htmlFor="edit-share-password" className="block text-xs font-medium text-gray-700">
                                                                     {collection?.has_public_password ? 'New password' : 'Password'} <span className="text-red-500">*</span>
                                                                 </label>
-                                                                <input
-                                                                    id="edit-share-password"
-                                                                    type="password"
-                                                                    autoComplete="new-password"
-                                                                    value={sharePassword}
-                                                                    onChange={(e) => setSharePassword(e.target.value)}
-                                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                                                    disabled={submitting}
-                                                                />
+                                                                <div className="relative mt-1">
+                                                                    <input
+                                                                        id="edit-share-password"
+                                                                        type={showSharePassword ? 'text' : 'password'}
+                                                                        autoComplete="new-password"
+                                                                        value={sharePassword}
+                                                                        onChange={(e) => setSharePassword(e.target.value)}
+                                                                        className="block w-full rounded-md border border-gray-300 py-2 pl-3 pr-10 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                        disabled={submitting}
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500 hover:text-gray-700"
+                                                                        onClick={() => setShowSharePassword((v) => !v)}
+                                                                        aria-label={showSharePassword ? 'Hide password' : 'Show password'}
+                                                                        tabIndex={-1}
+                                                                    >
+                                                                        {showSharePassword ? (
+                                                                            <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                                                        ) : (
+                                                                            <EyeIcon className="h-5 w-5" aria-hidden />
+                                                                        )}
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                             <div>
                                                                 <label htmlFor="edit-share-password2" className="block text-xs font-medium text-gray-700">
                                                                     Confirm password <span className="text-red-500">*</span>
                                                                 </label>
-                                                                <input
-                                                                    id="edit-share-password2"
-                                                                    type="password"
-                                                                    autoComplete="new-password"
-                                                                    value={sharePasswordConfirmation}
-                                                                    onChange={(e) => setSharePasswordConfirmation(e.target.value)}
-                                                                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                                                    disabled={submitting}
-                                                                />
+                                                                <div className="relative mt-1">
+                                                                    <input
+                                                                        id="edit-share-password2"
+                                                                        type={showSharePassword ? 'text' : 'password'}
+                                                                        autoComplete="new-password"
+                                                                        value={sharePasswordConfirmation}
+                                                                        onChange={(e) => setSharePasswordConfirmation(e.target.value)}
+                                                                        className="block w-full rounded-md border border-gray-300 py-2 pl-3 pr-10 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                        disabled={submitting}
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500 hover:text-gray-700"
+                                                                        onClick={() => setShowSharePassword((v) => !v)}
+                                                                        aria-label={showSharePassword ? 'Hide password' : 'Show password'}
+                                                                        tabIndex={-1}
+                                                                    >
+                                                                        {showSharePassword ? (
+                                                                            <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                                                        ) : (
+                                                                            <EyeIcon className="h-5 w-5" aria-hidden />
+                                                                        )}
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                             {changingSharePassword ? (
                                                                 <button
@@ -776,31 +828,181 @@ export default function EditCollectionModal({
                                                         </>
                                                     ) : null}
                                                     {collection?.public_share_url ? (
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const u = collection.public_share_url
-                                                                    if (!u) return
-                                                                    const done = () => {
-                                                                        setShareCopied(true)
-                                                                        setTimeout(() => setShareCopied(false), 2000)
-                                                                    }
-                                                                    if (navigator.clipboard?.writeText) {
-                                                                        navigator.clipboard.writeText(u).then(done).catch(done)
-                                                                    } else {
-                                                                        done()
-                                                                    }
-                                                                }}
-                                                                className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                                                            >
-                                                                {shareCopied ? (
-                                                                    <CheckIcon className="h-3.5 w-3.5 text-green-600" />
-                                                                ) : (
-                                                                    <ClipboardDocumentIcon className="h-3.5 w-3.5 text-gray-500" />
-                                                                )}
-                                                                {shareCopied ? 'Copied' : 'Copy link'}
-                                                            </button>
+                                                        <div className="space-y-3">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const u = collection.public_share_url
+                                                                        if (!u) return
+                                                                        const done = () => {
+                                                                            setShareCopied(true)
+                                                                            setTimeout(() => setShareCopied(false), 2000)
+                                                                        }
+                                                                        if (navigator.clipboard?.writeText) {
+                                                                            navigator.clipboard.writeText(u).then(done).catch(done)
+                                                                        } else {
+                                                                            done()
+                                                                        }
+                                                                    }}
+                                                                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                                                >
+                                                                    {shareCopied ? (
+                                                                        <CheckIcon className="h-3.5 w-3.5 text-green-600" />
+                                                                    ) : (
+                                                                        <ClipboardDocumentIcon className="h-3.5 w-3.5 text-gray-500" />
+                                                                    )}
+                                                                    {shareCopied ? 'Copied' : 'Copy link'}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setShareEmailOpen((o) => !o)
+                                                                        setShareEmailError(null)
+                                                                        setShareEmailSent(false)
+                                                                    }}
+                                                                    className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                                                                >
+                                                                    <EnvelopeIcon className="h-3.5 w-3.5 text-gray-500" aria-hidden />
+                                                                    {shareEmailOpen ? 'Hide email' : 'Email instructions'}
+                                                                </button>
+                                                            </div>
+                                                            {shareEmailOpen ? (
+                                                                <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+                                                                    <p className="text-xs text-gray-600">
+                                                                        Sends a branded message with the share link. To include the password, enter it below so we can verify it matches this collection.
+                                                                    </p>
+                                                                    <div>
+                                                                        <label htmlFor="share-email-to" className="block text-xs font-medium text-gray-700">
+                                                                            Recipient email
+                                                                        </label>
+                                                                        <input
+                                                                            id="share-email-to"
+                                                                            type="email"
+                                                                            autoComplete="email"
+                                                                            value={shareEmailTo}
+                                                                            onChange={(e) => setShareEmailTo(e.target.value)}
+                                                                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                            disabled={shareEmailSending}
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label htmlFor="share-email-note" className="block text-xs font-medium text-gray-700">
+                                                                            Short note (optional)
+                                                                        </label>
+                                                                        <textarea
+                                                                            id="share-email-note"
+                                                                            rows={2}
+                                                                            value={shareEmailNote}
+                                                                            onChange={(e) => setShareEmailNote(e.target.value)}
+                                                                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                            disabled={shareEmailSending}
+                                                                        />
+                                                                    </div>
+                                                                    <label className="flex items-center gap-2">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={shareEmailIncludePassword}
+                                                                            onChange={() => setShareEmailIncludePassword((v) => !v)}
+                                                                            disabled={shareEmailSending}
+                                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                        />
+                                                                        <span className="text-sm text-gray-800">Include password in email</span>
+                                                                    </label>
+                                                                    {shareEmailIncludePassword ? (
+                                                                        <div className="relative">
+                                                                            <label htmlFor="share-email-pw" className="block text-xs font-medium text-gray-700">
+                                                                                Share password (to verify)
+                                                                            </label>
+                                                                            <div className="relative mt-1">
+                                                                                <input
+                                                                                    id="share-email-pw"
+                                                                                    type={showShareEmailPassword ? 'text' : 'password'}
+                                                                                    autoComplete="off"
+                                                                                    value={shareEmailPassword}
+                                                                                    onChange={(e) => setShareEmailPassword(e.target.value)}
+                                                                                    className="block w-full rounded-md border border-gray-300 py-2 pl-3 pr-10 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                                                    disabled={shareEmailSending}
+                                                                                />
+                                                                                <button
+                                                                                    type="button"
+                                                                                    className="absolute inset-y-0 right-0 flex items-center pr-2 text-gray-500 hover:text-gray-700"
+                                                                                    onClick={() => setShowShareEmailPassword((v) => !v)}
+                                                                                    aria-label={showShareEmailPassword ? 'Hide password' : 'Show password'}
+                                                                                    tabIndex={-1}
+                                                                                >
+                                                                                    {showShareEmailPassword ? (
+                                                                                        <EyeSlashIcon className="h-5 w-5" aria-hidden />
+                                                                                    ) : (
+                                                                                        <EyeIcon className="h-5 w-5" aria-hidden />
+                                                                                    )}
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : null}
+                                                                    {shareEmailError ? (
+                                                                        <p className="text-xs text-red-600" role="alert">
+                                                                            {shareEmailError}
+                                                                        </p>
+                                                                    ) : null}
+                                                                    {shareEmailSent ? (
+                                                                        <p className="text-xs text-green-700">Email sent.</p>
+                                                                    ) : null}
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={shareEmailSending || !shareEmailTo.trim()}
+                                                                        onClick={async () => {
+                                                                            if (!collection?.id) return
+                                                                            setShareEmailSending(true)
+                                                                            setShareEmailError(null)
+                                                                            setShareEmailSent(false)
+                                                                            try {
+                                                                                const res = await fetch(
+                                                                                    `/app/collections/${collection.id}/public-share-email`,
+                                                                                    {
+                                                                                        method: 'POST',
+                                                                                        headers: {
+                                                                                            'Content-Type': 'application/json',
+                                                                                            Accept: 'application/json',
+                                                                                            'X-Requested-With': 'XMLHttpRequest',
+                                                                                            'X-CSRF-TOKEN':
+                                                                                                document.querySelector('meta[name="csrf-token"]')?.content ||
+                                                                                                '',
+                                                                                        },
+                                                                                        credentials: 'same-origin',
+                                                                                        body: JSON.stringify({
+                                                                                            email: shareEmailTo.trim(),
+                                                                                            personal_message: shareEmailNote.trim() || null,
+                                                                                            include_password: shareEmailIncludePassword,
+                                                                                            share_password: shareEmailIncludePassword
+                                                                                                ? shareEmailPassword
+                                                                                                : null,
+                                                                                        }),
+                                                                                    }
+                                                                                )
+                                                                                const data = await res.json().catch(() => ({}))
+                                                                                if (!res.ok) {
+                                                                                    const msg =
+                                                                                        data?.errors?.email?.[0] ||
+                                                                                        data?.errors?.share_password?.[0] ||
+                                                                                        data?.message ||
+                                                                                        'Could not send email.'
+                                                                                    throw new Error(msg)
+                                                                                }
+                                                                                setShareEmailSent(true)
+                                                                                setShareEmailPassword('')
+                                                                            } catch (e) {
+                                                                                setShareEmailError(e?.message || 'Could not send email.')
+                                                                            } finally {
+                                                                                setShareEmailSending(false)
+                                                                            }
+                                                                        }}
+                                                                        className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                                                                    >
+                                                                        {shareEmailSending ? 'Sending…' : 'Send email'}
+                                                                    </button>
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                     ) : null}
                                                     <p className="text-xs text-gray-500">

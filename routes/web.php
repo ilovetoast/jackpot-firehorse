@@ -996,6 +996,7 @@ Route::middleware(['auth', 'ensure.account.active', 'collect.asset_url_metrics',
             Route::get('/collections/field-visibility', [\App\Http\Controllers\CollectionController::class, 'checkFieldVisibility'])->name('collections.field-visibility');
             Route::post('/collections', [\App\Http\Controllers\CollectionController::class, 'store'])->name('collections.store');
             Route::put('/collections/{collection}', [\App\Http\Controllers\CollectionController::class, 'update'])->name('collections.update');
+            Route::post('/collections/{collection}/public-share-email', [\App\Http\Controllers\CollectionController::class, 'sendPublicShareInstructions'])->name('collections.public-share-email')->middleware(['throttle:15,1']);
             Route::post('/collections/{collection}/assets', [\App\Http\Controllers\CollectionController::class, 'addAsset'])->name('collections.assets.store');
             Route::delete('/collections/{collection}/assets/{asset}', [\App\Http\Controllers\CollectionController::class, 'removeAsset'])->name('collections.assets.destroy');
             Route::put('/assets/{asset}/collections', [\App\Http\Controllers\CollectionController::class, 'syncAssetCollections'])->name('assets.collections.sync');

@@ -26,10 +26,12 @@ use App\Support\Roles\RoleRegistry;
 use App\Support\Typography\CampaignBannerFontEnricher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Mail\ShareCollectionPublicLinkInstructions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -935,6 +937,78 @@ class CollectionController extends Controller
         return response()->json([
             'collection' => $this->collectionJsonForEdit($collection->fresh()),
         ]);
+    }
+
+    /**
+     * Email the public share URL (and optionally the password after verification) to an external address.
+     * Authorized like collection update: brand admin / brand manager (and tenant admins with cascade).
+     */
+    public function sendPublicShareInstructions(Request $request, Collection $collection): JsonResponse
+    {
+        $user = $request->user();
+        Gate::forUser($user)->authorize('update', $collection);
+
+        $tenant = $collection->tenant;
+        $brand = app('brand');
+        if (! $tenant || ! $brand || $collection->tenant_id !== $tenant->id || $collection->brand_id !== $brand->id) {
+            abort(404, 'Collection not found.');
+        }
+
+        if (! $this->featureGate->publicCollectionsEnabled($tenant)) {
+            throw ValidationException::withMessages([
+                'email' => ['Share links are not available on your current plan.'],
+            ]);
+        }
+
+        if (! $collection->isShareableByGuests()) {
+            throw ValidationException::withMessages([
+                'email' => ['Turn on the share link and set a password before sending instructions.'],
+            ]);
+        }
+
+        $shareUrl = $collection->publicShareUrl();
+        if (! $shareUrl) {
+            throw ValidationException::withMessages([
+                'email' => ['Share link is not available for this collection yet.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+            'personal_message' => ['nullable', 'string', 'max:2000'],
+            'include_password' => ['nullable', 'boolean'],
+            'share_password' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $includePassword = $request->boolean('include_password');
+        $verifiedPlain = null;
+        if ($includePassword) {
+            $plain = $request->string('share_password')->toString();
+            if (trim($plain) === '') {
+                throw ValidationException::withMessages([
+                    'share_password' => ['Enter the share password to include it in the email, or turn off "Include password".'],
+                ]);
+            }
+            if (! Hash::check($plain, $collection->public_password_hash)) {
+                throw ValidationException::withMessages([
+                    'share_password' => ['That password does not match this collection share password.'],
+                ]);
+            }
+            $verifiedPlain = $plain;
+        }
+
+        $personal = isset($validated['personal_message']) ? trim((string) $validated['personal_message']) : '';
+        $personal = $personal !== '' ? $personal : null;
+
+        Mail::to($validated['email'])->send(new ShareCollectionPublicLinkInstructions(
+            $collection->fresh(['brand', 'tenant']),
+            $user,
+            $shareUrl,
+            $verifiedPlain,
+            $personal,
+        ));
+
+        return response()->json(['sent' => true]);
     }
 
     /**
