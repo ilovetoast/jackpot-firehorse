@@ -208,6 +208,58 @@ class HelpAskEndpointTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_no_workspace_in_session_returns_workspace_required_without_persisting(): void
+    {
+        [, , $user] = $this->actingTenantUser();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $response = $this->actingAs($user)->postJson('/app/help/ask', [
+            'question' => 'How do I upload assets?',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('kind', 'workspace_required')
+            ->assertJsonPath('help_ai_question_id', null);
+
+        $this->assertDatabaseCount('help_ai_questions', 0);
+    }
+
+    public function test_guest_cannot_post_help_ask(): void
+    {
+        $response = $this->postJson('/app/help/ask', [
+            'question' => 'Anything?',
+        ]);
+
+        $this->assertContains($response->status(), [302, 401], 'Unauthenticated POST /app/help/ask should redirect or reject');
+    }
+
+    public function test_help_ask_is_throttled_at_21st_request_in_window(): void
+    {
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $session = ['tenant_id' => $tenant->id, 'brand_id' => $brand->id];
+        $body = ['question' => 'zzzzzzzzzzzzzz'];
+
+        for ($i = 0; $i < 20; $i++) {
+            $this->actingAs($user)
+                ->withSession($session)
+                ->postJson('/app/help/ask', $body)
+                ->assertOk();
+        }
+
+        $this->actingAs($user)
+            ->withSession($session)
+            ->postJson('/app/help/ask', $body)
+            ->assertStatus(429);
+    }
+
     protected function tearDown(): void
     {
         Mockery::close();

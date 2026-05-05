@@ -34,6 +34,8 @@ return [
     |
     | Uses AIService + registered agent `in_app_help_assistant` (gpt-4o-mini).
     | Answers must use only retrieved help_actions JSON; see HelpAiAskService.
+    | Agent + model are defined below (`agents.in_app_help_assistant`, `models.gpt-4o-mini`).
+    | Requires a working text provider (e.g. OpenAI API key when default_provider is openai).
     |
     */
     'help_ask' => [

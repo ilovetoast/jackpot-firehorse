@@ -57,7 +57,9 @@ export default function ManageLayout({ children, title = 'Manage', activeSection
                             <WorkbenchLocalNav items={SIDEBAR_ITEMS} activeId={activeSection} ariaLabel="Manage sections" />
                         </aside>
 
-                        <main className="min-w-0 flex-1">{children}</main>
+                        <main className="min-w-0 flex-1" data-help="manage-metadata-structure">
+                            {children}
+                        </main>
                     </div>
                 </BrandWorkbenchChrome>
             </div>

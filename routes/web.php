@@ -643,13 +643,14 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/onboarding/reset', [\App\Http\Controllers\OnboardingController::class, 'resetOnboarding'])->name('onboarding.reset');
     });
 
-    // In-app help: GET actions must not require ResolveTenant (Help is in AppNav on /app/companies, etc.).
-    // POST ask/feedback still use tenant middleware for workspace settings + persistence.
+    // In-app help: GET actions + POST ask must not require ResolveTenant (Help is in AppNav on /app/companies, etc.).
+    // POST ask is not public: inherits `auth` + `ensure.account.active` from this `app` group, plus `verified` + throttle here.
+    // Ask AI returns JSON workspace_required when no tenant is bound; never calls AIService in that case. Feedback stays tenant-scoped.
     Route::get('/help/actions', [\App\Http\Controllers\HelpActionController::class, 'index'])->name('help.actions');
+    Route::post('/help/ask', [\App\Http\Controllers\HelpActionController::class, 'ask'])
+        ->middleware(['verified', 'throttle:20,1'])
+        ->name('help.ask');
     Route::middleware(['tenant'])->group(function () {
-        Route::post('/help/ask', [\App\Http\Controllers\HelpActionController::class, 'ask'])
-            ->middleware('throttle:20,1')
-            ->name('help.ask');
         Route::post('/help/ask/{helpAiQuestion}/feedback', [\App\Http\Controllers\HelpActionController::class, 'feedback'])
             ->middleware('throttle:30,1')
             ->name('help.ask.feedback');

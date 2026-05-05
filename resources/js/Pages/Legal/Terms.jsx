@@ -468,9 +468,7 @@ export default function Terms() {
                 <p className="font-semibold text-white">Jackpot Brand Asset Management, LLC</p>
                 <p className="mt-1">An Ohio limited liability company</p>
                 <p className="mt-3">
-                    100 Pheasant Woods Ct<br />
-                    Loveland, OH 45140<br />
-                    United States
+                    Ohio
                 </p>
                 <p className="mt-3">
                     General inquiries: <a className="text-white hover:underline" href="mailto:support@jackpotbam.com">support@jackpotbam.com</a>

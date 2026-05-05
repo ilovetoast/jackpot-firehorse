@@ -46,20 +46,32 @@ class HelpActionController extends Controller
         return response()->json($payload);
     }
 
-    public function ask(Request $request, AuthPermissionService $authPermissionService, HelpAiAskService $helpAiAskService): JsonResponse
+    public function ask(Request $request, AuthPermissionService $authPermissionService): JsonResponse
     {
         $validated = $request->validate([
             'question' => ['required', 'string', 'max:2000'],
         ]);
 
         $user = $request->user();
+        if (! app()->bound('tenant')) {
+            return response()->json([
+                'kind' => 'workspace_required',
+                'message' => 'Choose a company and brand from the workspace menu, then try Ask AI again. You can still search help topics above.',
+                'matched_keys' => [],
+                'best_score' => 0,
+                'suggested' => [],
+                'usage' => null,
+                'help_ai_question_id' => null,
+            ]);
+        }
+
         /** @var Tenant $tenant */
         $tenant = app('tenant');
         $brand = app()->bound('brand') ? app('brand') : null;
 
         $permissions = $authPermissionService->effectivePermissions($user, $tenant, $brand);
 
-        $payload = $helpAiAskService->ask(
+        $payload = app(HelpAiAskService::class)->ask(
             $validated['question'],
             $permissions,
             $brand,

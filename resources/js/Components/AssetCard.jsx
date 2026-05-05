@@ -833,7 +833,10 @@ export default function AssetCard({
                 
                 {/* Phase 2 – Step 7: Bulk selection checkbox */}
                 {!isVirtualGoogleFont && onBulkSelect && (
-                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isBulkSelected ? 'scale-105' : 'scale-100'}`}>
+                    <div
+                        data-help="asset-selection-checkbox"
+                        className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isBulkSelected ? 'scale-105' : 'scale-100'}`}
+                    >
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
                                 isBulkSelected ? 'bg-[var(--primary-color)]' : 'bg-white'
@@ -859,7 +862,10 @@ export default function AssetCard({
 
                 {/* Phase D1/D3: Download bucket checkbox. SelectionContext is source of truth. Show when selection exists (or legacy onBucketToggle). */}
                 {!isVirtualGoogleFont && !onBulkSelect && (selection || onBucketToggle) && (
-                    <div className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'opacity-100' : 'opacity-0'} ${(onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'scale-105' : 'scale-100'}`}>
+                    <div
+                        data-help="asset-selection-checkbox"
+                        className={`absolute top-2 left-2 z-10 flex items-center justify-center transition-all duration-150 ease-out ${isMobile || isCardHovering || (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'opacity-100' : 'opacity-0'} ${(onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'scale-105' : 'scale-100'}`}
+                    >
                         <div
                             className={`inline-flex items-center justify-center rounded p-0 leading-none transition-all duration-150 ease-out ${
                                 (onBucketToggle ? isInBucket : (selection?.isSelected(asset.id) ?? false)) ? 'bg-[var(--primary-color)]' : 'bg-white'

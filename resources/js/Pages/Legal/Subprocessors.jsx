@@ -245,13 +245,7 @@ export default function Subprocessors() {
             <div className="mt-16 rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 text-sm text-white/60">
                 <p className="font-semibold text-white">Jackpot Brand Asset Management, LLC</p>
                 <p className="mt-1">An Ohio limited liability company</p>
-                <p className="mt-3">
-                    100 Pheasant Woods Ct
-                    <br />
-                    Loveland, OH 45140
-                    <br />
-                    United States
-                </p>
+                <p className="mt-3">Ohio</p>
                 <p className="mt-3">
                     Privacy inquiries:{' '}
                     <a className="text-white hover:underline" href="mailto:privacy@jackpotbam.com">

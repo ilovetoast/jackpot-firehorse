@@ -1,12 +1,13 @@
 import { usePage } from '@inertiajs/react'
+import HelpGuidedHighlightOverlay from './HelpGuidedHighlightOverlay'
 import { useHelpHighlightFromUrl } from '../hooks/useHelpHighlightFromUrl'
 
 /**
- * App-level: react to `?help=&highlight=` after Inertia navigations.
+ * App-level: react to `?help=&highlight=` (optional `highlight_label=`) after Inertia navigations.
  */
 export default function HelpHighlightController() {
     const { url } = usePage()
-    useHelpHighlightFromUrl(url)
+    const [session, dismiss] = useHelpHighlightFromUrl(url)
 
-    return null
+    return <HelpGuidedHighlightOverlay session={session} onDismiss={dismiss} />
 }

@@ -6,7 +6,7 @@ In-app **Ask AI** answers are **grounded only** in entries from `config/help_act
 
 - **Table**: `help_ai_questions`
 - **Model**: `App\Models\HelpAiQuestion`
-- **Written on**: every `POST /app/help/ask` (success paths and fallbacks).
+- **Written on**: every `POST /app/help/ask` that runs `HelpAiAskService` (success paths and fallbacks). **Not** written for **`workspace_required`** (no tenant in session — see [help-actions](./help-actions.md) Phase 2).
 - **`response_kind`** (internal diagnostics label; client `kind` may differ slightly):
   - `no_strong_match` — best score below threshold; no LLM call (client `kind`: `fallback`).
   - `ai` — LLM returned a sanitized answer (client `kind`: `ai`).

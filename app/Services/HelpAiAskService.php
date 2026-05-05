@@ -104,12 +104,12 @@ class HelpAiAskService
         }
 
         $allowedKeys = array_fill_keys($matchedKeys, true);
-        $contextJson = json_encode(array_values($matches), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-        $prompt = $this->buildPrompt(trim($question), $contextJson);
-
-        $agentId = (string) config('ai.help_ask.agent_id', 'in_app_help_assistant');
 
         try {
+            $contextJson = json_encode(array_values($matches), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $prompt = $this->buildPrompt(trim($question), $contextJson);
+            $agentId = (string) config('ai.help_ask.agent_id', 'in_app_help_assistant');
+
             $ai = $this->aiService->executeAgent(
                 $agentId,
                 AITaskType::IN_APP_HELP_ACTION_ANSWER,
@@ -184,6 +184,29 @@ class HelpAiAskService
                 $recommendedKey,
                 $usage
             );
+        } catch (\JsonException $e) {
+            Log::warning('help.ask.context_encode_failed', $baseLog + ['error' => $e->getMessage()]);
+
+            return $this->attachPersistedId(
+                [
+                    'kind' => 'fallback',
+                    'matched_keys' => $matchedKeys,
+                    'best_score' => $bestScore,
+                    'message' => 'Could not prepare the help context for AI. Try again or browse topics below.',
+                    'suggested' => $commonSlice,
+                    'usage' => null,
+                ],
+                $question,
+                $tenant,
+                $user,
+                $brand,
+                'context_encode_failed',
+                $matchedKeys,
+                $bestScore,
+                null,
+                null,
+                null
+            );
         } catch (\Throwable $e) {
             Log::warning('help.ask.ai_failed', $baseLog + [
                 'error' => $e->getMessage(),
@@ -238,31 +261,42 @@ class HelpAiAskService
         ?string $recommendedKey,
         ?array $usage,
     ): array {
-        $row = HelpAiQuestion::create([
-            'tenant_id' => $tenant->id,
-            'user_id' => $user->id,
-            'brand_id' => $brand?->id,
-            'question' => mb_substr(trim($question), 0, 2000),
-            'response_kind' => $responseKind,
-            'matched_action_keys' => $matchedKeys,
-            'best_score' => $bestScore,
-            'confidence' => $confidence,
-            'recommended_action_key' => $recommendedKey,
-            'agent_run_id' => $usage !== null && isset($usage['agent_run_id']) && $usage['agent_run_id'] !== null
-                ? (int) $usage['agent_run_id']
-                : null,
-            'cost' => $usage !== null && array_key_exists('cost', $usage) && $usage['cost'] !== null
-                ? (string) $usage['cost']
-                : null,
-            'tokens_in' => $usage !== null && isset($usage['tokens_in']) && $usage['tokens_in'] !== null
-                ? (int) $usage['tokens_in']
-                : null,
-            'tokens_out' => $usage !== null && isset($usage['tokens_out']) && $usage['tokens_out'] !== null
-                ? (int) $usage['tokens_out']
-                : null,
-        ]);
+        try {
+            $row = HelpAiQuestion::create([
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'brand_id' => $brand?->id,
+                'question' => mb_substr(trim($question), 0, 2000),
+                'response_kind' => $responseKind,
+                'matched_action_keys' => $matchedKeys,
+                'best_score' => $bestScore,
+                'confidence' => $confidence,
+                'recommended_action_key' => $recommendedKey,
+                'agent_run_id' => $usage !== null && isset($usage['agent_run_id']) && $usage['agent_run_id'] !== null
+                    ? (int) $usage['agent_run_id']
+                    : null,
+                'cost' => $usage !== null && array_key_exists('cost', $usage) && $usage['cost'] !== null
+                    ? (string) $usage['cost']
+                    : null,
+                'tokens_in' => $usage !== null && isset($usage['tokens_in']) && $usage['tokens_in'] !== null
+                    ? (int) $usage['tokens_in']
+                    : null,
+                'tokens_out' => $usage !== null && isset($usage['tokens_out']) && $usage['tokens_out'] !== null
+                    ? (int) $usage['tokens_out']
+                    : null,
+            ]);
 
-        return array_merge($payload, ['help_ai_question_id' => $row->id]);
+            return array_merge($payload, ['help_ai_question_id' => $row->id]);
+        } catch (\Throwable $e) {
+            Log::warning('help.ask.persist_failed', [
+                'error' => $e->getMessage(),
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'response_kind' => $responseKind,
+            ]);
+
+            return array_merge($payload, ['help_ai_question_id' => null]);
+        }
     }
 
     private function buildPrompt(string $userQuestion, string $helpActionsJson): string

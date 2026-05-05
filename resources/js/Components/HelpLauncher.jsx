@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { router, usePage } from '@inertiajs/react'
+import { applyCsrfTokenToPage } from '../utils/csrf'
 import {
     ArrowLeftIcon,
     ArrowPathIcon,
@@ -13,11 +14,52 @@ import {
 
 /** Labels aligned with `page_context` in `config/help_actions.php` (case-insensitive server-side). */
 const HELP_PAGE_LABEL_BY_ROUTE = {
+    'app': 'Overview',
+    'overview': 'Overview',
+    'overview.creator-progress': 'Overview',
     'assets.index': 'Assets',
     'assets.staged': 'Assets',
     'assets.processing': 'Assets',
+    'executions.index': 'Executions',
     'collections.index': 'Collections',
+    'collection-invite.landing': 'Collections',
+    'collection-invite.view': 'Collections',
     'downloads.index': 'Downloads',
+    'generative.index': 'Studio',
+    'insights.overview': 'Insights',
+    'insights.overview.metadata-analytics': 'Insights',
+    'insights.metadata': 'Insights',
+    'insights.usage': 'Insights',
+    'insights.activity': 'Insights',
+    'insights.review': 'Insights',
+    'insights.creator': 'Insights',
+    'manage.categories': 'Manage',
+    'manage.structure': 'Manage',
+    'manage.fields': 'Manage',
+    'manage.tags': 'Manage',
+    'manage.values': 'Manage',
+    'brands.edit': 'Brand settings',
+    'brands.approvals': 'Brand settings',
+    'brands.creators': 'Brand settings',
+    'brands.creators.show': 'Brand settings',
+    'brands.guidelines.index': 'Brand guidelines',
+    'brand-guidelines.index': 'Brand guidelines',
+    'brands.brand-guidelines.builder': 'Brand guidelines',
+    'brands.research.show': 'Brand settings',
+    'brands.review.show': 'Brand settings',
+    'companies.index': 'Companies',
+    'companies.settings': 'Company',
+    'companies.team': 'Company',
+    'companies.permissions': 'Company',
+    'companies.activity': 'Company',
+    'agency.dashboard': 'Agency',
+    'onboarding.show': 'Onboarding',
+    'onboarding.verify-email': 'Onboarding',
+    'tenant.metadata.fields.index': 'Company',
+    'tenant.metadata.fields.show': 'Company',
+    'tenant.metadata.registry.index': 'Company',
+    'support.tickets.index': 'Support',
+    'support.tickets.create': 'Support',
 }
 
 /**
@@ -38,7 +80,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     const [selected, setSelected] = useState(null)
     const [askQuestion, setAskQuestion] = useState('')
     const [askLoading, setAskLoading] = useState(false)
-    const [askError, setAskError] = useState(false)
+    const [askError, setAskError] = useState(null)
     const [askResult, setAskResult] = useState(null)
     const searchRef = useRef(null)
     const closeBtnRef = useRef(null)
@@ -117,7 +159,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         if (!open) {
             setAskQuestion('')
             setAskLoading(false)
-            setAskError(false)
+            setAskError(null)
             setAskResult(null)
         }
     }, [open])
@@ -128,27 +170,62 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             return
         }
         setAskLoading(true)
-        setAskError(false)
+        setAskError(null)
         setAskResult(null)
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
-        try {
-            const r = await fetch('/app/help/ask', {
+        const askHeaders = (token) => ({
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': token,
+            'X-Requested-With': 'XMLHttpRequest',
+        })
+        const postAsk = (token) =>
+            fetch('/app/help/ask', {
                 method: 'POST',
                 credentials: 'same-origin',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrf,
-                },
+                headers: askHeaders(token),
                 body: JSON.stringify({ question: q }),
             })
+        let token = document.querySelector('meta[name="csrf-token"]')?.content || ''
+        try {
+            let r = await postAsk(token)
+            if (r.status === 419) {
+                const cr = await fetch('/csrf-token', {
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                })
+                if (cr.ok) {
+                    const cd = await cr.json().catch(() => null)
+                    if (cd?.token) {
+                        applyCsrfTokenToPage(cd.token)
+                        token = cd.token
+                        r = await postAsk(token)
+                    }
+                }
+            }
             if (!r.ok) {
-                throw new Error(String(r.status))
+                let detail = `Request failed (HTTP ${r.status}).`
+                const ct = r.headers.get('content-type') || ''
+                if (ct.includes('application/json')) {
+                    const body = await r.json().catch(() => null)
+                    if (body && typeof body.message === 'string' && body.message.trim() !== '') {
+                        detail = body.message
+                    } else if (body && body.errors && typeof body.errors === 'object') {
+                        const first = Object.values(body.errors).flat().find((x) => typeof x === 'string')
+                        if (first) {
+                            detail = first
+                        }
+                    }
+                }
+                setAskError(detail)
+                return
             }
             const data = await r.json()
             setAskResult(data && typeof data === 'object' ? data : null)
         } catch {
-            setAskError(true)
+            setAskError('Could not reach AI help. Check your connection or try again in a moment.')
         } finally {
             setAskLoading(false)
         }
@@ -229,6 +306,11 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             const u = new URL(base, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
             u.searchParams.set('help', String(action.key || ''))
             u.searchParams.set('highlight', action.highlight.selector)
+            const lab =
+                typeof action.highlight.label === 'string' ? action.highlight.label.trim().slice(0, 120) : ''
+            if (lab) {
+                u.searchParams.set('highlight_label', lab)
+            }
             return u.pathname + u.search + u.hash
         } catch {
             return null
@@ -411,11 +493,11 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                 </div>
                             ) : (
                                 <>
-                                    {askError && (
+                                    {askError ? (
                                         <div className="mb-4 rounded-lg border border-red-100 bg-red-50/90 px-3 py-2 text-sm text-red-800">
-                                            Could not reach AI help. Try again in a moment.
+                                            {askError}
                                         </div>
-                                    )}
+                                    ) : null}
                                     {askResult && (
                                         <div className="mb-4 space-y-3">
                                             <HelpAskResultBlock
@@ -663,7 +745,7 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
             </div>
         )
     }
-    if (kind === 'fallback' || kind === 'ai_disabled' || kind === 'feature_disabled') {
+    if (kind === 'fallback' || kind === 'ai_disabled' || kind === 'feature_disabled' || kind === 'workspace_required') {
         const suggested = Array.isArray(result.suggested) ? result.suggested : []
         return (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">

@@ -5804,7 +5804,10 @@ export default function AssetDrawer({
                                 </div>
                             </div>
                             {/* Keep Fields content mounted even when Embedded tab is active so /metadata/editable keeps polling and the embedded summary stays fresh. */}
-                            <div className={`space-y-3 pl-2.5 ${assetDataTab === 'fields' ? '' : 'hidden'}`}>
+                            <div
+                                className={`space-y-3 pl-2.5 ${assetDataTab === 'fields' ? '' : 'hidden'}`}
+                                data-help="asset-metadata-panel"
+                            >
                             {/* Step 2: Pending Metadata Section - Moved above standard metadata list */}
                             {/* Phase M-2: Only show pending metadata if metadata approval is enabled for company + brand */}
                             {auth?.metadata_approval_features?.metadata_approval_enabled && 

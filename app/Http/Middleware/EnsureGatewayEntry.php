@@ -155,6 +155,8 @@ class EnsureGatewayEntry
             || $request->is('app/companies/*')
             // Help topic list (read-only): must work on company picker / no workspace in session.
             || $request->is('app/help/actions')
+            // Ask AI returns JSON workspace hint instead of redirect when no tenant is selected.
+            || $request->is('app/help/ask')
             || $request->is('app/logout')
             // Command Center: site staff may open admin surfaces before picking a workspace.
             || $request->is('app/admin')
