@@ -40,6 +40,31 @@ class HelpActionsEndpointTest extends TestCase
         $this->assertIsArray($response->json('contextual'));
     }
 
+    public function test_returns_json_when_authenticated_but_no_workspace_in_session(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Tnosess',
+            'slug' => 't-help-nosess',
+            'manual_plan_override' => 'enterprise',
+        ]);
+        $brand = $tenant->brands()->where('is_default', true)->firstOrFail();
+        $user = User::create([
+            'email' => 'help-nosess@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'H',
+            'last_name' => 'N',
+            'email_verified_at' => now(),
+        ]);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
+        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        // Same as opening Help from /app/companies: no tenant_id / brand_id in session yet.
+        $response = $this->actingAs($user)->getJson('/app/help/actions');
+
+        $response->assertOk()
+            ->assertJsonStructure(['query', 'contextual', 'results', 'common']);
+    }
+
     public function test_route_name_returns_contextual_matching_actions(): void
     {
         config(['help_actions.actions' => [

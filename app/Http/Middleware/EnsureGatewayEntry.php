@@ -153,6 +153,8 @@ class EnsureGatewayEntry
             || $request->is('app/profile/*')
             || $request->is('app/companies')
             || $request->is('app/companies/*')
+            // Help topic list (read-only): must work on company picker / no workspace in session.
+            || $request->is('app/help/actions')
             || $request->is('app/logout')
             // Command Center: site staff may open admin surfaces before picking a workspace.
             || $request->is('app/admin')

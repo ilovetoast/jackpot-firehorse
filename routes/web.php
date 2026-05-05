@@ -643,9 +643,10 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/onboarding/reset', [\App\Http\Controllers\OnboardingController::class, 'resetOnboarding'])->name('onboarding.reset');
     });
 
-    // In-app help (tenant context for permissions; outside RestrictCollectionOnlyUser so collection guests can load topics)
+    // In-app help: GET actions must not require ResolveTenant (Help is in AppNav on /app/companies, etc.).
+    // POST ask/feedback still use tenant middleware for workspace settings + persistence.
+    Route::get('/help/actions', [\App\Http\Controllers\HelpActionController::class, 'index'])->name('help.actions');
     Route::middleware(['tenant'])->group(function () {
-        Route::get('/help/actions', [\App\Http\Controllers\HelpActionController::class, 'index'])->name('help.actions');
         Route::post('/help/ask', [\App\Http\Controllers\HelpActionController::class, 'ask'])
             ->middleware('throttle:20,1')
             ->name('help.ask');

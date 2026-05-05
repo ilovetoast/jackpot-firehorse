@@ -70,7 +70,13 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         }
         const qs = params.toString()
         const url = qs ? `/app/help/actions?${qs}` : '/app/help/actions'
-        fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+        fetch(url, {
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+        })
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
             .then((data) => {
                 if (!cancelled) {
