@@ -7,6 +7,7 @@ use App\Exceptions\BillingUserFacingException;
 use App\Models\Download;
 use App\Models\TenantModule;
 use App\Services\AiUsageService;
+use App\Services\Billing\StripeSubscriptionSyncService;
 use App\Services\BillingService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Stripe\Checkout\Session as StripeCheckoutSession;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
@@ -1074,9 +1076,34 @@ class BillingController extends Controller
 
     /**
      * Handle successful checkout redirect.
+     * Syncs subscription immediately from Checkout Session so the plans page updates even if webhooks are delayed.
      */
-    public function success()
+    public function success(Request $request)
     {
+        $sessionId = $request->query('session_id');
+        if (is_string($sessionId) && $sessionId !== '' && config('services.stripe.secret')) {
+            try {
+                Stripe::setApiKey((string) config('services.stripe.secret'));
+                $session = StripeCheckoutSession::retrieve($sessionId);
+                $customerId = is_string($session->customer ?? null) ? $session->customer : null;
+                $subscriptionId = is_string($session->subscription ?? null) ? $session->subscription : null;
+
+                if ($customerId && $subscriptionId) {
+                    $tenant = \App\Models\Tenant::where('stripe_id', $customerId)->first();
+                    $user = $request->user();
+                    if ($tenant && $user && $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+                        $stripeSubscription = \Stripe\Subscription::retrieve($subscriptionId);
+                        app(StripeSubscriptionSyncService::class)->sync($tenant, $stripeSubscription);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('billing.success.checkout_session_sync_failed', [
+                    'message' => $e->getMessage(),
+                    'session_id' => $sessionId,
+                ]);
+            }
+        }
+
         return redirect()->route('billing')->with('success', 'Subscription activated successfully!');
     }
 

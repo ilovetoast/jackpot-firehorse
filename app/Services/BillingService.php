@@ -73,7 +73,8 @@ class BillingService
 
             $checkout = $tenant->newSubscription('default', $priceId)
                 ->checkout([
-                    'success_url' => route('billing.success'),
+                    // Stripe replaces {CHECKOUT_SESSION_ID}; sync on success avoids waiting for webhooks.
+                    'success_url' => route('billing.success').'?session_id={CHECKOUT_SESSION_ID}',
                     'cancel_url' => route('billing'),
                     'metadata' => $metadata,
                     'subscription_data' => [

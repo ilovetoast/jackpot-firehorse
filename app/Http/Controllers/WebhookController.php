@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Tenant;
+use App\Services\Billing\StripeSubscriptionSyncService;
 use Illuminate\Http\Request;
 use Laravel\Cashier\Http\Controllers\WebhookController as CashierController;
 use Symfony\Component\HttpFoundation\Response;
@@ -195,88 +196,7 @@ class WebhookController extends CashierController
      */
     protected function syncSubscription(Tenant $tenant, $stripeSubscription): void
     {
-        // Handle both array (from payload) and object (from API) formats
-        $subscriptionId = is_array($stripeSubscription) ? $stripeSubscription['id'] : $stripeSubscription->id;
-        $status = is_array($stripeSubscription) ? $stripeSubscription['status'] : $stripeSubscription->status;
-        
-        // Safely get items - handle both array and object formats
-        if (is_array($stripeSubscription)) {
-            $items = $stripeSubscription['items']['data'] ?? [];
-        } else {
-            $items = $stripeSubscription->items->data ?? [];
-        }
-        
-        $trialEnd = is_array($stripeSubscription) ? ($stripeSubscription['trial_end'] ?? null) : ($stripeSubscription->trial_end ?? null);
-        $cancelAt = is_array($stripeSubscription) ? ($stripeSubscription['cancel_at'] ?? null) : ($stripeSubscription->cancel_at ?? null);
-
-        // Get or create the subscription
-        $subscription = $tenant->subscriptions()->firstOrNew([
-            'stripe_id' => $subscriptionId,
-        ]);
-
-        $subscription->name = 'default';
-        $subscription->stripe_status = $status;
-        
-        // Safely get price and quantity from first item if it exists
-        if (!empty($items)) {
-            $firstItem = $items[0];
-            if (is_array($firstItem)) {
-                $subscription->stripe_price = $firstItem['price']['id'] ?? null;
-                $subscription->quantity = $firstItem['quantity'] ?? 1;
-            } else {
-                $subscription->stripe_price = $firstItem->price->id ?? null;
-                $subscription->quantity = $firstItem->quantity ?? 1;
-            }
-        } else {
-            // No items found - this shouldn't happen but handle gracefully
-            $subscription->stripe_price = null;
-            $subscription->quantity = 1;
-            \Log::warning('Subscription has no items', [
-                'subscription_id' => $subscriptionId,
-                'tenant_id' => $tenant->id,
-            ]);
-        }
-        
-        $subscription->trial_ends_at = $trialEnd 
-            ? \Carbon\Carbon::createFromTimestamp($trialEnd) 
-            : null;
-        $subscription->ends_at = $cancelAt 
-            ? \Carbon\Carbon::createFromTimestamp($cancelAt) 
-            : null;
-
-        $subscription->save();
-
-        // Sync subscription items
-        foreach ($items as $item) {
-            try {
-                $itemId = is_array($item) ? ($item['id'] ?? null) : ($item->id ?? null);
-                $itemPrice = is_array($item) ? ($item['price'] ?? null) : ($item->price ?? null);
-                $itemQuantity = is_array($item) ? ($item['quantity'] ?? 1) : ($item->quantity ?? 1);
-                
-                if (!$itemId || !$itemPrice) {
-                    \Log::warning('Skipping subscription item - missing ID or price', [
-                        'subscription_id' => $subscriptionId,
-                        'item' => $item,
-                    ]);
-                    continue;
-                }
-                
-                $subscriptionItem = $subscription->items()->firstOrNew([
-                    'stripe_id' => $itemId,
-                ]);
-
-                $subscriptionItem->stripe_product = is_array($itemPrice) ? ($itemPrice['product'] ?? null) : ($itemPrice->product ?? null);
-                $subscriptionItem->stripe_price = is_array($itemPrice) ? ($itemPrice['id'] ?? null) : ($itemPrice->id ?? null);
-                $subscriptionItem->quantity = $itemQuantity;
-                $subscriptionItem->save();
-            } catch (\Exception $e) {
-                \Log::error('Error syncing subscription item', [
-                    'subscription_id' => $subscriptionId,
-                    'error' => $e->getMessage(),
-                    'item' => is_array($item) ? $item : (array) $item,
-                ]);
-            }
-        }
+        app(StripeSubscriptionSyncService::class)->sync($tenant, $stripeSubscription);
     }
 
     /**

@@ -65,10 +65,11 @@ class PlanService
             }
         }
 
-        // Get the most recent active subscription with name 'default'
+        // Paid access while Stripe reports these statuses (active, trialing, or past_due).
         $subscription = $tenant->subscriptions()
             ->where('name', 'default')
-            ->where('stripe_status', 'active')
+            ->whereIn('stripe_status', ['active', 'trialing', 'past_due'])
+            ->with('items')
             ->orderBy('created_at', 'desc')
             ->first();
 
@@ -76,19 +77,25 @@ class PlanService
             return 'free';
         }
 
-        $priceId = $subscription->stripe_price;
-
-        if (! $priceId && $subscription->items->count() > 0) {
-            $priceId = $subscription->items->first()->stripe_price;
+        $priceIds = [];
+        if ($subscription->stripe_price) {
+            $priceIds[] = $subscription->stripe_price;
         }
+        foreach ($subscription->items as $item) {
+            if ($item->stripe_price) {
+                $priceIds[] = $item->stripe_price;
+            }
+        }
+        $priceIds = array_values(array_unique(array_filter($priceIds)));
 
-        if (! $priceId) {
+        if ($priceIds === []) {
             return 'free';
         }
 
-        // Find plan by Stripe price ID
+        // Match config/plans.php stripe_price_id against any subscription line item.
         foreach (config('plans') as $planName => $planConfig) {
-            if (($planConfig['stripe_price_id'] ?? null) === $priceId) {
+            $configuredPrice = $planConfig['stripe_price_id'] ?? null;
+            if ($configuredPrice && in_array($configuredPrice, $priceIds, true)) {
                 return $planName;
             }
         }
