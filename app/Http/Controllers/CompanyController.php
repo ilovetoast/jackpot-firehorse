@@ -922,7 +922,7 @@ class CompanyController extends Controller
             return null;
         }
 
-        $skip = ['portal', 'brand_slug', 'subject_name', 'subject_type', 'subject_id'];
+        $skip = ['portal', 'brand_slug', 'subject_name', 'subject_type', 'subject_id', 'mailable'];
         $labels = [
             'collection_count' => 'Collections',
             'asset_count' => 'Assets',
@@ -939,6 +939,9 @@ class CompanyController extends Controller
             'fields_updated' => 'Fields updated',
             'old_version' => 'Old version',
             'new_version' => 'New version',
+            'template_key' => 'Template',
+            'email_type' => 'Email category',
+            'recipients' => 'Recipients',
         ];
 
         $summary = [];
@@ -1263,6 +1266,13 @@ class CompanyController extends Controller
                 return 'Entered brand portal';
             case \App\Enums\EventType::DOWNLOAD_LANDING_PAGE_VIEWED:
                 return $subjectIdentifier ? "Viewed download page for {$subjectIdentifier}" : 'Viewed download page';
+            case \App\Enums\EventType::EMAIL_TRANSACTIONAL_SENT:
+                $templateKey = $metadata['template_key'] ?? null;
+                if (is_string($templateKey) && $templateKey !== '') {
+                    return "Sent email ({$templateKey})";
+                }
+
+                return 'Sent transactional email';
             default:
                 // Fallback: format event type nicely
                 return ucfirst(str_replace(['_', '.'], ' ', $eventType));

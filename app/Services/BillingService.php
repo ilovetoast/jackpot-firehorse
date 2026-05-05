@@ -544,14 +544,29 @@ class BillingService
                 return collect([]);
             }
 
-            $invoices = $tenant->invoices();
+            $invoices = $tenant->invoices(false, [
+                'limit' => 24,
+                'expand' => ['data.charge'],
+            ]);
 
             return collect($invoices)->map(function ($invoice) {
+                $paidCents = $invoice->rawAmountPaid();
+                $refundedCents = $this->refundedAmountCentsForCashierInvoice($invoice);
+                $netCents = max(0, $paidCents - $refundedCents);
+
+                $stripeStatus = (string) ($invoice->status ?? 'unknown');
+                $displayStatus = $stripeStatus;
+                if ($refundedCents > 0 && $stripeStatus === 'paid' && $paidCents > 0) {
+                    $displayStatus = $refundedCents >= $paidCents ? 'refunded' : 'partially_refunded';
+                }
+
                 return [
                     'id' => $invoice->id,
-                    'amount' => $invoice->amount_paid / 100, // Convert cents to dollars
-                    'currency' => strtoupper($invoice->currency),
-                    'status' => $invoice->status,
+                    'amount' => $netCents / 100,
+                    'amount_paid_gross' => $paidCents / 100,
+                    'amount_refunded' => $refundedCents / 100,
+                    'currency' => strtoupper($invoice->currency ?? 'usd'),
+                    'status' => $displayStatus,
                     'date' => $invoice->created,
                     'url' => $invoice->hosted_invoice_url,
                     'pdf' => $invoice->invoice_pdf,
@@ -560,6 +575,32 @@ class BillingService
         } catch (ApiErrorException $e) {
             return collect([]);
         }
+    }
+
+    /**
+     * Refunds apply to the Stripe Charge; amount_paid on the invoice often stays unchanged.
+     */
+    protected function refundedAmountCentsForCashierInvoice(\Laravel\Cashier\Invoice $invoice): int
+    {
+        $charge = $invoice->charge;
+
+        if ($charge instanceof \Stripe\Charge) {
+            return (int) ($charge->amount_refunded ?? 0);
+        }
+
+        if (is_string($charge) && $charge !== '' && config('services.stripe.secret')) {
+            try {
+                $ch = \Stripe\Charge::retrieve($charge, [
+                    'api_key' => config('services.stripe.secret'),
+                ]);
+
+                return (int) ($ch->amount_refunded ?? 0);
+            } catch (\Throwable) {
+                return 0;
+            }
+        }
+
+        return 0;
     }
 
     /**

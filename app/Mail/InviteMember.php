@@ -19,6 +19,9 @@ class InviteMember extends BaseMailable
     use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
 
+    /** Team invite already records {@see \App\Enums\EventType::USER_INVITED}. */
+    protected bool $recordSendActivity = false;
+
     public $tenant;
     public $inviter;
     public $inviteUrl;

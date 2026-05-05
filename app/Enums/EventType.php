@@ -205,6 +205,9 @@ class EventType
     // D-SHARE — Share link email sent (audit only; no recipient in metadata)
     public const DOWNLOAD_SHARE_EMAIL_SENT = 'download.share_email_sent';
 
+    /** Transactional email successfully handed off to the mailer (see {@see \App\Mail\BaseMailable}). */
+    public const EMAIL_TRANSACTIONAL_SENT = 'email.transactional.sent';
+
     // Subscription/Billing events
     public const SUBSCRIPTION_CREATED = 'subscription.created';
     public const SUBSCRIPTION_UPDATED = 'subscription.updated';
@@ -382,6 +385,7 @@ class EventType
             self::DOWNLOAD_ACCESS_GRANTED,
             self::DOWNLOAD_LANDING_PAGE_VIEWED,
             self::DOWNLOAD_SHARE_EMAIL_SENT,
+            self::EMAIL_TRANSACTIONAL_SENT,
             self::SUBSCRIPTION_CREATED,
             self::SUBSCRIPTION_UPDATED,
             self::SUBSCRIPTION_CANCELED,

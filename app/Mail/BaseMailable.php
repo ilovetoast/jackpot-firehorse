@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Services\EmailGate;
+use App\Services\TransactionalEmailActivityRecorder;
 use Illuminate\Mail\Mailable as IlluminateMailable;
 use Illuminate\Support\Facades\Log;
 
@@ -21,9 +22,46 @@ abstract class BaseMailable extends IlluminateMailable
      */
     protected string $emailType = 'user';
 
+    /**
+     * When false, a successful send does not create an {@see \App\Enums\EventType::EMAIL_TRANSACTIONAL_SENT} row
+     * (e.g. team invite already logs {@see \App\Enums\EventType::USER_INVITED}).
+     */
+    protected bool $recordSendActivity = true;
+
     public function shouldSend(): bool
     {
         return app(EmailGate::class)->canSend($this->emailType);
+    }
+
+    public function shouldRecordSendActivity(): bool
+    {
+        return $this->recordSendActivity;
+    }
+
+    /**
+     * @internal Used for activity metadata; mirrors {@see $emailType}.
+     */
+    public function emailTypeForActivity(): string
+    {
+        return $this->emailType;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function activityRecipientAddresses(): array
+    {
+        $emails = [];
+        foreach (['to', 'cc', 'bcc'] as $kind) {
+            foreach ($this->{$kind} ?? [] as $recipient) {
+                $addr = $recipient['address'] ?? null;
+                if (is_string($addr) && $addr !== '') {
+                    $emails[] = $addr;
+                }
+            }
+        }
+
+        return array_values(array_unique($emails));
     }
 
     public function send($mailer)
@@ -38,5 +76,7 @@ abstract class BaseMailable extends IlluminateMailable
         }
 
         parent::send($mailer);
+
+        TransactionalEmailActivityRecorder::record($this);
     }
 }

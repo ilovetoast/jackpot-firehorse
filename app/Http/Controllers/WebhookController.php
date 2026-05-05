@@ -7,6 +7,7 @@ use App\Services\Billing\StripeSubscriptionSyncService;
 use App\Services\Billing\SubscriptionBillingNotifier;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Cashier\Http\Controllers\WebhookController as CashierController;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -469,27 +470,42 @@ class WebhookController extends CashierController
         try {
             $charge = $payload['data']['object'];
             $stripeCustomerId = $charge['customer'] ?? null;
-            
-            if ($stripeCustomerId) {
-                $tenant = Tenant::where('stripe_id', $stripeCustomerId)->first();
-                
-                if ($tenant) {
-                    \Log::info('Refund processed via webhook', [
-                        'tenant_id' => $tenant->id,
-                        'tenant_name' => $tenant->name,
-                        'charge_id' => $charge['id'],
-                        'refund_id' => $charge['refunds']['data'][0]['id'] ?? null,
-                        'amount' => $charge['amount_refunded'] / 100,
-                        'currency' => strtoupper($charge['currency']),
-                    ]);
+            $amountRefundedCents = (int) ($charge['amount_refunded'] ?? 0);
 
-                    // You can add additional logic here:
-                    // - Update subscription status if needed
-                    // - Send notification to customer
-                    // - Update internal records
-                    // - Trigger any business logic
-                }
+            if (! $stripeCustomerId || $amountRefundedCents <= 0) {
+                return $this->successMethod();
             }
+
+            $tenant = Tenant::where('stripe_id', $stripeCustomerId)->first();
+            if (! $tenant) {
+                return $this->successMethod();
+            }
+
+            $refunds = $charge['refunds']['data'] ?? [];
+            $latestRefundId = $refunds[0]['id'] ?? null;
+            if ($latestRefundId && ! Cache::add('billing.refund_email.'.$latestRefundId, 1, now()->addDays(90))) {
+                return $this->successMethod();
+            }
+
+            $invoiceId = isset($charge['invoice']) && is_string($charge['invoice'])
+                ? $charge['invoice']
+                : null;
+
+            \Log::info('Refund processed via webhook', [
+                'tenant_id' => $tenant->id,
+                'tenant_name' => $tenant->name,
+                'charge_id' => $charge['id'],
+                'refund_id' => $latestRefundId,
+                'amount' => $amountRefundedCents / 100,
+                'currency' => strtoupper($charge['currency'] ?? 'usd'),
+            ]);
+
+            app(SubscriptionBillingNotifier::class)->notifyRefundProcessed(
+                $tenant,
+                $invoiceId,
+                $amountRefundedCents,
+                strtoupper((string) ($charge['currency'] ?? 'usd')),
+            );
         } catch (\Exception $e) {
             \Log::error('Error handling charge refunded: ' . $e->getMessage(), [
                 'exception' => $e,

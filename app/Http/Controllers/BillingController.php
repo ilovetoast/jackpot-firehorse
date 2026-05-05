@@ -534,6 +534,8 @@ class BillingController extends Controller
             return [
                 'id' => $invoice['id'],
                 'amount' => $invoice['amount'],
+                'amount_paid_gross' => $invoice['amount_paid_gross'] ?? $invoice['amount'],
+                'amount_refunded' => $invoice['amount_refunded'] ?? 0,
                 'currency' => $invoice['currency'],
                 'status' => $invoice['status'],
                 'date' => date('M d, Y', $invoice['date']),

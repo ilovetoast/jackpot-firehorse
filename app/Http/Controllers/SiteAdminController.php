@@ -1800,6 +1800,13 @@ class SiteAdminController extends Controller
                 }
 
                 return 'Updated plan';
+            case EventType::EMAIL_TRANSACTIONAL_SENT:
+                $templateKey = $metadata['template_key'] ?? null;
+                if (is_string($templateKey) && $templateKey !== '') {
+                    return "Sent email ({$templateKey})";
+                }
+
+                return 'Sent transactional email';
             default:
                 // Fallback: format event type nicely
                 return ucfirst(str_replace(['_', '.'], ' ', $eventType));

@@ -110,8 +110,16 @@ export default function BillingOverview({
             open: 'bg-yellow-100 text-yellow-800',
             void: 'bg-gray-100 text-gray-800',
             uncollectible: 'bg-red-100 text-red-800',
+            refunded: 'bg-slate-100 text-slate-800',
+            partially_refunded: 'bg-amber-100 text-amber-900',
         }
         return statusMap[status.toLowerCase()] || 'bg-gray-100 text-gray-800'
+    }
+
+    const formatStatusLabel = (status) => {
+        if (!status) return ''
+        const s = String(status).replace(/_/g, ' ')
+        return s.charAt(0).toUpperCase() + s.slice(1)
     }
 
     return (
@@ -514,11 +522,16 @@ export default function BillingOverview({
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(invoice.status)}`}>
-                                                        {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+                                                        {formatStatusLabel(invoice.status)}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    {formatCurrency(invoice.amount, invoice.currency)}
+                                                    <div>{formatCurrency(invoice.amount, invoice.currency)}</div>
+                                                    {Number(invoice.amount_refunded) > 0 ? (
+                                                        <div className="text-xs text-gray-500 mt-0.5">
+                                                            Refunded {formatCurrency(invoice.amount_refunded, invoice.currency)}
+                                                        </div>
+                                                    ) : null}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     {invoice.url ? (
