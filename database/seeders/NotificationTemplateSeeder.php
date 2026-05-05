@@ -676,6 +676,62 @@ HTML),
                 'variables' => ['recipient_name', 'status_label', 'ticket_number', 'ticket_subject', 'category_label', 'tenant_name', 'ticket_url', 'app_name', 'app_url'],
                 'is_active' => true,
             ],
+            [
+                'key' => 'plan_changed_tenant',
+                'name' => 'Plan changed (tenant owner)',
+                'category' => 'tenant',
+                'subject' => 'Your {{app_name}} plan is now {{new_plan}} — {{tenant_name}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">Your subscription is updated</h2>
+<p style="margin:0 0 16px;">Hi {{owner_name}},</p>
+<p style="margin:0 0 20px;">The plan for <strong>{{tenant_name}}</strong> has changed.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border-collapse:collapse;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+  <tr><td style="padding:14px 16px;font-size:14px;"><strong style="color:#0f172a;">Previous plan</strong><br /><span style="color:#334155;">{{old_plan}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Current plan</strong><br /><span style="color:#334155;">{{new_plan}}</span></td></tr>
+  <tr><td style="padding:0 16px 14px;font-size:14px;"><strong style="color:#0f172a;">Billing status</strong><br /><span style="color:#334155;">{{billing_status}}</span></td></tr>
+  <tr><td style="padding:0 16px 16px;font-size:14px;"><strong style="color:#0f172a;">Recorded by</strong><br /><span style="color:#334155;">{{admin_name}}</span></td></tr>
+</table>
+<p style="margin:0 0 12px;font-size:14px;color:#64748b;">Manage payment method, invoices, and plan anytime from billing.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{billing_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Open billing</a></td></tr></table>
+<p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">If you didn’t expect this change, contact support immediately.</p>
+HTML),
+                'body_text' => "Your subscription is updated\n\nHi {{owner_name}},\n\nThe plan for {{tenant_name}} has changed.\n\nPrevious plan: {{old_plan}}\nCurrent plan: {{new_plan}}\nBilling status: {{billing_status}}\nRecorded by: {{admin_name}}\n\nBilling: {{billing_url}}\n\nIf you didn’t expect this change, contact support.",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'old_plan', 'new_plan', 'billing_status', 'expiration_date', 'admin_name', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'subscription_cancel_scheduled_tenant',
+                'name' => 'Subscription cancellation scheduled',
+                'category' => 'tenant',
+                'subject' => 'Your subscription will end — {{tenant_name}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">We’ve received your cancellation</h2>
+<p style="margin:0 0 16px;">Hi {{owner_name}},</p>
+<p style="margin:0 0 20px;">Your <strong>{{plan_name}}</strong> subscription for <strong>{{tenant_name}}</strong> is canceled and will not renew.</p>
+<p style="margin:0 0 20px;padding:14px 16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;font-size:14px;color:#334155;">You’ll keep your current plan benefits until <strong>{{access_ends_at}}</strong>. After that, your workspace moves to the Free plan unless you subscribe again.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{billing_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">Billing & invoices</a></td></tr></table>
+<p style="margin:24px 0 0;font-size:13px;color:#94a3b8;">Changed your mind? You can resume from billing while your subscription is still active.</p>
+HTML),
+                'body_text' => "We’ve received your cancellation\n\nHi {{owner_name}},\n\nYour {{plan_name}} subscription for {{tenant_name}} is canceled and will not renew.\n\nAccess continues until {{access_ends_at}}.\n\nBilling: {{billing_url}}",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'plan_name', 'access_ends_at', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
+            [
+                'key' => 'subscription_ended_tenant',
+                'name' => 'Paid subscription ended',
+                'category' => 'tenant',
+                'subject' => 'Your paid plan has ended — {{tenant_name}}',
+                'body_html' => TransactionalEmailHtml::systemShell(<<<'HTML'
+<h2 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#0f172a;letter-spacing:-0.02em;">Your paid subscription has ended</h2>
+<p style="margin:0 0 16px;">Hi {{owner_name}},</p>
+<p style="margin:0 0 20px;">The <strong>{{previous_plan}}</strong> subscription for <strong>{{tenant_name}}</strong> has ended. Your workspace is now on the <strong>Free</strong> plan.</p>
+<p style="margin:0 0 20px;font-size:14px;color:#64748b;">Some features may be limited. You can upgrade again anytime.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;"><tr><td align="left" style="border-radius:9999px;background:linear-gradient(180deg,#7c3aed 0%,#5b21b6 100%);box-shadow:0 1px 2px rgba(0,0,0,0.08);"><a href="{{billing_url}}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9999px;">View plans</a></td></tr></table>
+HTML),
+                'body_text' => "Your paid subscription has ended\n\nHi {{owner_name}},\n\nThe {{previous_plan}} subscription for {{tenant_name}} has ended. You are now on the Free plan.\n\nPlans: {{billing_url}}",
+                'variables' => ['tenant_name', 'owner_name', 'owner_email', 'previous_plan', 'app_name', 'app_url', 'billing_url'],
+                'is_active' => true,
+            ],
         ];
 
         foreach ($templates as $template) {

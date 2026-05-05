@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Models\Tenant;
+use App\Services\PlanService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -16,6 +17,10 @@ class StripeSubscriptionSyncService
      */
     public function sync(Tenant $tenant, array|\Stripe\Subscription $stripeSubscription): void
     {
+        $planService = app(PlanService::class);
+        $planService->forgetCurrentPlanCache($tenant);
+        $planBefore = $planService->getCurrentPlan($tenant);
+
         $subscriptionId = is_array($stripeSubscription) ? $stripeSubscription['id'] : $stripeSubscription->id;
         $status = is_array($stripeSubscription) ? $stripeSubscription['status'] : $stripeSubscription->status;
 
@@ -93,5 +98,12 @@ class StripeSubscriptionSyncService
                 ]);
             }
         }
+
+        $tenant->refresh();
+        $tenant->unsetRelation('subscriptions');
+        $planService->forgetCurrentPlanCache($tenant);
+        $planAfter = $planService->getCurrentPlan($tenant);
+
+        app(SubscriptionBillingNotifier::class)->notifyPlanChangedAfterSync($tenant, $planBefore, $planAfter);
     }
 }

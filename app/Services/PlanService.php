@@ -32,6 +32,17 @@ class PlanService
     }
 
     /**
+     * Clear per-request memo so plan reflects subscription rows updated in the same request (e.g. Stripe sync).
+     */
+    public function forgetCurrentPlanCache(Tenant $tenant): void
+    {
+        $memoKey = self::class.'.current_plan.'.$tenant->getKey();
+        if (app()->bound($memoKey)) {
+            app()->forgetInstance($memoKey);
+        }
+    }
+
+    /**
      * Resolve plan name from tenant override, Cashier subscription, and config.
      *
      * Legacy mapping: if the resolved key is 'premium' (grandfathered customers),

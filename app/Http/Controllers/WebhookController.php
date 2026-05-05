@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Tenant;
 use App\Services\Billing\StripeSubscriptionSyncService;
+use App\Services\Billing\SubscriptionBillingNotifier;
+use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Laravel\Cashier\Http\Controllers\WebhookController as CashierController;
 use Symfony\Component\HttpFoundation\Response;
@@ -250,15 +252,23 @@ class WebhookController extends CashierController
 
         if ($tenant) {
             try {
+                $planService = app(PlanService::class);
+                $planService->forgetCurrentPlanCache($tenant);
+                $previousPlan = $planService->getCurrentPlan($tenant);
+
                 // Find and delete the subscription
                 $subscriptionModel = $tenant->subscriptions()->where('stripe_id', $stripeSubscriptionId)->first();
                 if ($subscriptionModel) {
                     $subscriptionModel->delete();
-                    
+
                     \Log::info('Subscription deleted', [
                         'tenant_id' => $tenant->id,
                         'subscription_id' => $stripeSubscriptionId,
                     ]);
+
+                    $tenant->refresh();
+                    $tenant->unsetRelation('subscriptions');
+                    app(SubscriptionBillingNotifier::class)->notifySubscriptionEnded($tenant, $previousPlan);
                 }
             } catch (\Exception $e) {
                 \Log::error('Error deleting subscription', [

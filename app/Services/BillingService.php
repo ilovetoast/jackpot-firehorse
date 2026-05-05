@@ -406,6 +406,15 @@ class BillingService
                     'price_id' => $priceId,
                 ]
             );
+
+            $resolvedNew = $newPlanId ?? 'unknown';
+            if ($resolvedNew !== 'unknown' && $oldPlan !== $resolvedNew) {
+                app(\App\Services\Billing\SubscriptionBillingNotifier::class)->notifyPlanChangedAfterSync(
+                    $tenant,
+                    $oldPlan,
+                    $resolvedNew
+                );
+            }
             
             return [
                 'action' => $action,
@@ -469,6 +478,15 @@ class BillingService
                 $currentPlan = $planService->getCurrentPlan($tenant);
                 
                 $subscription->cancel();
+
+                $subscription->refresh();
+                $endsAt = $subscription->ends_at;
+
+                app(\App\Services\Billing\SubscriptionBillingNotifier::class)->notifyCancellationScheduled(
+                    $tenant,
+                    $currentPlan,
+                    $endsAt
+                );
                 
                 // Log activity
                 ActivityRecorder::record(
