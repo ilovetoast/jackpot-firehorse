@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { router, usePage } from '@inertiajs/react'
 import {
     ArrowLeftIcon,
+    ArrowPathIcon,
     QuestionMarkCircleIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
 
 /**
  * App help: slide-over panel with search (debounced) against /app/help/actions.
+ * Uses Headless UI Dialog for focus trap, Escape/outside dismiss, and scroll locking.
  */
 export default function HelpLauncher({ textColor = '#000000' }) {
     const { auth } = usePage().props
@@ -17,9 +19,12 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     const [query, setQuery] = useState('')
     const [debouncedQuery, setDebouncedQuery] = useState('')
     const [loading, setLoading] = useState(false)
+    const [loadError, setLoadError] = useState(false)
+    const [retryToken, setRetryToken] = useState(0)
     const [payload, setPayload] = useState({ query: null, results: [], common: [] })
     const [selected, setSelected] = useState(null)
     const searchRef = useRef(null)
+    const closeBtnRef = useRef(null)
 
     useEffect(() => {
         const t = setTimeout(() => setDebouncedQuery(query.trim()), 300)
@@ -31,10 +36,11 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             return
         }
         let cancelled = false
+        setLoading(true)
+        setLoadError(false)
         const url = debouncedQuery
             ? `/app/help/actions?q=${encodeURIComponent(debouncedQuery)}`
             : '/app/help/actions'
-        setLoading(true)
         fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
             .then((data) => {
@@ -48,6 +54,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             })
             .catch(() => {
                 if (!cancelled) {
+                    setLoadError(true)
                     setPayload({ query: debouncedQuery || null, results: [], common: [] })
                 }
             })
@@ -59,7 +66,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         return () => {
             cancelled = true
         }
-    }, [open, debouncedQuery])
+    }, [open, debouncedQuery, retryToken])
 
     useEffect(() => {
         setSelected(null)
@@ -69,18 +76,23 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         if (!open) {
             return undefined
         }
-        const onKey = (e) => {
-            if (e.key === 'Escape') {
-                setOpen(false)
+        const id = requestAnimationFrame(() => {
+            if (selected) {
+                closeBtnRef.current?.focus()
+            } else {
+                searchRef.current?.focus()
             }
+        })
+        return () => cancelAnimationFrame(id)
+    }, [open, selected])
+
+    const handleDialogClose = useCallback(() => {
+        if (selected) {
+            setSelected(null)
+            return
         }
-        document.addEventListener('keydown', onKey)
-        const id = requestAnimationFrame(() => searchRef.current?.focus())
-        return () => {
-            document.removeEventListener('keydown', onKey)
-            cancelAnimationFrame(id)
-        }
-    }, [open])
+        setOpen(false)
+    }, [selected])
 
     const resolveVisitHref = useCallback(
         (action) => {
@@ -117,6 +129,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                 return
             }
             setOpen(false)
+            setSelected(null)
             router.visit(href)
         },
         [resolveVisitHref]
@@ -124,72 +137,80 @@ export default function HelpLauncher({ textColor = '#000000' }) {
 
     const listItems = debouncedQuery ? payload.results : payload.common
     const showSecondaryCommon =
-        Boolean(debouncedQuery) && payload.results.length === 0 && payload.common.length > 0
+        Boolean(debouncedQuery) && payload.results.length === 0 && payload.common.length > 0 && !loadError
 
-    /**
-     * Portal to document.body: cinematic nav uses backdrop-filter, which creates a containing block and
-     * breaks fixed-position overlays / solid backgrounds for descendants (same class of issue as mobile
-     * bottom nav in AppNav.jsx).
-     */
-    const helpOverlay =
-        open && typeof document !== 'undefined' ? (
-            <div
-                className="fixed inset-0 z-[220] flex justify-end"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="jp-help-title"
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => {
+                    setOpen(true)
+                    setLoadError(false)
+                }}
+                className="rounded-full p-1.5 transition-colors hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                style={{ color: textColor }}
+                aria-expanded={open}
+                aria-haspopup="dialog"
+                title="Help"
             >
-                <button
-                    type="button"
-                    className="absolute inset-0 bg-gray-900/40"
-                    aria-label="Close help"
-                    onClick={() => setOpen(false)}
-                />
-                <div className="relative isolate flex h-full w-full max-w-md flex-col bg-white shadow-xl border-l border-gray-200">
-                    <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
-                        {selected ? (
+                <span className="sr-only">Open help</span>
+                <QuestionMarkCircleIcon className="h-6 w-6" aria-hidden />
+            </button>
+
+            <Dialog open={open} onClose={handleDialogClose} className="relative z-[220]">
+                <div className="fixed inset-0 bg-gray-900/40" aria-hidden />
+                <div className="fixed inset-0 flex justify-end">
+                    <DialogPanel className="flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl outline-none">
+                        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+                            {selected ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelected(null)}
+                                        className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900"
+                                    >
+                                        <ArrowLeftIcon className="h-4 w-4" aria-hidden />
+                                        Back
+                                    </button>
+                                    <DialogTitle className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-gray-900">
+                                        {selected.title}
+                                    </DialogTitle>
+                                </>
+                            ) : (
+                                <DialogTitle id="jp-help-title" className="text-sm font-semibold text-gray-900">
+                                    Help
+                                </DialogTitle>
+                            )}
                             <button
+                                ref={closeBtnRef}
                                 type="button"
-                                onClick={() => setSelected(null)}
-                                className="inline-flex items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900"
+                                onClick={() => setOpen(false)}
+                                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                aria-label="Close help"
                             >
-                                <ArrowLeftIcon className="h-4 w-4" />
-                                Back
+                                <XMarkIcon className="h-5 w-5" aria-hidden />
                             </button>
-                        ) : (
-                            <h2 id="jp-help-title" className="text-sm font-semibold text-gray-900">
-                                Help
-                            </h2>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => setOpen(false)}
-                            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                            aria-label="Close"
-                        >
-                            <XMarkIcon className="h-5 w-5" />
-                        </button>
-                    </div>
-
-                    {!selected && (
-                        <div className="shrink-0 border-b border-gray-100 bg-white px-4 py-3">
-                            <label htmlFor="jp-help-search" className="sr-only">
-                                Search help
-                            </label>
-                            <input
-                                ref={searchRef}
-                                id="jp-help-search"
-                                type="search"
-                                autoComplete="off"
-                                placeholder="Search topics…"
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                            />
                         </div>
-                    )}
 
-                    <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 py-3">
+                        {!selected && (
+                            <div className="shrink-0 border-b border-gray-100 bg-white px-4 py-3">
+                                <label htmlFor="jp-help-search" className="sr-only">
+                                    Search help
+                                </label>
+                                <input
+                                    ref={searchRef}
+                                    id="jp-help-search"
+                                    type="search"
+                                    autoComplete="off"
+                                    placeholder="Search topics…"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                />
+                            </div>
+                        )}
+
+                        <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                             {selected ? (
                                 <HelpActionDetail
                                     action={selected}
@@ -197,8 +218,26 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                     onPickRelated={(a) => setSelected(a)}
                                     resolveVisitHref={resolveVisitHref}
                                 />
+                            ) : loadError ? (
+                                <div className="rounded-lg border border-red-100 bg-red-50/90 px-3 py-5 text-center">
+                                    <p className="text-sm font-medium text-red-800">Could not load help topics</p>
+                                    <p className="mt-1 text-xs text-red-700/90">Check your connection and try again.</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setRetryToken((t) => t + 1)}
+                                        className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-800 shadow-sm hover:bg-red-50"
+                                    >
+                                        <ArrowPathIcon className="h-4 w-4" aria-hidden />
+                                        Retry
+                                    </button>
+                                </div>
                             ) : loading ? (
-                                <p className="text-sm text-gray-500">Loading…</p>
+                                <div className="space-y-2 py-2" aria-busy="true" aria-live="polite">
+                                    <p className="text-sm text-gray-500">Loading topics…</p>
+                                    <div className="h-2 w-[66%] animate-pulse rounded bg-gray-200" />
+                                    <div className="h-2 w-full animate-pulse rounded bg-gray-100" />
+                                    <div className="h-2 w-[83%] animate-pulse rounded bg-gray-100" />
+                                </div>
                             ) : listItems.length === 0 && !showSecondaryCommon ? (
                                 <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center">
                                     <p className="text-sm text-gray-600">
@@ -216,7 +255,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                                     <button
                                                         type="button"
                                                         onClick={() => setSelected(item)}
-                                                        className="flex w-full flex-col rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                                        className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
                                                     >
                                                         <span className="font-medium text-gray-900">{item.title}</span>
                                                         {item.category ? (
@@ -238,7 +277,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                                         <button
                                                             type="button"
                                                             onClick={() => setSelected(item)}
-                                                            className="flex w-full flex-col rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50"
+                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
                                                         >
                                                             <span className="font-medium text-gray-900">{item.title}</span>
                                                         </button>
@@ -249,26 +288,10 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                     )}
                                 </>
                             )}
-                    </div>
+                        </div>
+                    </DialogPanel>
                 </div>
-            </div>
-        ) : null
-
-    return (
-        <>
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className="rounded-full p-1.5 transition-colors hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                style={{ color: textColor }}
-                aria-expanded={open}
-                aria-haspopup="dialog"
-                title="Help"
-            >
-                <span className="sr-only">Open help</span>
-                <QuestionMarkCircleIcon className="h-6 w-6" aria-hidden />
-            </button>
-            {helpOverlay ? createPortal(helpOverlay, document.body) : null}
+            </Dialog>
         </>
     )
 }
@@ -281,7 +304,7 @@ function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
         <div className="space-y-4">
             <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{action.page_label || action.category}</p>
-                <h3 className="mt-1 text-base font-semibold text-gray-900">{action.title}</h3>
+                <p className="mt-1 text-base font-semibold text-gray-900">{action.title}</p>
                 <p className="mt-2 text-sm text-gray-600">{action.short_answer}</p>
             </div>
             {Array.isArray(action.steps) && action.steps.length > 0 && (
@@ -299,7 +322,7 @@ function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
                     type="button"
                     disabled={!canGo}
                     onClick={onGo}
-                    className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-95 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-95 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
                 >
                     Go to page
                 </button>
@@ -318,7 +341,7 @@ function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
                                 key={rel.key}
                                 type="button"
                                 onClick={() => onPickRelated(rel)}
-                                className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                className="min-h-[36px] rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
                             >
                                 {rel.title}
                             </button>

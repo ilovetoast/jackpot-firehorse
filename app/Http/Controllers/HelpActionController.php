@@ -17,8 +17,11 @@ class HelpActionController extends Controller
 
         $permissions = $authPermissionService->effectivePermissions($user, $tenant, $brand);
 
+        $rawQ = $request->query('q');
+        $query = is_string($rawQ) ? $rawQ : null;
+
         $payload = $helpActionService->forRequest(
-            $request->query('q'),
+            $query,
             $permissions,
             $brand
         );

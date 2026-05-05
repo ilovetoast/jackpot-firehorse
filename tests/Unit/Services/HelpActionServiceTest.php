@@ -273,4 +273,237 @@ class HelpActionServiceTest extends TestCase
         $this->assertSame('Child answer', $rel['short_answer']);
         $this->assertSame([], $rel['related']);
     }
+
+    public function test_empty_string_query_behaves_like_no_query(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'c1',
+                'title' => 'Common',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $a = $service->forRequest(null, [], null);
+        $b = $service->forRequest('', [], null);
+        $this->assertEquals($a, $b);
+        $this->assertNull($b['query']);
+        $this->assertNotEmpty($b['common']);
+    }
+
+    public function test_search_with_no_matches_returns_empty_results(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'only',
+                'title' => 'Alpha only',
+                'aliases' => [],
+                'category' => 'Cat',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('zzzznomatchzzzz', [], null);
+        $this->assertSame('zzzznomatchzzzz', $out['query']);
+        $this->assertSame([], $out['results']);
+    }
+
+    public function test_missing_route_name_serializes_null_url_without_throw(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'noroute',
+                'title' => 'T',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+            [
+                'key' => 'badroute',
+                'title' => 'Bad route topic',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => 'this.route.name.does.not.exist.on.purpose',
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('Bad route', [], null);
+        $this->assertCount(1, $out['results']);
+        $this->assertNull($out['results'][0]['url']);
+        $this->assertSame('this.route.name.does.not.exist.on.purpose', $out['results'][0]['route_name']);
+    }
+
+    public function test_related_omits_targets_user_cannot_access(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'parent',
+                'title' => 'Parent',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => ['secret', 'child'],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+            [
+                'key' => 'secret',
+                'title' => 'Secret child',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'Hidden',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => ['billing.view'],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+            [
+                'key' => 'child',
+                'title' => 'Public child',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'Visible',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('Parent', [], null);
+        $related = $out['results'][0]['related'];
+        $this->assertCount(1, $related);
+        $this->assertSame('child', $related[0]['key']);
+    }
+
+    public function test_malformed_action_entries_are_skipped_or_sanitized(): void
+    {
+        config(['help_actions.actions' => [
+            'not-an-array',
+            [
+                'key' => '',
+                'title' => 'No key',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+            [
+                'key' => 'ok',
+                'title' => 'OK',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => ['a', 99, ['nested'], 'b'],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [1, 'tag', null],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 2,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('OK', [], null);
+        $this->assertCount(1, $out['results']);
+        $row = $out['results'][0];
+        $this->assertSame(['a', '99', 'b'], $row['steps']);
+        $this->assertSame(['1', 'tag'], $row['tags']);
+    }
+
+    public function test_non_array_permissions_in_config_treated_as_public(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'wide',
+                'title' => 'Wide',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => 'billing.view',
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest(null, [], null);
+        $this->assertCount(1, $out['common']);
+        $this->assertSame('wide', $out['common'][0]['key']);
+    }
 }

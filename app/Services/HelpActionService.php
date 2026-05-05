@@ -25,6 +25,9 @@ class HelpActionService
         }
 
         $q = $query !== null ? trim($query) : '';
+        if ($q !== '' && mb_strlen($q) > 256) {
+            $q = mb_substr($q, 0, 256);
+        }
         $normalizedQuery = $q === '' ? null : $q;
 
         $common = $this->pickCommon($visible);
@@ -68,11 +71,15 @@ class HelpActionService
     public function userCanAccess(array $action, array $userPermissions): bool
     {
         $required = $action['permissions'] ?? [];
-        if (! is_array($required) || $required === []) {
+        if (! is_array($required)) {
+            $required = [];
+        }
+        if ($required === []) {
             return true;
         }
         foreach ($required as $permission) {
-            if (! is_string($permission) || ! in_array($permission, $userPermissions, true)) {
+            $p = is_string($permission) ? $permission : (is_scalar($permission) ? (string) $permission : null);
+            if ($p === null || $p === '' || ! in_array($p, $userPermissions, true)) {
                 return false;
             }
         }
@@ -141,11 +148,11 @@ class HelpActionService
             'title' => (string) ($action['title'] ?? ''),
             'category' => (string) ($action['category'] ?? ''),
             'short_answer' => (string) ($action['short_answer'] ?? ''),
-            'steps' => is_array($action['steps'] ?? null) ? $action['steps'] : [],
+            'steps' => $this->sanitizeSteps($action['steps'] ?? null),
             'page_label' => (string) ($action['page_label'] ?? ''),
             'route_name' => $routeName,
             'url' => $url,
-            'tags' => is_array($action['tags'] ?? null) ? $action['tags'] : [],
+            'tags' => $this->sanitizeStringList($action['tags'] ?? null),
             'related' => $relatedOut,
         ];
     }
@@ -166,13 +173,53 @@ class HelpActionService
             'title' => (string) ($target['title'] ?? ''),
             'category' => (string) ($target['category'] ?? ''),
             'short_answer' => (string) ($target['short_answer'] ?? ''),
-            'steps' => is_array($target['steps'] ?? null) ? $target['steps'] : [],
+            'steps' => $this->sanitizeSteps($target['steps'] ?? null),
             'page_label' => (string) ($target['page_label'] ?? ''),
             'route_name' => $routeName,
             'url' => $this->resolveUrl($routeName, $bindings, $brand),
-            'tags' => is_array($target['tags'] ?? null) ? $target['tags'] : [],
+            'tags' => $this->sanitizeStringList($target['tags'] ?? null),
             'related' => [],
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function sanitizeSteps(mixed $steps): array
+    {
+        if (! is_array($steps)) {
+            return [];
+        }
+        $out = [];
+        foreach ($steps as $step) {
+            if (is_string($step) && $step !== '') {
+                $out[] = $step;
+            } elseif (is_scalar($step) && (string) $step !== '') {
+                $out[] = (string) $step;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function sanitizeStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $item) {
+            if (is_string($item) && $item !== '') {
+                $out[] = $item;
+            } elseif (is_scalar($item) && (string) $item !== '') {
+                $out[] = (string) $item;
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -194,6 +241,8 @@ class HelpActionService
                     return null;
                 }
                 $params[$param] = $brand->id;
+            } else {
+                // Only `active_brand` is supported; unknown sources skip binding (route() may still succeed or throw — caught below).
             }
         }
 
@@ -217,15 +266,19 @@ class HelpActionService
         $haystacks = [];
         $haystacks[] = mb_strtolower((string) ($action['title'] ?? ''));
         foreach ($action['aliases'] ?? [] as $alias) {
-            if (is_string($alias)) {
+            if (is_string($alias) && $alias !== '') {
                 $haystacks[] = mb_strtolower($alias);
+            } elseif (is_scalar($alias) && (string) $alias !== '') {
+                $haystacks[] = mb_strtolower((string) $alias);
             }
         }
         $haystacks[] = mb_strtolower((string) ($action['category'] ?? ''));
         $haystacks[] = mb_strtolower((string) ($action['short_answer'] ?? ''));
         foreach ($action['tags'] ?? [] as $tag) {
-            if (is_string($tag)) {
+            if (is_string($tag) && $tag !== '') {
                 $haystacks[] = mb_strtolower($tag);
+            } elseif (is_scalar($tag) && (string) $tag !== '') {
+                $haystacks[] = mb_strtolower((string) $tag);
             }
         }
 

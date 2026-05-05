@@ -6,6 +6,38 @@
 
 V1 is **file-driven** (no database). The backend loads it through `App\Services\HelpActionService`, and the app shell queries `GET /app/help/actions` for the help panel.
 
+## API contract (`GET /app/help/actions`)
+
+- **Query `q`**: optional string. Non-strings (e.g. `q[]=x`) are ignored and treated as no search. Values are trimmed and capped at **256 characters** server-side.
+- **Response** (always JSON): `{ "query": string|null, "results": [...], "common": [...] }`
+  - `query` is `null` when there is no active search; otherwise the normalized search string.
+  - Each item in `results` / `common` exposes **only** these keys: `key`, `title`, `category`, `short_answer`, `steps` (list of strings), `page_label`, `route_name` (nullable), `url` (nullable), `tags` (list of strings), `related` (list of the same shape, with empty `related` on nested entries).
+- **URLs**: `url` is generated only when `Route::has()` succeeds and parameters resolve (e.g. `active_brand` requires the current `app('brand')`). Missing routes or unresolved bindings yield `url: null` without throwing.
+- **Permissions**: Actions are filtered with **AND** semantics on `permissions` before search ranking. Invalid `permissions` values in config (non-array) are treated as **no restriction** (public) so a bad deploy does not 500; fix the config to an array as soon as you notice.
+
+## Adding or editing actions safely
+
+1. **Use a stable `key`**  
+   Dot-separated, lower snake case (e.g. `billing.plan`). Never rename casually: analytics and `related` references depend on it.
+
+2. **Verify `route_name`**  
+   Run `php artisan route:list --name=…` or search `routes/web.php`. Wrong names still return JSON with `url: null` but confuse users—prefer fixing immediately.
+
+3. **`route_bindings`**  
+   Only `active_brand` is supported today. It maps to the resolved `app('brand')` id. If there is no active brand, `url` is `null` and the UI explains context.
+
+4. **`permissions`**  
+   Use permission strings from `App\Support\Roles\PermissionMap` (same as the rest of RBAC). Empty array = visible to all authenticated users who can hit the endpoint.
+
+5. **`related`**  
+   List other **`key` values**. Related targets are only included if that target is **also visible** to the user (same permission filter). Do not use `related` to point at “admin-only” topics from a public parent—the child will be omitted automatically.
+
+6. **`steps` / `tags` / `aliases`**  
+   Use arrays of strings. Non-string entries are coerced or dropped in the API so clients never see odd types.
+
+7. **Ship with the route change**  
+   If you rename a Laravel route, update `help_actions.php` in the **same PR** as `routes/web.php`.
+
 ## How future AI should use this
 
 1. **Retrieval first**  
@@ -15,10 +47,29 @@ V1 is **file-driven** (no database). The backend loads it through `App\Services\
    Model answers should be **grounded in the matching help action(s)**. Prefer quoting or paraphrasing `short_answer` and `steps` from the config rather than inventing new product behavior. If nothing matches, the model should say it does not have a covered topic and point to support or the help search UI—not guess.
 
 3. **Respect `permissions` and `url` resolution**  
-   The service filters actions by the user’s effective permissions (same idea as the rest of the app). AI assistants calling APIs on behalf of the user must still respect RBAC; **never** Surface steps that imply access the user does not have. URLs that depend on `active_brand` may be null until context exists—the UI already handles that.
+   The service filters actions by the user’s effective permissions (same idea as the rest of the app). AI assistants calling APIs on behalf of the user must still respect RBAC; **never** surface steps that imply access the user does not have. URLs that depend on `active_brand` may be null until context exists—the UI already handles that.
 
 4. **Stable keys**  
    The `key` field (e.g. `assets.upload`) is the stable identifier for analytics, A/B tests, and linking related content. Prefer referencing keys in code and prompts rather than titles.
+
+## Example prompt (hypothetical AI) using only retrieved actions
+
+Use this pattern so the model cannot invent navigation:
+
+```
+You are Jackpot in-app help. You must ONLY use the JSON array HELP_ACTIONS below as factual ground truth.
+Rules:
+- Answer in short paragraphs or bullet steps taken from short_answer and steps fields.
+- If the user question is not covered by any entry, say you do not have a documented topic and suggest they open Help in the app or contact support. Do not guess URLs or menu paths.
+- Never claim the user can perform an action that requires a permission they do not have; the list is already filtered for their role.
+
+HELP_ACTIONS:
+{{paste JSON from GET /app/help/actions?q=... or from config for an offline tool}}
+
+User question: {{user_question}}
+```
+
+In production, replace `{{paste…}}` with the live HTTP response body or a server-side slice of the same structure.
 
 ## Why AI answers should stay tied to predefined actions
 
@@ -56,3 +107,7 @@ When editorial teams need to edit help without deploys:
 4. Optionally keep **seed data** from config for new environments and migrations.
 
 Until then, PRs that change copy or routes should update `config/help_actions.php` alongside real route changes.
+
+## Frontend testing
+
+Jackpot’s JS tests today use **Node’s built-in test runner** on small `.mjs` utilities (`npm run test:js`). There is **no React Testing Library / Vitest** harness for components yet, so `HelpLauncher` is covered via manual QA, Headless UI behavior, and backend/API tests. When a component test runner is adopted, add tests for: open/close, Escape vs back stack, retry on fetch failure, and focus order.
