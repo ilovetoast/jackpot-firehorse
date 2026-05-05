@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\TenantAgency;
 use App\Models\TenantModule;
 use App\Services\AiUsageService;
+use App\Services\BillingService;
 use App\Services\CompanyCostService;
 use App\Services\CompanyDataService;
 use App\Services\FeatureGate;
@@ -321,6 +322,26 @@ class CompanyViewController extends Controller
             ->where('module_key', TenantModule::KEY_CREATOR)
             ->first();
 
+        $featureGate = app(FeatureGate::class);
+        $stripeInvoicesAdmin = [];
+        if ($stripeConnected && $tenant->stripe_id) {
+            try {
+                $stripeInvoicesAdmin = app(BillingService::class)->listStripeInvoicesForAdmin($tenant, 40);
+            } catch (\Throwable $e) {
+                Log::warning('CompanyViewController.stripe_invoices_failed', [
+                    'tenant_id' => $tenant->id,
+                    'message' => $e->getMessage(),
+                ]);
+                $stripeInvoicesAdmin = null;
+            }
+        }
+
+        $activeAddonLineItems = $this->buildAdminActiveAddonLineItems($tenant, $creatorModuleRow, $featureGate);
+        $subscriptionStripeId = $subscription?->stripe_id;
+        $canUseStripeCustomerAddons = $stripeConnected
+            && $subscriptionStripeId
+            && ($subscription->stripe_status ?? '') === 'active';
+
         return Inertia::render('Admin/CompanyView', [
             'linked_agencies' => $linkedAgencies,
             'company' => [
@@ -344,7 +365,7 @@ class CompanyViewController extends Controller
                 'plan_change_info' => $planChangeInfo,
                 'creator_module' => [
                     'has_row' => $creatorModuleRow !== null,
-                    'enabled' => app(FeatureGate::class)->creatorModuleEnabled($tenant),
+                    'enabled' => $featureGate->creatorModuleEnabled($tenant),
                     'status' => $creatorModuleRow?->status,
                     'expires_at' => $creatorModuleRow?->expires_at?->toIso8601String(),
                     'granted_by_admin' => (bool) ($creatorModuleRow?->granted_by_admin),
@@ -358,6 +379,10 @@ class CompanyViewController extends Controller
                     'ai_credits_addon_stripe_price_id' => $tenant->ai_credits_addon_stripe_price_id,
                     'ai_credits_addon_stripe_subscription_item_id' => $tenant->ai_credits_addon_stripe_subscription_item_id,
                 ],
+                'active_addon_line_items' => $activeAddonLineItems,
+                'stripe_default_subscription_id' => $subscriptionStripeId,
+                'can_use_stripe_customer_addons' => $canUseStripeCustomerAddons,
+                'stripe_invoices_admin' => $stripeInvoicesAdmin,
                 'owner' => $owner ? [
                     'id' => $owner->id,
                     'name' => trim(($owner->first_name ?? '').' '.($owner->last_name ?? '')),
@@ -602,5 +627,80 @@ class CompanyViewController extends Controller
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    protected function buildAdminActiveAddonLineItems(Tenant $tenant, ?TenantModule $creatorModuleRow, FeatureGate $featureGate): array
+    {
+        $items = [];
+
+        $storageMb = (int) ($tenant->storage_addon_mb ?? 0);
+        $storageItem = $tenant->storage_addon_stripe_subscription_item_id;
+        if ($storageMb > 0 || ! empty($storageItem)) {
+            $warning = null;
+            if ($storageMb > 0 && empty($storageItem)) {
+                $warning = 'Storage quota on row without Stripe subscription item — reconcile or fix.';
+            } elseif ($storageMb <= 0 && ! empty($storageItem)) {
+                $warning = 'Stripe storage item on file but MB is zero — possible ghost row.';
+            }
+            $items[] = [
+                'kind' => 'storage',
+                'title' => 'Storage add-on (Stripe)',
+                'value_label' => $storageMb > 0 ? $this->formatTenantStorageMbLabel($storageMb).' extra' : '—',
+                'stripe_item_id' => $storageItem,
+                'warning' => $warning,
+            ];
+        }
+
+        $ai = (int) ($tenant->ai_credits_addon ?? 0);
+        $aiItem = $tenant->ai_credits_addon_stripe_subscription_item_id;
+        if ($ai > 0 || ! empty($aiItem)) {
+            $warning = null;
+            if ($ai > 0 && empty($aiItem)) {
+                $warning = 'AI credits on row without Stripe subscription item — reconcile or fix.';
+            } elseif ($ai <= 0 && ! empty($aiItem)) {
+                $warning = 'Stripe AI item on file but credits are zero — possible ghost row.';
+            }
+            $items[] = [
+                'kind' => 'ai_credits',
+                'title' => 'AI credits add-on (Stripe)',
+                'value_label' => $ai > 0 ? number_format($ai).' / billing period' : '—',
+                'stripe_item_id' => $aiItem,
+                'warning' => $warning,
+            ];
+        }
+
+        if ($creatorModuleRow && in_array((string) $creatorModuleRow->status, ['active', 'trial'], true)) {
+            $entitled = $featureGate->creatorModuleEnabled($tenant);
+            $items[] = [
+                'kind' => 'creator',
+                'title' => 'Creator module',
+                'value_label' => (string) $creatorModuleRow->status === 'trial' ? 'Trial' : 'Active',
+                'subtitle' => ($creatorModuleRow->granted_by_admin ?? false)
+                    ? 'Granted by admin (not Stripe-billed for module access)'
+                    : ($entitled ? 'Enabled via plan or Stripe subscription' : 'Row present; check expiry or status'),
+                'seats_limit' => $creatorModuleRow->seats_limit,
+                'stripe_item_id' => $creatorModuleRow->stripe_subscription_item_id,
+                'warning' => ! $entitled ? 'Module row exists but app entitlement is off — check expiry or status.' : null,
+            ];
+        }
+
+        return $items;
+    }
+
+    protected function formatTenantStorageMbLabel(int $mb): string
+    {
+        if ($mb >= 1024 * 1024) {
+            return ((int) round($mb / 1024 / 1024)).' TB';
+        }
+        if ($mb >= 1024) {
+            $gb = $mb / 1024;
+
+            return (abs($gb - round($gb)) < 0.05 ? (string) (int) round($gb) : number_format($gb, 1, '.', '')).' GB';
+        }
+
+        return $mb.' MB';
     }
 }

@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Tenant;
 use App\Services\AuthPermissionService;
 use App\Services\HelpActionService;
+use App\Services\HelpAiAskService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,6 +26,30 @@ class HelpActionController extends Controller
             $query,
             $permissions,
             $brand
+        );
+
+        return response()->json($payload);
+    }
+
+    public function ask(Request $request, AuthPermissionService $authPermissionService, HelpAiAskService $helpAiAskService): JsonResponse
+    {
+        $validated = $request->validate([
+            'question' => ['required', 'string', 'max:2000'],
+        ]);
+
+        $user = $request->user();
+        /** @var Tenant $tenant */
+        $tenant = app('tenant');
+        $brand = app()->bound('brand') ? app('brand') : null;
+
+        $permissions = $authPermissionService->effectivePermissions($user, $tenant, $brand);
+
+        $payload = $helpAiAskService->ask(
+            $validated['question'],
+            $permissions,
+            $brand,
+            $tenant,
+            $user
         );
 
         return response()->json($payload);

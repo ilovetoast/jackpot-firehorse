@@ -668,6 +668,7 @@ export default function AppNav({
                         {showBrandSettings ? (
                             <Link
                                 href={route('brands.edit', { brand: activeBrand.id })}
+                                data-help="brand-settings-nav"
                                 title={brandSettingsLabel}
                                 className={`${subLinkBase} ${brandSettingsPathActive ? subLinkActive : subLinkInactive}`}
                                 style={brandSettingsPathActive ? { borderLeftColor: accent } : undefined}

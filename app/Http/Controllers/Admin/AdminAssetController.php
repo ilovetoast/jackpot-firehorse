@@ -318,7 +318,10 @@ class AdminAssetController extends Controller
             'metadata_extracted' => (bool) ($metadata['metadata_extracted'] ?? false),
             'thumbnails_generated' => $thumbnailsGenerated,
             'thumbnail_timeout' => (bool) ($metadata['thumbnail_timeout'] ?? false),
-            'stuck_state_detected' => ($asset->analysis_status ?? '') === 'uploading' && ! empty($metadata['metadata_extracted']),
+            'stuck_state_detected' => (
+                (($asset->analysis_status ?? '') === 'uploading' && ! empty($metadata['metadata_extracted']))
+                || (! empty($metadata['pipeline_completed_at']) && ($asset->analysis_status ?? '') !== 'complete')
+            ),
             'auto_recover_attempted' => (bool) ($metadata['auto_recover_attempted'] ?? false),
         ];
 

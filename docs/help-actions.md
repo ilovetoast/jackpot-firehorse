@@ -11,9 +11,29 @@ V1 is **file-driven** (no database). The backend loads it through `App\Services\
 - **Query `q`**: optional string. Non-strings (e.g. `q[]=x`) are ignored and treated as no search. Values are trimmed and capped at **256 characters** server-side.
 - **Response** (always JSON): `{ "query": string|null, "results": [...], "common": [...] }`
   - `query` is `null` when there is no active search; otherwise the normalized search string.
-  - Each item in `results` / `common` exposes **only** these keys: `key`, `title`, `category`, `short_answer`, `steps` (list of strings), `page_label`, `route_name` (nullable), `url` (nullable), `tags` (list of strings), `related` (list of the same shape, with empty `related` on nested entries).
-- **URLs**: `url` is generated only when `Route::has()` succeeds and parameters resolve (e.g. `active_brand` requires the current `app('brand')`). Missing routes or unresolved bindings yield `url: null` without throwing.
+  - Each item in `results` / `common` exposes: `key`, `title`, `category`, `short_answer`, `steps` (list of strings), `page_label`, `route_name` (nullable), `url` (nullable), `deep_link` (nullable object), `highlight` (nullable object), `tags` (list of strings), `related` (list of the same shape, with empty `related` on nested entries).
+- **`deep_link`** (optional in config): when present and valid, the API includes `{ "route_name": string, "params": { … }, "query": { … } }` with **resolved** route parameters (same binding rules as `route_bindings`) and a sanitized query map (string keys `^[a-zA-Z0-9_-]{1,64}$`, string values capped at 256 chars, max 24 entries). If the deep-link route is missing or cannot be generated, `deep_link` is `null`.
+- **`highlight`** (optional in config): when valid, `{ "selector": string, "label"?: string }`. `selector` must match `^[a-z0-9][a-z0-9_.-]{0,63}$` — this is the value used in `[data-help="selector"]` on the frontend and in the `highlight=` query param for **Show me**. Invalid or non-array values yield `highlight: null` (never a 500). Labels longer than 200 characters are truncated server-side.
+- **URLs**: `url` is built by **preferring `deep_link`** (`route_name` + `params` + `query`) when that resolves; otherwise it falls back to `route_name` + `route_bindings`. Generation uses `Route::has()` and the same `active_brand` binding rules. Missing routes or unresolved bindings yield `url: null` without throwing.
 - **Permissions**: Actions are filtered with **AND** semantics on `permissions` before search ranking. Invalid `permissions` values in config (non-array) are treated as **no restriction** (public) so a bad deploy does not 500; fix the config to an array as soon as you notice.
+
+## Phase 2 — `POST /app/help/ask` (grounded AI)
+
+- **Body**: `{ "question": string }` — required, max **2000** characters (trimmed server-side in matching).
+- **Middleware**: same `tenant` context as `GET /app/help/actions`, plus **`throttle:20,1`** per user/session.
+- **Flow**:
+  1. `HelpActionService::rankForNaturalLanguageQuestion()` scores visible actions (same ranking as search).
+  2. If the best score is below `config('ai.help_ask.strong_match_min_score')` (default **12**), the response is **`kind: "fallback"`** with suggested common topics — **no LLM call**.
+  3. If `tenant.settings.ai_enabled === false` or `config('ai.help_ask.enabled')` is false → **`kind: "ai_disabled"`** with suggestions (no LLM).
+  4. Otherwise `AIService::executeAgent()` runs agent **`in_app_help_assistant`** (`config('ai.help_ask.agent_id')`) with task type **`in_app_help_action_answer`**, model **`gpt-4o-mini`** (registry key `gpt-4o-mini`), tenant + user + `brand_id` attribution. Only the top **`ai.help_ask.max_actions_for_prompt`** serialized actions are sent as JSON in the prompt.
+  5. On provider/model failure → **`kind: "fallback_action"`** with the best matching serialized action as `primary` (no throw to the client).
+- **Logging**: `Log::info` lines `help.ask.*` include `user_id`, `tenant_id`, `brand_id`, query snippet, matched keys, best score; on success also `model`, `agent_run_id`, tokens, `cost` from the agent run.
+- **Response shapes** (all 200 JSON):
+  - **`kind: "ai"`**: `answer` = `{ direct_answer, numbered_steps, recommended_page?, related_actions, confidence }` (sanitized to retrieved keys/URLs only), `usage` = `{ agent_run_id, model, tokens_in, tokens_out, cost }`.
+  - **`kind: "fallback"`** | **`"ai_disabled"`**: `message`, `suggested` (slice of common topics).
+  - **`kind: "fallback_action"`**: `message`, `primary` (one full serialized action), optional `suggested`.
+
+Guardrails are enforced in `HelpAiAskService` (prompt contract + `sanitizeAiPayload`). The model must not invent routes; `recommended_page.url` is re-bound from the retrieved payload when possible.
 
 ## Adding or editing actions safely
 
@@ -26,16 +46,22 @@ V1 is **file-driven** (no database). The backend loads it through `App\Services\
 3. **`route_bindings`**  
    Only `active_brand` is supported today. It maps to the resolved `app('brand')` id. If there is no active brand, `url` is `null` and the UI explains context.
 
-4. **`permissions`**  
+4. **`deep_link`** (optional)  
+   Object with `route_name` (string), optional `params` (same shape as `route_bindings`: values `active_brand` only), and optional `query` (plain key → scalar for query string). Used for contextual URLs (different page than `route_name`, or same page with extra query e.g. a tab). If `deep_link` cannot be resolved, the service falls back to `route_name` for `url` and sets `deep_link` to `null` in JSON.
+
+5. **`highlight`** (optional)  
+   Object with required `selector` (stable id for `data-help` and `?highlight=`) and optional `label` (short UI hint). Coordinate with frontend: add matching `data-help="{selector}"` on the control you want to pulse.
+
+6. **`permissions`**  
    Use permission strings from `App\Support\Roles\PermissionMap` (same as the rest of RBAC). Empty array = visible to all authenticated users who can hit the endpoint.
 
-5. **`related`**  
+7. **`related`**  
    List other **`key` values**. Related targets are only included if that target is **also visible** to the user (same permission filter). Do not use `related` to point at “admin-only” topics from a public parent—the child will be omitted automatically.
 
-6. **`steps` / `tags` / `aliases`**  
+8. **`steps` / `tags` / `aliases`**  
    Use arrays of strings. Non-string entries are coerced or dropped in the API so clients never see odd types.
 
-7. **Ship with the route change**  
+9. **Ship with the route change**  
    If you rename a Laravel route, update `help_actions.php` in the **same PR** as `routes/web.php`.
 
 ## How future AI should use this
@@ -86,6 +112,22 @@ For each help action you can extend the config with optional fields (implementat
 - `video_url`: short loom-style walkthrough  
 
 The frontend panel can then render a media block under **Steps**. Until then, keep copy concise so steps remain usable without images.
+
+## Contextual “Show me” (deep link + highlight)
+
+The help panel’s **Show me** control navigates to the resolved `url` and appends:
+
+`?help={action.key}&highlight={highlight.selector}`
+
+A small app-level hook (`HelpHighlightController` + `useHelpHighlightFromUrl`) finds `[data-help="…"]`, applies a short pulse/outline, then strips `help` / `highlight` from the URL with an Inertia `replace` visit so bookmarks stay clean.
+
+Example (after deploying matching `data-help` attributes):
+
+- Config: `key` => `collections.add_assets`, `highlight.selector` => `collections-add-assets`, `url` => `/app/collections` (via routes).
+- User clicks **Show me** → `/app/collections?help=collections.add_assets&highlight=collections-add-assets`
+- On load, the selection bar (when viewing a collection) or another marked control is highlighted briefly.
+
+Keep `selector` names stable; they are part of the public contract alongside `key`.
 
 ## Page-specific contextual help later
 

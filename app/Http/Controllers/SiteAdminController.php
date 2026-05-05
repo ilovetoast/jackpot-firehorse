@@ -2478,6 +2478,22 @@ class SiteAdminController extends Controller
     }
 
     /**
+     * Void a draft or open Stripe invoice for this tenant (admin cleanup). Invoices are not stored locally.
+     */
+    public function voidTenantStripeInvoice(Tenant $tenant, string $invoice): \Illuminate\Http\RedirectResponse
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can void invoices.');
+
+        try {
+            app(BillingService::class)->voidStripeInvoiceForTenant($tenant, $invoice);
+
+            return back()->with('success', "Invoice {$invoice} was voided in Stripe.");
+        } catch (\Throwable $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
      * Manually sync a subscription from Stripe.
      */
     public function syncSubscription(Request $request, Tenant $tenant)

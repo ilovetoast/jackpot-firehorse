@@ -66,26 +66,37 @@ export default function NotificationBell({ textColor = '#000000' }) {
 
     const loadNotifications = async () => {
         try {
-            const response = await fetch('/app/api/notifications')
+            const response = await fetch('/app/api/notifications', {
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json' },
+            })
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`)
+            }
             const data = await response.json()
             setNotifications(data.notifications || [])
             setUnreadCount(data.unread_count || 0)
-            setLoading(false)
         } catch (error) {
             console.error('Failed to load notifications:', error)
+        } finally {
             setLoading(false)
         }
     }
 
     const handleMarkAsRead = async (notificationId) => {
         try {
-            await fetch(`/app/api/notifications/${notificationId}/read`, {
+            const res = await fetch(`/app/api/notifications/${notificationId}/read`, {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: {
+                    Accept: 'application/json',
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content'),
                 },
             })
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`)
+            }
             loadNotifications()
         } catch (error) {
             console.error('Failed to mark notification as read:', error)

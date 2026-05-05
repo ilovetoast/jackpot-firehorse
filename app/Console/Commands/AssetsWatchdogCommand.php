@@ -76,6 +76,39 @@ class AssetsWatchdogCommand extends Command
             }
         }
 
+        // Pipeline marked complete in metadata but analysis_status never advanced (e.g. HEIC dimensions_unknown
+        // skip path before FinalizeAssetJob alignment). Reconcile heals without spamming incidents.
+        $zombieCutoff = now()->subMinutes($stuckGrace);
+        $zombies = Asset::whereNull('deleted_at')
+            ->where('analysis_status', '!=', 'complete')
+            ->whereNotNull('metadata->pipeline_completed_at')
+            ->where('updated_at', '<', $zombieCutoff)
+            ->limit(200)
+            ->get();
+        foreach ($zombies as $asset) {
+            try {
+                app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+            } catch (\Throwable $e) {
+                $this->warn("Reconcile failed for zombie pipeline asset {$asset->id}: {$e->getMessage()}");
+            }
+        }
+
+        // Analysis already complete but thumbnail row stuck FAILED after pipeline (Rule 1c heals).
+        $failedThumbZombies = Asset::whereNull('deleted_at')
+            ->where('analysis_status', 'complete')
+            ->where('thumbnail_status', ThumbnailStatus::FAILED)
+            ->whereNotNull('metadata->pipeline_completed_at')
+            ->where('updated_at', '<', $zombieCutoff)
+            ->limit(200)
+            ->get();
+        foreach ($failedThumbZombies as $asset) {
+            try {
+                app(\App\Services\Assets\AssetStateReconciliationService::class)->reconcile($asset->fresh());
+            } catch (\Throwable $e) {
+                $this->warn("Reconcile failed for failed-thumb terminal asset {$asset->id}: {$e->getMessage()}");
+            }
+        }
+
         $recorded = 0;
 
         foreach ($stuck as $asset) {

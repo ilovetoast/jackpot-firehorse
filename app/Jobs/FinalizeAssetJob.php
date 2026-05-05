@@ -174,6 +174,7 @@ class FinalizeAssetJob implements ShouldQueue
         ]);
         \App\Services\UploadDiagnosticLogger::jobComplete('FinalizeAssetJob', $asset->id);
 
+        $asset = $asset->fresh();
         $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
             ? $asset->thumbnail_status
             : null;
@@ -184,6 +185,20 @@ class FinalizeAssetJob implements ShouldQueue
         if ($willDispatchEmbedding) {
             GenerateAssetEmbeddingJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
         } else {
+            // Images with thumbnails skipped (or otherwise no embedding): GenerateAssetEmbeddingJob is not
+            // dispatched, so nothing would advance analysis_status from generating_thumbnails — align here.
+            if (ImageEmbeddingService::isImageMimeType($mimeForEmbedding, $asset->original_filename)
+                && ($asset->analysis_status ?? '') !== 'complete') {
+                $patch = ['analysis_status' => 'complete'];
+                if ($thumbnailStatus === ThumbnailStatus::PENDING || $thumbnailStatus === ThumbnailStatus::PROCESSING) {
+                    $meta = $asset->metadata ?? [];
+                    $patch['thumbnail_status'] = ThumbnailStatus::SKIPPED;
+                    $patch['thumbnail_error'] = (string) ($meta['thumbnail_skip_message'] ?? $meta['thumbnail_skip_reason'] ?? 'Thumbnail generation skipped');
+                    $patch['thumbnail_started_at'] = null;
+                }
+                Asset::where('id', $this->assetId)->update($patch);
+                $asset = $asset->fresh();
+            }
             // Non-images and image assets without embeddings: embedding job normally dispatches EBI after scoring.
             $fresh = $asset->fresh();
             $schedule = app(BrandIntelligenceScheduleService::class);

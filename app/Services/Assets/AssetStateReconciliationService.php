@@ -44,6 +44,31 @@ class AssetStateReconciliationService
             $changes = array_merge($changes, $promotions);
         }
 
+        // Rule 1b — Pipeline finalized with intentional thumbnail skip (no embedding for skipped images)
+        // FinalizeAssetJob does not queue embeddings when thumbnails are SKIPPED; without this rule,
+        // analysis_status can stay on generating_thumbnails forever while metadata shows pipeline_completed_at.
+        if (
+            isset($metadata['pipeline_completed_at'])
+            && ($metadata['thumbnails_generated'] ?? false) !== true
+            && ! empty($metadata['thumbnail_skip_reason'] ?? null)
+            && ($asset->analysis_status ?? '') !== 'complete'
+        ) {
+            $promotions = $this->applyRule1b($asset);
+            $changes = array_merge($changes, $promotions);
+            $asset = $asset->fresh();
+            $metadata = $asset->metadata ?? [];
+        }
+
+        // Rule 1c — Pipeline + analysis already complete but thumbnail row stuck FAILED (e.g. .ai raster
+        // exhausted retries, or Illustrator-like files that will not succeed in headless raster paths).
+        // "Attempt Repair" only reconciles; without this, admins see complete analysis + failed thumb forever.
+        $promotions = $this->applyRule1cIfApplicable($asset);
+        if (! empty($promotions)) {
+            $changes = array_merge($changes, $promotions);
+            $asset = $asset->fresh();
+            $metadata = $asset->metadata ?? [];
+        }
+
         // Rule 2 — Timeout But Later Success
         if (
             ($metadata['thumbnail_timeout'] ?? false) === true
@@ -175,6 +200,107 @@ class AssetStateReconciliationService
         }
 
         return $changes;
+    }
+
+    /**
+     * Rule 1b: pipeline_completed_at + thumbnail_skip_reason + analysis not complete → complete analysis;
+     * align stuck thumbnail row (pending/processing) with SKIPPED when metadata says skip.
+     *
+     * @return list<string>
+     */
+    protected function applyRule1b(Asset $asset): array
+    {
+        $changes = [];
+        $metadata = $asset->metadata ?? [];
+        $updates = ['analysis_status' => 'complete'];
+        $changes[] = 'analysis_status → complete';
+
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
+        if ($thumbEnum === ThumbnailStatus::PENDING || $thumbEnum === ThumbnailStatus::PROCESSING) {
+            $updates['thumbnail_status'] = ThumbnailStatus::SKIPPED;
+            $updates['thumbnail_error'] = (string) ($metadata['thumbnail_skip_message'] ?? $metadata['thumbnail_skip_reason'] ?? 'Thumbnail generation skipped');
+            $updates['thumbnail_started_at'] = null;
+            $changes[] = 'thumbnail_status → skipped (aligned with metadata skip)';
+        }
+
+        $asset->update($updates);
+        $asset->refresh();
+        Log::info('[AssetStateReconciliationService] Rule 1b applied (pipeline done, thumbnails skipped)', [
+            'asset_id' => $asset->id,
+            'changes' => $changes,
+        ]);
+
+        return $changes;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function applyRule1cIfApplicable(Asset $asset): array
+    {
+        $asset = $asset->fresh();
+        $metadata = $asset->metadata ?? [];
+
+        if (($asset->analysis_status ?? '') !== 'complete') {
+            return [];
+        }
+        if (! isset($metadata['pipeline_completed_at'])) {
+            return [];
+        }
+
+        $thumbEnum = $asset->thumbnail_status instanceof ThumbnailStatus ? $asset->thumbnail_status : null;
+        if ($thumbEnum !== ThumbnailStatus::FAILED) {
+            return [];
+        }
+
+        $maxRetries = max(1, (int) config('assets.thumbnail.max_retries', 3));
+        $exhausted = (int) ($asset->thumbnail_retry_count ?? 0) >= $maxRetries;
+        $designRaster = $this->isDesignIllustratorLikeAsset($asset);
+
+        if (! $exhausted && ! $designRaster) {
+            return [];
+        }
+
+        $reason = $designRaster ? 'design_raster_failed' : 'generation_failed_exhausted';
+        $message = $designRaster
+            ? 'Design/vector preview could not be rasterized (or is unsupported in this environment); the library shows a type icon.'
+            : "Thumbnail generation failed after {$maxRetries} attempts; marked as skipped for display.";
+
+        $meta = $metadata;
+        $meta['thumbnail_skip_reason'] = $reason;
+        $meta['thumbnail_skip_message'] = $message;
+
+        $retryCountBefore = (int) ($asset->thumbnail_retry_count ?? 0);
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => $message,
+            'thumbnail_started_at' => null,
+            'metadata' => $meta,
+        ]);
+        $asset->refresh();
+
+        Log::info('[AssetStateReconciliationService] Rule 1c applied (terminal FAILED→SKIPPED after pipeline complete)', [
+            'asset_id' => $asset->id,
+            'reason' => $reason,
+            'thumbnail_retry_count' => $retryCountBefore,
+            'design_raster' => $designRaster,
+        ]);
+
+        return ['Rule 1c: thumbnail_status failed→skipped after pipeline (terminal)'];
+    }
+
+    private function isDesignIllustratorLikeAsset(Asset $asset): bool
+    {
+        $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+
+        if (in_array($ext, ['ai', 'eps'], true)) {
+            return true;
+        }
+
+        return str_contains($mime, 'illustrator')
+            || str_contains($mime, 'postscript')
+            || str_contains($mime, 'illustrator-artwork');
     }
 
     /**

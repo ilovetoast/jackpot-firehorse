@@ -20,19 +20,22 @@ export default function CompanySelector({ companies }) {
     }
 
     return (
-        <div className="w-full max-w-md animate-fade-in" style={{ animationDuration: '500ms' }}>
-            <div className="text-center mb-12">
+        <div
+            className="w-full max-w-lg sm:max-w-2xl lg:max-w-4xl xl:max-w-6xl animate-fade-in"
+            style={{ animationDuration: '500ms' }}
+        >
+            <div className="text-center mb-10 md:mb-12">
                 <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-3">
                     Choose Workspace
                 </h1>
-                <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">
+                <p className="text-sm text-white/60 mt-2 max-w-md lg:max-w-2xl mx-auto">
                     Select a company to continue
                 </p>
             </div>
 
-            <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
                 {companies.length === 0 && (
-                    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-center">
+                    <div className="col-span-full rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-center">
                         <p className="text-sm text-white/70 leading-relaxed">
                             You don&apos;t have access to any workspace right now. You can manage your account, start a
                             company, or sign out and use a different login.
@@ -68,7 +71,7 @@ export default function CompanySelector({ companies }) {
                             type="button"
                             onClick={() => handleSelect(company)}
                             disabled={processing}
-                            className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] p-6 text-left transition-all duration-200 hover:scale-[1.02] hover:border-white/[0.16] hover:bg-white/10 disabled:opacity-50"
+                            className="group relative h-full min-h-[5.5rem] overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] p-5 sm:p-6 text-left transition-all duration-200 hover:scale-[1.01] hover:border-white/[0.16] hover:bg-white/10 disabled:opacity-50 md:hover:scale-[1.02]"
                         >
                             <div className="flex items-center gap-5">
                                 <CompanyIcon company={company} color={color} />

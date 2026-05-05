@@ -87,8 +87,19 @@ export default function AdminCompanyView({
     const [addonsModal, setAddonsModal] = useState({ open: false, step: 'pick' })
     const [billingReconcileBusy, setBillingReconcileBusy] = useState(false)
     const [billingSyncBusy, setBillingSyncBusy] = useState(false)
+    const [invoiceVoidBusy, setInvoiceVoidBusy] = useState(null)
 
     const closeAddonsModal = () => setAddonsModal({ open: false, step: 'pick' })
+
+    const handleVoidStripeInvoice = (invoiceId) => {
+        if (!window.confirm(`Void invoice ${invoiceId} in Stripe? This cannot be undone.`)) return
+        setInvoiceVoidBusy(invoiceId)
+        router.post(
+            route('admin.companies.stripe-invoices.void', { tenant: company.id, invoice: invoiceId }),
+            {},
+            { preserveScroll: true, onFinish: () => setInvoiceVoidBusy(null) },
+        )
+    }
 
     useEffect(() => {
         const cm = company.creator_module
@@ -702,7 +713,7 @@ export default function AdminCompanyView({
                                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                                         <h2 className="text-lg font-semibold text-gray-900">Plan Management</h2>
                                         <div className="flex flex-wrap items-center gap-2">
-                                            {company.creator_module && (
+                                            {company.plan_management && (
                                                 <button
                                                     type="button"
                                                     onClick={() => setAddonsModal({ open: true, step: 'pick' })}
@@ -733,6 +744,82 @@ export default function AdminCompanyView({
                                             )}
                                         </div>
                                     </div>
+
+                                    {(company.active_addon_line_items?.length > 0 ||
+                                        company.stripe_connected ||
+                                        company.billing_status === 'comped' ||
+                                        company.billing_status === 'trial' ||
+                                        company.plan_name === 'free') && (
+                                        <div className="mb-6 rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50/90 to-white p-4 ring-1 ring-indigo-100">
+                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                <div>
+                                                    <h3 className="text-sm font-semibold text-gray-900">
+                                                        Active add-ons &amp; billable extras
+                                                    </h3>
+                                                    <p className="mt-1 text-xs text-gray-600 max-w-3xl">
+                                                        Each card is a line item on the company (Stripe subscription add-ons or Creator module). This is separate from the Creator-only summary below.
+                                                    </p>
+                                                </div>
+                                                {company.stripe_default_subscription_id ? (
+                                                    <span className="text-[11px] font-mono text-gray-500 break-all max-w-xs text-right">
+                                                        Sub: {company.stripe_default_subscription_id}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                            {!company.stripe_connected ? (
+                                                <p className="mt-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                                    No Stripe customer on this company — users cannot purchase storage/AI add-ons through billing until Stripe is linked. You can still grant the{' '}
+                                                    <strong>Creator module</strong> from Add-on modules for free, trial, or comped workspaces.
+                                                </p>
+                                            ) : null}
+                                            {company.stripe_connected && !company.can_use_stripe_customer_addons ? (
+                                                <p className="mt-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                                                    Stripe is linked but there is no <strong>active</strong> subscription — self-serve storage/AI add-ons are blocked until the subscription is active.
+                                                </p>
+                                            ) : null}
+                                            {company.active_addon_line_items?.length ? (
+                                                <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                                    {company.active_addon_line_items.map((item) => (
+                                                        <li
+                                                            key={`${item.kind}-${item.title}`}
+                                                            className={`rounded-lg border bg-white px-3 py-3 shadow-sm ${
+                                                                item.warning ? 'border-amber-300 ring-1 ring-amber-100' : 'border-gray-200'
+                                                            }`}
+                                                        >
+                                                            <div className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                                                                {item.kind === 'storage'
+                                                                    ? 'Storage'
+                                                                    : item.kind === 'ai_credits'
+                                                                        ? 'AI credits'
+                                                                        : 'Module'}
+                                                            </div>
+                                                            <div className="mt-1 text-sm font-semibold text-gray-900">{item.title}</div>
+                                                            <div className="mt-1 text-sm text-gray-800">{item.value_label}</div>
+                                                            {item.subtitle ? (
+                                                                <div className="mt-1 text-xs text-gray-600 leading-snug">{item.subtitle}</div>
+                                                            ) : null}
+                                                            {item.seats_limit != null ? (
+                                                                <div className="mt-1 text-xs text-gray-500">Seats cap: {item.seats_limit}</div>
+                                                            ) : null}
+                                                            {item.stripe_item_id ? (
+                                                                <div className="mt-2 text-[10px] font-mono text-gray-500 break-all">
+                                                                    {item.stripe_item_id}
+                                                                </div>
+                                                            ) : null}
+                                                            {item.warning ? (
+                                                                <p className="mt-2 text-[11px] text-amber-900 leading-snug">{item.warning}</p>
+                                                            ) : null}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            ) : (
+                                                <p className="mt-4 text-sm text-gray-500">
+                                                    No storage, AI credit, or active Creator line items on file for this company.
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                         <div>
                                             <dt className="text-sm font-medium text-gray-500">Current Plan</dt>
@@ -866,10 +953,11 @@ export default function AdminCompanyView({
                                         {company.creator_module && (
                                             <div className="col-span-full border-t border-gray-200 pt-5 mt-2">
                                                 <h3 className="text-sm font-semibold text-gray-900">
-                                                    Add-on modules (summary)
+                                                    Creator module (admin grant)
                                                 </h3>
                                                 <p className="text-xs text-gray-500 mt-1 mb-4 max-w-2xl">
-                                                    Grant or extend modules via the &quot;Add-on modules&quot; button above. Creator covers prostaff uploads and dashboards; Space is planned for storage add-ons.
+                                                    <strong>Entitled now</strong> reflects app access (FeatureGate). Storage and AI add-ons are billed through Stripe — see{' '}
+                                                    <em>Active add-ons</em> above and raw fields below. Use &quot;Add-on modules&quot; to grant or extend Creator for free, trial, or comped companies without Stripe.
                                                 </p>
                                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
                                                     <div>
@@ -920,15 +1008,16 @@ export default function AdminCompanyView({
                                                     <strong>Reconcile add-ons</strong> to clear local quota when the Stripe item
                                                     is missing or no longer on this subscription (fixes “ghost” add-ons in the
                                                     app). Use <strong>Sync subscription</strong> to refresh Cashier’s copy of the
-                                                    Stripe subscription. Customer-facing <strong>invoices</strong> are read from
-                                                    Stripe — remove, void, or fix duplicates in the{' '}
+                                                    Stripe subscription. Invoices below are loaded live from Stripe (nothing is
+                                                    stored in this database). You can <strong>void draft/open</strong> invoices here;
+                                                    paid invoices must be adjusted in the{' '}
                                                     <a
                                                         href="/app/admin/stripe-status"
                                                         className="font-medium text-indigo-600 hover:text-indigo-800"
                                                     >
                                                         Stripe integration page
                                                     </a>{' '}
-                                                    or Stripe Dashboard; they are not stored separately here.
+                                                    or Stripe Dashboard.
                                                 </p>
                                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm mb-4">
                                                     <div>
@@ -957,6 +1046,88 @@ export default function AdminCompanyView({
                                                         </dd>
                                                     </div>
                                                 </div>
+
+                                                <div className="mb-4">
+                                                    <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 mb-2">
+                                                        Recent Stripe invoices (this customer)
+                                                    </h4>
+                                                    {company.stripe_invoices_admin === null ? (
+                                                        <p className="text-sm text-red-600">Could not load invoices from Stripe.</p>
+                                                    ) : company.stripe_invoices_admin.length === 0 ? (
+                                                        <p className="text-sm text-gray-500">No invoices returned for this customer.</p>
+                                                    ) : (
+                                                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                                                            <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                                                <thead className="bg-gray-50">
+                                                                    <tr>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">Date</th>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">#</th>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">Status</th>
+                                                                        <th className="px-2 py-2 text-right font-medium text-gray-600">Paid</th>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">Summary</th>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">Sub</th>
+                                                                        <th className="px-2 py-2 text-right font-medium text-gray-600">Actions</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-100 bg-white">
+                                                                    {company.stripe_invoices_admin.map((inv) => (
+                                                                        <tr key={inv.id}>
+                                                                            <td className="px-2 py-2 whitespace-nowrap text-gray-700">
+                                                                                {new Date(inv.created * 1000).toLocaleString()}
+                                                                            </td>
+                                                                            <td className="px-2 py-2 font-mono text-gray-800">{inv.number || inv.id}</td>
+                                                                            <td className="px-2 py-2">
+                                                                                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-800">
+                                                                                    {inv.status}
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-2 py-2 text-right font-mono">
+                                                                                {inv.currency} {inv.amount_paid?.toFixed?.(2) ?? inv.amount_paid}
+                                                                            </td>
+                                                                            <td className="px-2 py-2 max-w-xs text-gray-700">
+                                                                                <span className="line-clamp-2" title={inv.description}>
+                                                                                    {inv.description}
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-2 py-2 font-mono text-[10px] text-gray-500 break-all max-w-[7rem]">
+                                                                                {inv.subscription_id || '—'}
+                                                                            </td>
+                                                                            <td className="px-2 py-2 text-right whitespace-nowrap">
+                                                                                {inv.hosted_invoice_url ? (
+                                                                                    <a
+                                                                                        href={inv.hosted_invoice_url}
+                                                                                        target="_blank"
+                                                                                        rel="noreferrer"
+                                                                                        className="font-medium text-indigo-600 hover:text-indigo-800"
+                                                                                    >
+                                                                                        View
+                                                                                    </a>
+                                                                                ) : (
+                                                                                    <span className="text-gray-400">—</span>
+                                                                                )}
+                                                                                {inv.can_void_in_stripe ? (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        disabled={invoiceVoidBusy !== null}
+                                                                                        onClick={() => handleVoidStripeInvoice(inv.id)}
+                                                                                        className="ml-2 font-medium text-red-700 hover:text-red-900 disabled:opacity-50"
+                                                                                    >
+                                                                                        {invoiceVoidBusy === inv.id ? 'Voiding…' : 'Void'}
+                                                                                    </button>
+                                                                                ) : null}
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                    <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+                                                        Rows are live from Stripe (not a local cache). Several &quot;paid&quot; lines on the same day are often normal (plan + add-on + proration). Only{' '}
+                                                        <strong>draft</strong> or <strong>open</strong> invoices can be voided from this page; paid or broken hosted links need the Stripe Dashboard.
+                                                    </p>
+                                                </div>
+
                                                 <div className="flex flex-wrap gap-2">
                                                     <button
                                                         type="button"
@@ -1889,7 +2060,7 @@ export default function AdminCompanyView({
             <AppFooter />
 
             {/* Add-on modules: pick module, then configure (Creator today; Space placeholder) */}
-            {addonsModal.open && company.creator_module && (
+            {addonsModal.open && company.plan_management && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                         <div
@@ -1960,7 +2131,7 @@ export default function AdminCompanyView({
                                                 <span className="min-w-0 flex-1">
                                                     <span className="block text-sm font-semibold text-gray-700">Space</span>
                                                     <span className="mt-0.5 block text-xs text-gray-500">
-                                                        Storage and asset add-ons (planned). Not available yet.
+                                                        Reserved for future bundled modules. Storage and AI add-ons are Stripe subscription items — see Plan Management → Active add-ons and Stripe invoices.
                                                     </span>
                                                 </span>
                                                 <span className="shrink-0 text-sm font-medium text-gray-400">Coming soon</span>

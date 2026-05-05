@@ -174,6 +174,29 @@ export function getAssetCardVisualState(asset, options = {}) {
         }
     }
 
+    // Terminal skip: pipeline finished but raster thumbnails were skipped (e.g. dimensions_unknown).
+    // analysis_status can lag until reconciliation — avoid infinite "Generating preview" in the grid.
+    if (
+        meta.pipeline_completed_at &&
+        (meta.thumbnail_skip_reason || meta.preview_skipped) &&
+        !hasServerRasterThumbnail(asset)
+    ) {
+        return {
+            kind: 'preview_unavailable',
+            label: 'No grid preview',
+            description:
+                meta.thumbnail_skip_message ||
+                meta.preview_skipped_reason ||
+                'Thumbnail step was skipped after the pipeline finalized.',
+            showThumbnail: false,
+            showLocalPreview: false,
+            showFileTypeCard: true,
+            badgeTone: 'warning',
+            badgeShort: 'Unavailable',
+            extensionLabel: extUpper,
+        }
+    }
+
     if (previewMsg || (timedOut && !hasServerRasterThumbnail(asset))) {
         return {
             kind: 'preview_unavailable',
@@ -296,6 +319,10 @@ export function getAssetCardVisualState(asset, options = {}) {
 export function assetThumbnailPollEligible(asset) {
     if (!asset?.id) return false
     if (asset.final_thumbnail_url) return false
+    const meta = asset.metadata || {}
+    if (meta.pipeline_completed_at && (meta.thumbnail_skip_reason || meta.preview_skipped)) {
+        return false
+    }
     const { state } = getThumbnailState(asset)
     if (state === 'NOT_SUPPORTED') return false
     if (asset.thumbnail_error) return false

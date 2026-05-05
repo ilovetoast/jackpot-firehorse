@@ -46,6 +46,7 @@ import AssetProcessingTray from './Components/AssetProcessingTray'
 import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
 import CookieConsentBanner from './Components/CookieConsentBanner'
+import HelpHighlightController from './Components/HelpHighlightController'
 // import PushServiceInit from './Components/PushServiceInit' // off while PUSH_CLIENT_DISABLED — see pushService.js
 import { BucketProvider } from './contexts/BucketContext'
 import { SelectionProvider } from './contexts/SelectionContext'
@@ -147,6 +148,7 @@ createInertiaApp({
                 <PageComponent {...props} />
                 <CookieConsentBanner />
                 {props.auth?.user && <PWAInstallPopover auth={props.auth} />}
+                {props.auth?.user && <HelpHighlightController />}
                 {/* Push / OneSignal pre-prompt: disabled — uncomment PushServiceInit import + line below when re-enabling (pushService.js PUSH_CLIENT_DISABLED). */}
                 {/* {props.auth?.user && <PushServiceInit />} */}
                 <FlashMessage />

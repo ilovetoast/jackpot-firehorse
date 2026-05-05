@@ -15,6 +15,7 @@ use Laravel\Cashier\Exceptions\IncompletePayment;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
+use Stripe\StripeClient;
 use Stripe\Subscription;
 use Stripe\SubscriptionItem;
 
@@ -466,6 +467,98 @@ class BillingService
         }
         
         return 0;
+    }
+
+    /**
+     * Live Stripe invoices for this customer (admin diagnostics). Not stored locally.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listStripeInvoicesForAdmin(Tenant $tenant, int $limit = 40): array
+    {
+        $secret = config('services.stripe.secret');
+        if (empty($secret) || empty($tenant->stripe_id)) {
+            return [];
+        }
+
+        $client = new StripeClient($secret);
+        $list = $client->invoices->all([
+            'customer' => $tenant->stripe_id,
+            'limit' => $limit,
+        ]);
+
+        $rows = [];
+        foreach ($list->data as $inv) {
+            $desc = $inv->description ?? null;
+            if (! $desc && ! empty($inv->lines->data)) {
+                $first = $inv->lines->data[0];
+                $desc = $first->description ?? null;
+            }
+            $desc = $desc ?: 'Subscription invoice';
+
+            $subscriptionId = $inv->subscription ?? null;
+            if (is_object($subscriptionId) && isset($subscriptionId->id)) {
+                $subscriptionId = $subscriptionId->id;
+            }
+
+            $rows[] = [
+                'id' => $inv->id,
+                'number' => $inv->number ?? null,
+                'status' => $inv->status,
+                'amount_paid' => ($inv->amount_paid ?? 0) / 100,
+                'amount_due' => ($inv->amount_due ?? 0) / 100,
+                'currency' => strtoupper($inv->currency ?? 'usd'),
+                'created' => $inv->created,
+                'hosted_invoice_url' => $inv->hosted_invoice_url,
+                'invoice_pdf' => $inv->invoice_pdf ?? null,
+                'description' => Str::limit($desc, 140),
+                'subscription_id' => is_string($subscriptionId) ? $subscriptionId : null,
+                'can_void_in_stripe' => in_array($inv->status, ['draft', 'open'], true),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Void a draft or open invoice in Stripe for this tenant's customer.
+     *
+     * @throws \RuntimeException
+     */
+    public function voidStripeInvoiceForTenant(Tenant $tenant, string $invoiceId): void
+    {
+        $secret = config('services.stripe.secret');
+        if (empty($secret) || empty($tenant->stripe_id)) {
+            throw new \RuntimeException('Stripe is not configured or this company has no Stripe customer.');
+        }
+
+        if (! str_starts_with($invoiceId, 'in_')) {
+            throw new \RuntimeException('Invalid invoice id.');
+        }
+
+        $client = new StripeClient($secret);
+        $inv = $client->invoices->retrieve($invoiceId, []);
+
+        if (($inv->customer ?? null) !== $tenant->stripe_id) {
+            throw new \RuntimeException('That invoice does not belong to this company’s Stripe customer.');
+        }
+
+        if (! in_array($inv->status, ['draft', 'open'], true)) {
+            throw new \RuntimeException(
+                'Only draft or open invoices can be voided from here. Paid or finalized invoices must be handled in the Stripe Dashboard (credit note / refund).'
+            );
+        }
+
+        try {
+            $client->invoices->voidInvoice($invoiceId, []);
+        } catch (ApiErrorException $e) {
+            $this->logStripeApiFailure('billing.admin_void_invoice', $e, [
+                'tenant_id' => $tenant->id,
+                'invoice_id' => $invoiceId,
+            ]);
+
+            throw new \RuntimeException('Stripe could not void this invoice: '.$e->getMessage());
+        }
     }
 
     /**

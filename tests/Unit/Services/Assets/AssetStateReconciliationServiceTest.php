@@ -82,6 +82,172 @@ class AssetStateReconciliationServiceTest extends TestCase
         $this->assertSame(ThumbnailStatus::COMPLETED->value, $asset->thumbnail_status?->value);
     }
 
+    public function test_rule_1b_completes_analysis_when_pipeline_finished_with_thumbnail_skip(): void
+    {
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'temp/test/file.heic',
+            'original_filename' => 'img-1393.HEIC',
+            'mime_type' => 'image/heic',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'analysis_status' => 'generating_thumbnails',
+            'thumbnail_status' => ThumbnailStatus::PROCESSING,
+            'metadata' => [
+                'pipeline_completed_at' => now()->toIso8601String(),
+                'thumbnails_generated' => false,
+                'thumbnail_skip_reason' => 'dimensions_unknown',
+                'thumbnail_skip_message' => 'Asset dimensions are not available; thumbnail generation skipped for safety.',
+            ],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $this->assertNotEmpty($result['changes']);
+
+        $asset->refresh();
+        $this->assertSame('complete', $asset->analysis_status);
+        $this->assertSame(ThumbnailStatus::SKIPPED->value, $asset->thumbnail_status?->value);
+    }
+
+    public function test_rule_1c_skips_failed_thumbnail_for_illustrator_like_asset_after_pipeline_complete(): void
+    {
+        config(['assets.thumbnail.max_retries' => 3]);
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'temp/test/file.ai',
+            'original_filename' => 'gk200.ai',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'analysis_status' => 'complete',
+            'thumbnail_status' => ThumbnailStatus::FAILED,
+            'thumbnail_retry_count' => 0,
+            'metadata' => [
+                'pipeline_completed_at' => now()->toIso8601String(),
+                'thumbnails_generated' => false,
+            ],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $asset->refresh();
+        $this->assertSame(ThumbnailStatus::SKIPPED->value, $asset->thumbnail_status?->value);
+        $this->assertSame('design_raster_failed', $asset->metadata['thumbnail_skip_reason'] ?? null);
+    }
+
+    public function test_rule_1c_skips_failed_thumbnail_when_retries_exhausted(): void
+    {
+        config(['assets.thumbnail.max_retries' => 3]);
+
+        $tenant = Tenant::create(['name' => 'Test', 'slug' => 'test']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand',
+        ]);
+        $bucket = StorageBucket::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'test-bucket',
+            'status' => StorageBucketStatus::ACTIVE,
+            'region' => 'us-east-1',
+        ]);
+        $session = UploadSession::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => $bucket->id,
+            'status' => UploadStatus::COMPLETED,
+            'type' => UploadType::DIRECT,
+            'expected_size' => 1024,
+            'uploaded_size' => 1024,
+        ]);
+
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'upload_session_id' => $session->id,
+            'storage_bucket_id' => $bucket->id,
+            'storage_root_path' => 'temp/test/file.jpg',
+            'original_filename' => 'photo.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 1024,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'analysis_status' => 'complete',
+            'thumbnail_status' => ThumbnailStatus::FAILED,
+            'thumbnail_retry_count' => 3,
+            'metadata' => [
+                'pipeline_completed_at' => now()->toIso8601String(),
+                'thumbnails_generated' => false,
+            ],
+        ]);
+
+        $service = app(AssetStateReconciliationService::class);
+        $result = $service->reconcile($asset->fresh());
+
+        $this->assertTrue($result['updated']);
+        $asset->refresh();
+        $this->assertSame(ThumbnailStatus::SKIPPED->value, $asset->thumbnail_status?->value);
+        $this->assertSame('generation_failed_exhausted', $asset->metadata['thumbnail_skip_reason'] ?? null);
+    }
+
     public function test_rule_7_resets_studio_export_version_and_dispatches_process_job(): void
     {
         Bus::fake();

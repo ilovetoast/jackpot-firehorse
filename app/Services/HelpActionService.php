@@ -13,16 +13,7 @@ class HelpActionService
      */
     public function forRequest(?string $query, array $userPermissions, ?Brand $brand): array
     {
-        $actions = config('help_actions.actions', []);
-        $visible = [];
-        foreach ($actions as $action) {
-            if (! is_array($action) || empty($action['key'])) {
-                continue;
-            }
-            if ($this->userCanAccess($action, $userPermissions)) {
-                $visible[] = $action;
-            }
-        }
+        $visible = $this->visibleActions($userPermissions);
 
         $q = $query !== null ? trim($query) : '';
         if ($q !== '' && mb_strlen($q) > 256) {
@@ -88,6 +79,69 @@ class HelpActionService
     }
 
     /**
+     * @param  list<string>  $userPermissions
+     * @return list<array<string, mixed>>
+     */
+    public function visibleActions(array $userPermissions): array
+    {
+        $actions = config('help_actions.actions', []);
+        $visible = [];
+        foreach ($actions as $action) {
+            if (! is_array($action) || empty($action['key'])) {
+                continue;
+            }
+            if ($this->userCanAccess($action, $userPermissions)) {
+                $visible[] = $action;
+            }
+        }
+
+        return $visible;
+    }
+
+    /**
+     * Rank visible help actions for a natural-language question (same scoring as search).
+     *
+     * @param  list<string>  $userPermissions
+     * @return array{serialized: list<array<string, mixed>>, best_score: int, matched_keys: list<string>}
+     */
+    public function rankForNaturalLanguageQuestion(string $question, array $userPermissions, ?Brand $brand, int $limit = 5): array
+    {
+        $visible = $this->visibleActions($userPermissions);
+        $q = trim($question);
+        if ($q !== '' && mb_strlen($q) > 2000) {
+            $q = mb_substr($q, 0, 2000);
+        }
+        if ($q === '') {
+            return ['serialized' => [], 'best_score' => 0, 'matched_keys' => []];
+        }
+        $lower = mb_strtolower($q);
+        $scored = [];
+        foreach ($visible as $action) {
+            $score = $this->scoreAction($action, $lower);
+            if ($score > 0) {
+                $scored[] = ['action' => $action, 'score' => $score];
+            }
+        }
+        usort($scored, function (array $a, array $b) {
+            if ($a['score'] !== $b['score']) {
+                return $b['score'] <=> $a['score'];
+            }
+
+            return strcmp((string) $a['action']['title'], (string) $b['action']['title']);
+        });
+        $top = array_slice($scored, 0, max(1, $limit));
+        $serialized = array_map(fn (array $row) => $this->serializeAction($row['action'], $brand, $visible), $top);
+        $best = $scored[0]['score'] ?? 0;
+        $keys = array_map(fn (array $row) => (string) $row['action']['key'], $top);
+
+        return [
+            'serialized' => $serialized,
+            'best_score' => (int) $best,
+            'matched_keys' => $keys,
+        ];
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $visible
      * @return list<array<string, mixed>>
      */
@@ -121,7 +175,9 @@ class HelpActionService
     {
         $routeName = isset($action['route_name']) && is_string($action['route_name']) ? $action['route_name'] : null;
         $bindings = isset($action['route_bindings']) && is_array($action['route_bindings']) ? $action['route_bindings'] : [];
-        $url = $this->resolveUrl($routeName, $bindings, $brand);
+        $url = $this->resolvePrimaryUrl($action, $routeName, $bindings, $brand);
+        $deepLinkOut = $this->serializeDeepLinkForResponse($action['deep_link'] ?? null, $brand);
+        $highlightOut = $this->sanitizeHighlight($action['highlight'] ?? null);
 
         $relatedOut = [];
         $visibleKeys = [];
@@ -152,6 +208,8 @@ class HelpActionService
             'page_label' => (string) ($action['page_label'] ?? ''),
             'route_name' => $routeName,
             'url' => $url,
+            'deep_link' => $deepLinkOut,
+            'highlight' => $highlightOut,
             'tags' => $this->sanitizeStringList($action['tags'] ?? null),
             'related' => $relatedOut,
         ];
@@ -176,7 +234,9 @@ class HelpActionService
             'steps' => $this->sanitizeSteps($target['steps'] ?? null),
             'page_label' => (string) ($target['page_label'] ?? ''),
             'route_name' => $routeName,
-            'url' => $this->resolveUrl($routeName, $bindings, $brand),
+            'url' => $this->resolvePrimaryUrl($target, $routeName, $bindings, $brand),
+            'deep_link' => $this->serializeDeepLinkForResponse($target['deep_link'] ?? null, $brand),
+            'highlight' => $this->sanitizeHighlight($target['highlight'] ?? null),
             'tags' => $this->sanitizeStringList($target['tags'] ?? null),
             'related' => [],
         ];
@@ -223,14 +283,127 @@ class HelpActionService
     }
 
     /**
+     * Prefer `deep_link` when it resolves; otherwise `route_name` + `route_bindings`.
+     *
+     * @param  array<string, mixed>  $action
      * @param  array<string, string>  $bindings  route parameter => active_brand | …
      */
-    public function resolveUrl(?string $routeName, array $bindings, ?Brand $brand): ?string
+    public function resolvePrimaryUrl(array $action, ?string $routeName, array $bindings, ?Brand $brand): ?string
     {
-        if (! $routeName || ! Route::has($routeName)) {
+        $deep = $this->parseDeepLinkConfig($action['deep_link'] ?? null);
+        if ($deep !== null) {
+            $u = $this->resolveUrlWithQuery($deep['route_name'], $deep['params'], $deep['query'], $brand);
+            if ($u !== null) {
+                return $u;
+            }
+        }
+
+        return $this->resolveUrl($routeName, $bindings, $brand);
+    }
+
+    /**
+     * Safe `deep_link` object for JSON (only if route exists and core shape is valid).
+     *
+     * @return array{route_name: string, params: array<string, int|string>, query: array<string, string>}|null
+     */
+    public function serializeDeepLinkForResponse(mixed $deepLink, ?Brand $brand): ?array
+    {
+        $deep = $this->parseDeepLinkConfig($deepLink);
+        if ($deep === null || ! Route::has($deep['route_name'])) {
+            return null;
+        }
+        $resolvedParams = $this->resolveBindingParams($deep['params'], $brand);
+        if ($resolvedParams === null) {
+            return null;
+        }
+        try {
+            route($deep['route_name'], $resolvedParams);
+        } catch (\Throwable) {
             return null;
         }
 
+        return [
+            'route_name' => $deep['route_name'],
+            'params' => $resolvedParams,
+            'query' => $deep['query'],
+        ];
+    }
+
+    /**
+     * @return array{selector: string, label?: string}|null
+     */
+    public function sanitizeHighlight(mixed $highlight): ?array
+    {
+        if (! is_array($highlight)) {
+            return null;
+        }
+        $selector = $highlight['selector'] ?? null;
+        if (! is_string($selector)) {
+            return null;
+        }
+        $selector = trim($selector);
+        if ($selector === '' || ! preg_match('/^[a-z0-9][a-z0-9_.-]{0,63}$/', $selector)) {
+            return null;
+        }
+        $out = ['selector' => $selector];
+        $label = $highlight['label'] ?? null;
+        if (is_string($label)) {
+            $label = trim($label);
+            if ($label !== '') {
+                $out['label'] = mb_strlen($label) > 200 ? mb_substr($label, 0, 200) : $label;
+            }
+        } elseif (is_scalar($label) && (string) $label !== '') {
+            $s = trim((string) $label);
+            if ($s !== '') {
+                $out['label'] = mb_strlen($s) > 200 ? mb_substr($s, 0, 200) : $s;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{route_name: string, params: array<string, string>, query: array<string, string>}|null
+     */
+    private function parseDeepLinkConfig(mixed $deepLink): ?array
+    {
+        if (! is_array($deepLink)) {
+            return null;
+        }
+        $name = $deepLink['route_name'] ?? null;
+        if (! is_string($name) || trim($name) === '') {
+            return null;
+        }
+        $name = trim($name);
+        $paramsIn = $deepLink['params'] ?? [];
+        if (! is_array($paramsIn)) {
+            $paramsIn = [];
+        }
+        $params = [];
+        foreach ($paramsIn as $param => $source) {
+            if (! is_string($param) || $param === '' || ! preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $param)) {
+                continue;
+            }
+            if (is_string($source)) {
+                $params[$param] = $source;
+            }
+        }
+        $queryIn = $deepLink['query'] ?? [];
+        $query = $this->sanitizeQueryAssoc($queryIn);
+
+        return [
+            'route_name' => $name,
+            'params' => $params,
+            'query' => $query,
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $bindings  route parameter => active_brand
+     * @return array<string, int|string>|null null when active_brand required but missing
+     */
+    private function resolveBindingParams(array $bindings, ?Brand $brand): ?array
+    {
         $params = [];
         foreach ($bindings as $param => $source) {
             if (! is_string($param)) {
@@ -241,13 +414,84 @@ class HelpActionService
                     return null;
                 }
                 $params[$param] = $brand->id;
-            } else {
-                // Only `active_brand` is supported; unknown sources skip binding (route() may still succeed or throw — caught below).
             }
         }
 
+        return $params;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function sanitizeQueryAssoc(mixed $query): array
+    {
+        if (! is_array($query)) {
+            return [];
+        }
+        $out = [];
+        $n = 0;
+        foreach ($query as $k => $v) {
+            if ($n >= 24) {
+                break;
+            }
+            if (! is_string($k) || ! preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $k)) {
+                continue;
+            }
+            if (is_string($v)) {
+                $s = trim($v);
+            } elseif (is_int($v) || is_float($v)) {
+                $s = (string) $v;
+            } elseif (is_bool($v)) {
+                $s = $v ? '1' : '0';
+            } else {
+                continue;
+            }
+            if (mb_strlen($s) > 256) {
+                $s = mb_substr($s, 0, 256);
+            }
+            if ($s === '') {
+                continue;
+            }
+            $out[$k] = $s;
+            $n++;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, string>  $bindings
+     */
+    private function resolveUrlWithQuery(string $routeName, array $bindings, array $query, ?Brand $brand): ?string
+    {
+        $base = $this->resolveUrl($routeName, $bindings, $brand);
+        if ($base === null || $query === []) {
+            return $base;
+        }
+        $qs = http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        if ($qs === '') {
+            return $base;
+        }
+
+        return $base.(str_contains($base, '?') ? '&' : '?').$qs;
+    }
+
+    /**
+     * @param  array<string, string>  $bindings  route parameter => active_brand | …
+     */
+    public function resolveUrl(?string $routeName, array $bindings, ?Brand $brand): ?string
+    {
+        if (! $routeName || ! Route::has($routeName)) {
+            return null;
+        }
+
+        $resolved = $this->resolveBindingParams($bindings, $brand);
+        if ($resolved === null) {
+            return null;
+        }
+
         try {
-            return route($routeName, $params);
+            return route($routeName, $resolved);
         } catch (\Throwable) {
             return null;
         }

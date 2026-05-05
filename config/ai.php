@@ -29,6 +29,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | In-app help (Phase 2 — grounded AI answers)
+    |--------------------------------------------------------------------------
+    |
+    | Uses AIService + registered agent `in_app_help_assistant` (gpt-4o-mini).
+    | Answers must use only retrieved help_actions JSON; see HelpAiAskService.
+    |
+    */
+    'help_ask' => [
+        'enabled' => (bool) env('AI_HELP_ASK_ENABLED', true),
+        /** Minimum best retrieval score (HelpActionService::scoreAction) to call the model. */
+        'strong_match_min_score' => (int) env('AI_HELP_ASK_STRONG_MIN_SCORE', 12),
+        'max_actions_for_prompt' => (int) env('AI_HELP_ASK_MAX_ACTIONS', 3),
+        'agent_id' => 'in_app_help_assistant',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Photography focal point (vision, gpt-4o-mini)
     |--------------------------------------------------------------------------
     |
@@ -716,6 +733,14 @@ PROMPT
                 'kling_v3_standard_image_to_video',
             ],
             'allowed_actions' => ['read', 'generate_image'],
+            'permissions' => [],
+        ],
+        'in_app_help_assistant' => [
+            'name' => 'In-app Help Assistant',
+            'description' => 'Answers user questions using only retrieved help_actions payloads (no open-ended product knowledge).',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
             'permissions' => [],
         ],
     ],

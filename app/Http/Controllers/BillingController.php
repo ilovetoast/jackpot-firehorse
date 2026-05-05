@@ -830,7 +830,10 @@ class BillingController extends Controller
         try {
             $this->billingService->cancelSubscription($tenant);
 
-            return redirect()->route('billing')->with('success', 'Subscription cancelled successfully.');
+            return redirect()->route('billing')->with(
+                'success',
+                'Your paid subscription is scheduled to end at the close of the current billing period. After that, this workspace moves to the Free plan.'
+            );
         } catch (\Exception $e) {
             return back()->withErrors([
                 'subscription' => 'Failed to cancel subscription: ' . $e->getMessage(),

@@ -356,6 +356,7 @@ export default function Team({ tenant, brands = [], tenant_roles = [], invite_lo
                 <div className="mt-8 mb-6 flex flex-wrap items-center justify-between gap-x-5 gap-y-4">
                     <button
                         type="button"
+                        data-help="team-invite-member"
                         onClick={openInviteModal}
                         disabled={user_limit_reached}
                         className="inline-flex h-10 shrink-0 items-center rounded-md bg-violet-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"

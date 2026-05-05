@@ -5,6 +5,7 @@ import {
     ArrowLeftIcon,
     ArrowPathIcon,
     QuestionMarkCircleIcon,
+    SparklesIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
 
@@ -23,6 +24,10 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     const [retryToken, setRetryToken] = useState(0)
     const [payload, setPayload] = useState({ query: null, results: [], common: [] })
     const [selected, setSelected] = useState(null)
+    const [askQuestion, setAskQuestion] = useState('')
+    const [askLoading, setAskLoading] = useState(false)
+    const [askError, setAskError] = useState(false)
+    const [askResult, setAskResult] = useState(null)
     const searchRef = useRef(null)
     const closeBtnRef = useRef(null)
 
@@ -71,6 +76,47 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     useEffect(() => {
         setSelected(null)
     }, [debouncedQuery])
+
+    useEffect(() => {
+        if (!open) {
+            setAskQuestion('')
+            setAskLoading(false)
+            setAskError(false)
+            setAskResult(null)
+        }
+    }, [open])
+
+    const submitAsk = useCallback(async () => {
+        const q = askQuestion.trim()
+        if (!q || askLoading) {
+            return
+        }
+        setAskLoading(true)
+        setAskError(false)
+        setAskResult(null)
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
+        try {
+            const r = await fetch('/app/help/ask', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                },
+                body: JSON.stringify({ question: q }),
+            })
+            if (!r.ok) {
+                throw new Error(String(r.status))
+            }
+            const data = await r.json()
+            setAskResult(data && typeof data === 'object' ? data : null)
+        } catch {
+            setAskError(true)
+        } finally {
+            setAskLoading(false)
+        }
+    }, [askQuestion, askLoading])
 
     useEffect(() => {
         if (!open) {
@@ -135,6 +181,37 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         [resolveVisitHref]
     )
 
+    const buildShowMeHref = useCallback((action) => {
+        if (!action?.highlight?.selector || typeof action.highlight.selector !== 'string') {
+            return null
+        }
+        const base = resolveVisitHref(action)
+        if (!base) {
+            return null
+        }
+        try {
+            const u = new URL(base, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+            u.searchParams.set('help', String(action.key || ''))
+            u.searchParams.set('highlight', action.highlight.selector)
+            return u.pathname + u.search + u.hash
+        } catch {
+            return null
+        }
+    }, [resolveVisitHref])
+
+    const showMe = useCallback(
+        (action) => {
+            const href = buildShowMeHref(action)
+            if (!href) {
+                return
+            }
+            setOpen(false)
+            setSelected(null)
+            router.visit(href)
+        },
+        [buildShowMeHref]
+    )
+
     const listItems = debouncedQuery ? payload.results : payload.common
     const showSecondaryCommon =
         Boolean(debouncedQuery) && payload.results.length === 0 && payload.common.length > 0 && !loadError
@@ -193,20 +270,60 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                         </div>
 
                         {!selected && (
-                            <div className="shrink-0 border-b border-gray-100 bg-white px-4 py-3">
-                                <label htmlFor="jp-help-search" className="sr-only">
-                                    Search help
-                                </label>
-                                <input
-                                    ref={searchRef}
-                                    id="jp-help-search"
-                                    type="search"
-                                    autoComplete="off"
-                                    placeholder="Search topics…"
-                                    value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
-                                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                                />
+                            <div className="shrink-0 space-y-3 border-b border-gray-100 bg-white px-4 py-3">
+                                <div>
+                                    <label htmlFor="jp-help-search" className="sr-only">
+                                        Search help
+                                    </label>
+                                    <input
+                                        ref={searchRef}
+                                        id="jp-help-search"
+                                        type="search"
+                                        autoComplete="off"
+                                        placeholder="Search topics…"
+                                        value={query}
+                                        onChange={(e) => setQuery(e.target.value)}
+                                        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                    />
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3">
+                                    <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                                        <SparklesIcon className="h-4 w-4 text-violet-600" aria-hidden />
+                                        Ask AI
+                                    </div>
+                                    <p className="mb-2 text-xs text-gray-500">
+                                        Answers use only your workspace&apos;s documented help topics — not general chat.
+                                    </p>
+                                    <label htmlFor="jp-help-ask" className="sr-only">
+                                        Ask a question
+                                    </label>
+                                    <textarea
+                                        id="jp-help-ask"
+                                        rows={3}
+                                        value={askQuestion}
+                                        onChange={(e) => setAskQuestion(e.target.value)}
+                                        placeholder="e.g. How do I invite someone to my company?"
+                                        className="block w-full resize-y rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={askLoading || askQuestion.trim() === ''}
+                                        onClick={() => submitAsk()}
+                                        className="mt-2 inline-flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+                                    >
+                                        {askLoading ? (
+                                            <>
+                                                <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden />
+                                                Thinking…
+                                            </>
+                                        ) : (
+                                            <>
+                                                <SparklesIcon className="h-4 w-4" aria-hidden />
+                                                Get answer
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -215,8 +332,10 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                 <HelpActionDetail
                                     action={selected}
                                     onGo={() => goToPage(selected)}
+                                    onShowMe={() => showMe(selected)}
                                     onPickRelated={(a) => setSelected(a)}
                                     resolveVisitHref={resolveVisitHref}
+                                    showMeHref={buildShowMeHref(selected)}
                                 />
                             ) : loadError ? (
                                 <div className="rounded-lg border border-red-100 bg-red-50/90 px-3 py-5 text-center">
@@ -248,6 +367,23 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                 </div>
                             ) : (
                                 <>
+                                    {askError && (
+                                        <div className="mb-4 rounded-lg border border-red-100 bg-red-50/90 px-3 py-2 text-sm text-red-800">
+                                            Could not reach AI help. Try again in a moment.
+                                        </div>
+                                    )}
+                                    {askResult && (
+                                        <div className="mb-4">
+                                            <HelpAskResultBlock
+                                                result={askResult}
+                                                onPickTopic={(item) => {
+                                                    setSelected(item)
+                                                    setAskResult(null)
+                                                }}
+                                                resolveVisitHref={resolveVisitHref}
+                                            />
+                                        </div>
+                                    )}
                                     {listItems.length > 0 && (
                                         <ul className="space-y-1">
                                             {listItems.map((item) => (
@@ -296,9 +432,105 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     )
 }
 
-function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
+function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
+    const kind = result?.kind
+    if (kind === 'ai' && result.answer) {
+        const a = result.answer
+        const rec = a.recommended_page
+        const recHref = rec ? resolveVisitHref(rec) : null
+        const conf = a.confidence || 'low'
+        const confClass =
+            conf === 'high' ? 'bg-emerald-100 text-emerald-900' : conf === 'medium' ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-700'
+        return (
+            <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 text-sm">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${confClass}`}>Confidence: {conf}</span>
+                </div>
+                <p className="text-gray-900">{a.direct_answer}</p>
+                {Array.isArray(a.numbered_steps) && a.numbered_steps.length > 0 && (
+                    <ol className="mt-3 list-decimal space-y-1 pl-4 text-gray-800">
+                        {a.numbered_steps.map((s, i) => (
+                            <li key={i}>{s}</li>
+                        ))}
+                    </ol>
+                )}
+                {rec && (
+                    <div className="mt-3">
+                        {recHref ? (
+                            <button
+                                type="button"
+                                onClick={() => router.visit(recHref)}
+                                className="inline-flex text-left text-sm font-medium text-violet-700 underline decoration-violet-300 underline-offset-2 hover:text-violet-900"
+                            >
+                                {rec.title || rec.key} →
+                            </button>
+                        ) : (
+                            <span className="text-sm text-gray-600">{rec.title || rec.key}</span>
+                        )}
+                    </div>
+                )}
+                {Array.isArray(a.related_actions) && a.related_actions.length > 0 && (
+                    <div className="mt-3">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Related</p>
+                        <div className="flex flex-wrap gap-2">
+                            {a.related_actions.map((rel) => (
+                                <span key={rel.key} className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                                    {rel.title}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        )
+    }
+    if (kind === 'fallback_action' && result.primary) {
+        return (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-sm text-gray-800">
+                <p className="mb-2">{result.message}</p>
+                <button
+                    type="button"
+                    onClick={() => onPickTopic(result.primary)}
+                    className="text-left font-medium text-violet-700 underline decoration-violet-200 underline-offset-2 hover:text-violet-900"
+                >
+                    Open: {result.primary.title}
+                </button>
+            </div>
+        )
+    }
+    if (kind === 'fallback' || kind === 'ai_disabled') {
+        const suggested = Array.isArray(result.suggested) ? result.suggested : []
+        return (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
+                <p className="mb-2">{result.message}</p>
+                {suggested.length > 0 && (
+                    <>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested topics</p>
+                        <ul className="space-y-1">
+                            {suggested.map((item) => (
+                                <li key={item.key}>
+                                    <button
+                                        type="button"
+                                        onClick={() => onPickTopic(item)}
+                                        className="text-left text-sm font-medium text-violet-700 hover:text-violet-900"
+                                    >
+                                        {item.title}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </>
+                )}
+            </div>
+        )
+    }
+    return null
+}
+
+function HelpActionDetail({ action, onGo, onShowMe, onPickRelated, resolveVisitHref, showMeHref }) {
     const href = resolveVisitHref(action)
     const canGo = Boolean(href)
+    const canShowMe = Boolean(showMeHref)
 
     return (
         <div className="space-y-4">
@@ -317,7 +549,7 @@ function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
                     </ol>
                 </div>
             )}
-            <div>
+            <div className="flex flex-col gap-2">
                 <button
                     type="button"
                     disabled={!canGo}
@@ -326,6 +558,15 @@ function HelpActionDetail({ action, onGo, onPickRelated, resolveVisitHref }) {
                 >
                     Go to page
                 </button>
+                {canShowMe && (
+                    <button
+                        type="button"
+                        onClick={onShowMe}
+                        className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                    >
+                        Show me
+                    </button>
+                )}
                 {!canGo && action.route_name && (
                     <p className="mt-2 text-xs text-gray-500">
                         Open this topic from a workspace with the right context (for example, an active brand).

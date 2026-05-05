@@ -2755,8 +2755,13 @@ export default function AssetDrawer({
     /** While the upload pipeline is still running, thumbnail_status often stays "pending" — hide manual Generate Preview to avoid duplicate jobs */
     const isAssetAnalysisPipelineRunning = useMemo(() => {
         const s = String(displayAsset?.analysis_status ?? '').toLowerCase()
-        return s === 'uploading' || s === 'generating_thumbnails'
-    }, [displayAsset?.analysis_status])
+        if (s !== 'uploading' && s !== 'generating_thumbnails') return false
+        const m = displayAsset?.metadata || {}
+        if (m.pipeline_completed_at && (m.thumbnail_skip_reason || m.preview_skipped)) {
+            return false
+        }
+        return true
+    }, [displayAsset?.analysis_status, displayAsset?.metadata])
 
     /** Disables processing actions while the asset is actively running server-side pipeline work */
     const isProcessingDrawerBusy = thumbnailStatus === 'processing' || isAssetAnalysisPipelineRunning

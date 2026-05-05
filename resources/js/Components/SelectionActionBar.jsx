@@ -157,6 +157,7 @@ export default function SelectionActionBar({
                         onOpenActions={onOpenBulkEdit ? handleOpenBulkActionsModal : null}
                     />
                     <div
+                        data-help={collectionId ? 'collections-add-assets' : undefined}
                         className="flex flex-row items-center justify-between gap-1.5 sm:gap-4 px-2.5 py-1.5 sm:px-4 sm:py-3 bg-white/95 backdrop-blur-md rounded-full shadow-2xl border border-gray-200 w-full max-w-[900px] transition-shadow duration-200 hover:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"
                         style={{ maxWidth: 'min(900px, calc(100vw - 2rem))' }}
                     >

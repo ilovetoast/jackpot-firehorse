@@ -504,6 +504,7 @@ export default function CollectionsIndex({
                             {can_create_collection && (
                                 <button
                                     type="button"
+                                    data-help="collections-create"
                                     onClick={() => setShowCreateModal(true)}
                                     className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2"
                                     aria-label="Create collection"
@@ -554,6 +555,7 @@ export default function CollectionsIndex({
                                                 {can_create_collection && (
                                                     <button
                                                         type="button"
+                                                        data-help="collections-create"
                                                         onClick={() => setShowCreateModal(true)}
                                                         className="mt-6 inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-offset-2"
                                                         style={{ backgroundColor: workspaceAccentColor }}

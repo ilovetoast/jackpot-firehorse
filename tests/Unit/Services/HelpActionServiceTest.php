@@ -298,7 +298,7 @@ class HelpActionServiceTest extends TestCase
         $service = app(HelpActionService::class);
         $a = $service->forRequest(null, [], null);
         $b = $service->forRequest('', [], null);
-        $this->assertEquals($a, $b);
+        $this->assertSame(json_encode($a), json_encode($b));
         $this->assertNull($b['query']);
         $this->assertNotEmpty($b['common']);
     }
@@ -505,5 +505,173 @@ class HelpActionServiceTest extends TestCase
         $out = $service->forRequest(null, [], null);
         $this->assertCount(1, $out['common']);
         $this->assertSame('wide', $out['common'][0]['key']);
+    }
+
+    public function test_deep_link_preferred_for_resolved_url_and_query_appended(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'deeplink',
+                'title' => 'Deep',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => 'assets.staged',
+                'route_bindings' => [],
+                'deep_link' => [
+                    'route_name' => 'assets.index',
+                    'params' => [],
+                    'query' => ['view' => 'compact'],
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('Deep', [], null);
+        $row = $out['results'][0];
+        $this->assertStringContainsString('/app/assets', (string) $row['url']);
+        $this->assertStringNotContainsString('staged', (string) $row['url']);
+        $this->assertStringContainsString('view=compact', (string) $row['url']);
+        $this->assertIsArray($row['deep_link']);
+        $this->assertSame('assets.index', $row['deep_link']['route_name']);
+        $this->assertSame(['view' => 'compact'], $row['deep_link']['query']);
+    }
+
+    public function test_invalid_deep_link_route_falls_back_to_route_name_for_url(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'fb',
+                'title' => 'Fallback',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => 'assets.index',
+                'route_bindings' => [],
+                'deep_link' => [
+                    'route_name' => 'no.such.route.help.test',
+                    'params' => [],
+                    'query' => [],
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 0,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('Fallback', [], null);
+        $row = $out['results'][0];
+        $this->assertStringContainsString('/app/assets', (string) $row['url']);
+        $this->assertNull($row['deep_link']);
+    }
+
+    public function test_invalid_highlight_omitted_without_breaking_payload(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'badhi',
+                'title' => 'Bad highlight',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'Bad Selector!',
+                    'label' => str_repeat('x', 400),
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest(null, [], null);
+        $this->assertCount(1, $out['common']);
+        $row = $out['common'][0];
+        $this->assertNull($row['highlight']);
+        $this->assertArrayHasKey('deep_link', $row);
+        $this->assertNull($row['deep_link']);
+    }
+
+    public function test_highlight_serializes_when_selector_valid(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'okhi',
+                'title' => 'Ok highlight',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'assets-upload',
+                    'label' => 'Upload',
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], null)['common'][0];
+        $this->assertSame('assets-upload', $row['highlight']['selector']);
+        $this->assertSame('Upload', $row['highlight']['label']);
+    }
+
+    public function test_highlight_label_truncated_beyond_200_chars(): void
+    {
+        $long = str_repeat('a', 250);
+        config(['help_actions.actions' => [
+            [
+                'key' => 'longlabel',
+                'title' => 'Long label',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'x',
+                    'label' => $long,
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], null)['common'][0];
+        $this->assertSame('x', $row['highlight']['selector']);
+        $this->assertSame(200, mb_strlen($row['highlight']['label']));
+        $this->assertSame(str_repeat('a', 200), $row['highlight']['label']);
     }
 }

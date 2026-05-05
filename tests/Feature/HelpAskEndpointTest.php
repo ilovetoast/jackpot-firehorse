@@ -1,0 +1,145 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\AITaskType;
+use App\Models\Brand;
+use App\Models\Tenant;
+use App\Models\User;
+use App\Services\AIService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Mockery;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Tests\TestCase;
+
+class HelpAskEndpointTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function actingTenantUser(): array
+    {
+        $tenant = Tenant::create([
+            'name' => 'T',
+            'slug' => 't-help-ask',
+            'manual_plan_override' => 'enterprise',
+        ]);
+        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b-help-ask']);
+        $user = User::create([
+            'email' => 'help-ask@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'H',
+            'last_name' => 'A',
+            'email_verified_at' => now(),
+        ]);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
+        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        return [$tenant, $brand, $user];
+    }
+
+    public function test_weak_question_returns_fallback_without_ai(): void
+    {
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $response = $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'zzzzzzzzzzzzzz']);
+
+        $response->assertOk();
+        $response->assertJsonPath('kind', 'fallback');
+        $this->assertLessThan(12, (int) $response->json('best_score'));
+    }
+
+    public function test_strong_match_calls_ai_and_returns_structured_answer(): void
+    {
+        Permission::firstOrCreate(['name' => 'asset.upload', 'guard_name' => 'web']);
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+        $role = Role::firstOrCreate(['name' => 'help-ask-uploader', 'guard_name' => 'web']);
+        $role->givePermissionTo('asset.upload');
+        $user->assignRole($role);
+
+        $payload = [
+            'severity' => 'info',
+            'confidence' => 0.88,
+            'summary' => 'Upload help',
+            'direct_answer' => 'Use the Add Asset control on the Assets page.',
+            'numbered_steps' => ['Open Assets.', 'Click Add Asset.', 'Pick files.'],
+            'recommended_page' => [
+                'key' => 'assets.upload',
+                'title' => 'Upload new assets',
+                'url' => '/app/assets',
+            ],
+            'related_actions' => [],
+            'confidence_tier' => 'high',
+        ];
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldReceive('executeAgent')
+            ->once()
+            ->with(
+                'in_app_help_assistant',
+                AITaskType::IN_APP_HELP_ACTION_ANSWER,
+                Mockery::on(fn (string $p) => str_contains($p, 'USER_QUESTION:') && str_contains($p, 'HELP_ACTIONS:')),
+                Mockery::on(fn (array $o) => isset($o['tenant'], $o['user']))
+            )
+            ->andReturn([
+                'text' => json_encode($payload, JSON_UNESCAPED_UNICODE),
+                'agent_run_id' => 4242,
+                'cost' => 0.0001,
+                'tokens_in' => 120,
+                'tokens_out' => 80,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+        $this->app->instance(AIService::class, $mock);
+
+        $response = $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'upload files to assets']);
+
+        $response->assertOk();
+        $response->assertJsonPath('kind', 'ai');
+        $response->assertJsonPath('answer.confidence', 'high');
+        $response->assertJsonPath('usage.agent_run_id', 4242);
+        $response->assertJsonPath('usage.model', 'gpt-4o-mini');
+    }
+
+    public function test_ai_disabled_on_tenant_returns_kind_ai_disabled(): void
+    {
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+        $tenant->settings = array_merge($tenant->settings ?? [], ['ai_enabled' => false]);
+        $tenant->save();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $response = $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'upload files to assets']);
+
+        $response->assertOk();
+        $response->assertJsonPath('kind', 'ai_disabled');
+    }
+
+    public function test_question_validation(): void
+    {
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', [])
+            ->assertStatus(422);
+    }
+
+    protected function tearDown(): void
+    {
+        Mockery::close();
+        parent::tearDown();
+    }
+}

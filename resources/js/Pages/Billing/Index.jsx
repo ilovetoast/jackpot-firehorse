@@ -190,6 +190,17 @@ export default function BillingIndex({
         })
     }
 
+    /** Paid → Free: no Stripe “free price”; cancel subscription (typically at period end, then Free). */
+    const handleDowngradeToFree = () => {
+        if (!subscription) return
+        setProcessingPlanId('free')
+        router.post('/app/billing/cancel', {}, {
+            preserveScroll: false,
+            onFinish: () => setProcessingPlanId(null),
+            onError: () => setProcessingPlanId(null),
+        })
+    }
+
     const handleAddonAction = async (url, body, method = 'post') => {
         setAddonError(null)
         setAddonSubmitting(body?.package_id || body?.pack_id || url)
@@ -277,8 +288,8 @@ export default function BillingIndex({
                             </div>
                             {currentPlanData && (
                                 <div className="flex items-center gap-4">
-                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-sm font-medium text-violet-800">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-800">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
                                         {currentPlanData.name} plan
                                     </span>
                                     <Link href="/app/billing/overview" className="text-sm font-medium text-violet-600 hover:text-violet-500">
@@ -338,21 +349,23 @@ export default function BillingIndex({
                                 <div
                                     key={plan.id}
                                     className={`relative flex flex-col rounded-xl border bg-white ${
-                                        isCurrent ? 'border-violet-500 ring-2 ring-violet-500 shadow-lg' :
-                                        isPopular ? 'border-violet-300 ring-1 ring-violet-300 shadow-md' :
-                                        'border-gray-200 shadow-sm'
+                                        isCurrent
+                                            ? 'border-slate-600 ring-2 ring-slate-600 shadow-lg'
+                                            : isPopular
+                                                ? 'border-violet-400 ring-2 ring-violet-400/80 shadow-md shadow-violet-500/10'
+                                                : 'border-gray-200 shadow-sm'
                                     }`}
                                 >
                                     {isCurrent && (
                                         <div className="absolute -top-3 left-0 right-0 flex justify-center">
-                                            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                            <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-white shadow-sm">
                                                 Your plan
                                             </span>
                                         </div>
                                     )}
                                     {isPopular && !isCurrent && (
                                         <div className="absolute -top-3 left-0 right-0 flex justify-center">
-                                            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white shadow-sm">
                                                 Most popular
                                             </span>
                                         </div>
@@ -420,13 +433,29 @@ export default function BillingIndex({
                                         {/* CTA */}
                                         <div className="mt-auto">
                                             {isCurrent ? (
-                                                <button disabled className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white cursor-default">
+                                                <button disabled className="w-full rounded-lg bg-slate-700 py-2.5 text-sm font-semibold text-white cursor-default">
                                                     Current Plan
                                                 </button>
                                             ) : plan.id === 'free' && isDowngrade ? (
-                                                <button disabled className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 text-sm font-semibold text-gray-400 cursor-default">
-                                                    Free Forever
-                                                </button>
+                                                subscription?.has_incomplete_payment ? (
+                                                    <button disabled className="w-full rounded-lg bg-gray-100 py-2.5 text-sm font-semibold text-gray-400 cursor-not-allowed">
+                                                        Payment Required
+                                                    </button>
+                                                ) : (
+                                                    <div className="space-y-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleDowngradeToFree}
+                                                            disabled={processingPlanId !== null || !subscription}
+                                                            className="w-full rounded-lg border border-slate-300 bg-white py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {processingPlanId === 'free' ? 'Processing…' : 'Downgrade to Free'}
+                                                        </button>
+                                                        <p className="text-center text-[11px] leading-snug text-gray-500">
+                                                            Cancels paid billing at the end of your current period; you keep access until then.
+                                                        </p>
+                                                    </div>
+                                                )
                                             ) : plan.requires_contact ? (
                                                 <Link
                                                     href={route('contact', { plan: plan.id })}
@@ -457,6 +486,8 @@ export default function BillingIndex({
                                                 </p>
                                             ) : (
                                                 <button
+                                                    type="button"
+                                                    data-help={plan.id === 'pro' && !isCurrent ? 'billing-upgrade-plan' : undefined}
                                                     onClick={() => {
                                                         if (!plan.stripe_price_id || plan.stripe_price_id === 'price_free') return
                                                         subscription ? handleUpdateSubscription(plan.stripe_price_id, plan.id) : handleSubscribe(plan.stripe_price_id, plan.id)

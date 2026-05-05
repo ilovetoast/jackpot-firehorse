@@ -107,6 +107,9 @@ class AITaskType
     /** Studio — background inpaint (e.g. Clipdrop) after cutout; billed on success */
     public const STUDIO_LAYER_BACKGROUND_FILL = 'studio_layer_background_fill';
 
+    /** In-app help: grounded answers from retrieved help_actions only (gpt-4o-mini) */
+    public const IN_APP_HELP_ACTION_ANSWER = 'in_app_help_action_answer';
+
     /**
      * Get all task types as an array.
      *
@@ -147,6 +150,7 @@ class AITaskType
             self::STUDIO_LAYER_BACKGROUND_FILL,
             self::THUMBNAIL_ENHANCEMENT,
             self::THUMBNAIL_PRESENTATION_PREVIEW,
+            self::IN_APP_HELP_ACTION_ANSWER,
         ];
     }
 

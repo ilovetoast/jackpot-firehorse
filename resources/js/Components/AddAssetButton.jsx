@@ -45,6 +45,7 @@ export default function AddAssetButton({
     return (
         <button
             type="button"
+            data-help="assets-upload"
             onClick={disabled ? undefined : (onClick || (() => {}))}
             disabled={disabled}
             className={`inline-flex items-center rounded-md px-4 py-2.5 text-sm font-semibold shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}

@@ -14,15 +14,20 @@ class HelpActionsEndpointTest extends TestCase
 
     public function test_returns_json_shape_for_authenticated_tenant_session(): void
     {
-        $tenant = Tenant::create(['name' => 'T', 'slug' => 't-help']);
+        $tenant = Tenant::create([
+            'name' => 'T',
+            'slug' => 't-help',
+            'manual_plan_override' => 'enterprise',
+        ]);
         $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b-help']);
         $user = User::create([
             'email' => 'help-endpoint@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'H',
             'last_name' => 'E',
+            'email_verified_at' => now(),
         ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
         $response = $this->actingAs($user)
@@ -36,15 +41,20 @@ class HelpActionsEndpointTest extends TestCase
 
     public function test_non_string_q_does_not_error(): void
     {
-        $tenant = Tenant::create(['name' => 'T2', 'slug' => 't-help2']);
+        $tenant = Tenant::create([
+            'name' => 'T2',
+            'slug' => 't-help2',
+            'manual_plan_override' => 'enterprise',
+        ]);
         $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B2', 'slug' => 'b-help2']);
         $user = User::create([
             'email' => 'help-endpoint2@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'H',
             'last_name' => 'E',
+            'email_verified_at' => now(),
         ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
         $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
 
         $this->actingAs($user)

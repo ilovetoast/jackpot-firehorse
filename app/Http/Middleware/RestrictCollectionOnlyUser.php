@@ -27,6 +27,8 @@ class RestrictCollectionOnlyUser
         'downloads.store',
         'downloads.download',
         'api.downloads.poll',
+        'api.notifications.index',
+        'api.notifications.read',
         'download-bucket.items',
         'download-bucket.add',
         'download-bucket.add_batch',
