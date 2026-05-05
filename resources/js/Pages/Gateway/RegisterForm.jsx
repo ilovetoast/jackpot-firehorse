@@ -183,6 +183,7 @@ export default function RegisterForm({ context, onToggleLogin }) {
                         onFocus={() => setFocusedField('company_name')}
                         onBlur={() => setFocusedField(null)}
                         placeholder="Company / Brand name"
+                        autoComplete="organization"
                         className={inputClass}
                         style={{ borderColor: inputBorder('company_name') }}
                     />

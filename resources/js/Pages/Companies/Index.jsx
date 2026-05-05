@@ -68,8 +68,18 @@ export default function CompaniesIndex({ companies }) {
                                                         )}
                                                     </div>
                                                     <div className="ml-4">
-                                                        <div className="text-sm font-medium text-gray-900">
-                                                            {company.name}
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="text-sm font-medium text-gray-900">
+                                                                {company.name}
+                                                            </span>
+                                                            {company.is_agency ? (
+                                                                <span
+                                                                    className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800"
+                                                                    title="Agency workspace"
+                                                                >
+                                                                    Agency
+                                                                </span>
+                                                            ) : null}
                                                         </div>
                                                         <div className="text-sm text-gray-500">{company.slug}</div>
                                                     </div>

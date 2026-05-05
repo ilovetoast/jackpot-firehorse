@@ -94,6 +94,10 @@ class Tenant extends Model
                 'slug' => $tenant->slug,
                 'is_default' => true,
                 'show_in_selector' => true, // Default to showing in selector
+                // Jackpot gateway / site violet (see BrandThemeBuilder DEFAULT_* + JACKPOT_VIOLET) until the user customizes.
+                'primary_color' => '#7c3aed',
+                'secondary_color' => '#8b5cf6',
+                'accent_color' => '#06b6d4',
             ]);
 
             // If tenant already has an owner (e.g., created via seeder or admin), connect them to default brand

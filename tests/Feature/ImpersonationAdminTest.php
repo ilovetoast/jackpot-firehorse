@@ -377,6 +377,16 @@ class ImpersonationAdminTest extends TestCase
             'tenant_id' => $this->tenant->id,
             'mode' => 'read_only',
         ]);
+
+        // HandleInertiaRequests must not strip tenant_id just because the initiator has no tenant_user row.
+        $this->actingAs($this->siteSupport)
+            ->get(route('app'))
+            ->assertOk();
+
+        $this->assertSame($this->tenant->id, (int) session('tenant_id'));
+        $this->assertSame($this->brand->id, (int) session('brand_id'));
+        $this->assertSame($this->target->id, auth()->id());
+        $this->assertNotNull(session(ImpersonationService::SESSION_KEY));
     }
 
     public function test_site_support_cannot_start_full_mode(): void

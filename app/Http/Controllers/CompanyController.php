@@ -78,6 +78,7 @@ class CompanyController extends Controller
                     'id' => $company->id,
                     'name' => $company->name,
                     'slug' => $company->slug,
+                    'is_agency' => (bool) $company->is_agency,
                     'timezone' => $company->timezone ?? 'UTC',
                     'is_active' => $company->id == $currentCompanyId,
                     'billing' => [

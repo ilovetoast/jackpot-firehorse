@@ -20,9 +20,9 @@ export default function BillingOverview({
     ai_credits,
     credit_weights,
     ai_credits_addon_packages,
+    ai_credits_addon_state = { active: false, monthly_credits: 0 },
     creator_addon_config,
     creator_billing_state = null,
-    available_addons,
 }) {
     const page = usePage()
     const { auth } = page.props
@@ -50,8 +50,8 @@ export default function BillingOverview({
 
     const canManageBilling =
         Array.isArray(auth?.effective_permissions) && auth.effective_permissions.includes('billing.manage')
-    const [storageAddonSubmitting, setStorageAddonSubmitting] = useState(false)
-    const [storageAddonError, setStorageAddonError] = useState(null)
+    const [billingAddonBusy, setBillingAddonBusy] = useState(null)
+    const [billingAddonError, setBillingAddonError] = useState(null)
 
     const formatStorage = (mb) => {
         if (mb >= 1024 * 1024) return `${(mb / 1024 / 1024).toFixed(0)} TB`
@@ -64,36 +64,110 @@ export default function BillingOverview({
         window.location.href = '/app/billing/portal'
     }
 
+    const billingJsonHeaders = { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+
     const handleAddStorageAddon = async (packageId) => {
-        if (!packageId || storageAddonSubmitting) return
-        setStorageAddonError(null)
-        setStorageAddonSubmitting(true)
+        if (!packageId || billingAddonBusy || !canManageBilling) return
+        setBillingAddonError(null)
+        setBillingAddonBusy('storage')
         try {
             const response = await window.axios.post('/app/billing/storage-addon', { package_id: packageId }, {
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                headers: billingJsonHeaders,
             })
             if (response?.data?.storage) router.reload()
         } catch (err) {
-            setStorageAddonError(err.response?.data?.message ?? 'Failed to add storage. Please try again.')
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to add storage. Please try again.')
         } finally {
-            setStorageAddonSubmitting(false)
+            setBillingAddonBusy(null)
         }
     }
 
     const handleRemoveStorageAddon = async () => {
-        if (storageAddonSubmitting) return
-        if (!confirm('Remove the storage add-on? Your storage limit will decrease at the end of the billing period.')) return
-        setStorageAddonError(null)
-        setStorageAddonSubmitting(true)
+        if (billingAddonBusy || !canManageBilling) return
+        if (!confirm('Remove the storage add-on? Stripe will apply any credits for unused time; your workspace limit updates right away.')) return
+        setBillingAddonError(null)
+        setBillingAddonBusy('storage')
         try {
             await window.axios.delete('/app/billing/storage-addon', {
-                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                headers: billingJsonHeaders,
             })
             router.reload()
         } catch (err) {
-            setStorageAddonError(err.response?.data?.message ?? 'Failed to remove storage add-on. Please try again.')
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to remove storage add-on. Please try again.')
         } finally {
-            setStorageAddonSubmitting(false)
+            setBillingAddonBusy(null)
+        }
+    }
+
+    const handleAddAiCreditsAddon = async (packageId) => {
+        if (!packageId || billingAddonBusy || !canManageBilling) return
+        setBillingAddonError(null)
+        setBillingAddonBusy(`ai:${packageId}`)
+        try {
+            await window.axios.post('/app/billing/ai-credits-addon', { package_id: packageId }, { headers: billingJsonHeaders })
+            router.reload()
+        } catch (err) {
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to add AI credit add-on. Please try again.')
+        } finally {
+            setBillingAddonBusy(null)
+        }
+    }
+
+    const handleRemoveAiCreditsAddon = async () => {
+        if (billingAddonBusy || !canManageBilling) return
+        if (!confirm('Remove the monthly AI credit add-on? Credits from your plan only will apply next period.')) return
+        setBillingAddonError(null)
+        setBillingAddonBusy('ai')
+        try {
+            await window.axios.delete('/app/billing/ai-credits-addon', { headers: billingJsonHeaders })
+            router.reload()
+        } catch (err) {
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to remove AI credit add-on. Please try again.')
+        } finally {
+            setBillingAddonBusy(null)
+        }
+    }
+
+    const handleCreatorModuleAdd = async () => {
+        if (billingAddonBusy || !canManageBilling) return
+        setBillingAddonError(null)
+        setBillingAddonBusy('creator-module')
+        try {
+            await window.axios.post('/app/billing/creator-module', {}, { headers: billingJsonHeaders })
+            router.reload()
+        } catch (err) {
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to add Creator module. Please try again.')
+        } finally {
+            setBillingAddonBusy(null)
+        }
+    }
+
+    const handleCreatorModuleRemove = async () => {
+        if (billingAddonBusy || !canManageBilling) return
+        if (!confirm('Remove the Creator module add-on? Creator portal access may be limited based on your plan.')) return
+        setBillingAddonError(null)
+        setBillingAddonBusy('creator-module')
+        try {
+            await window.axios.delete('/app/billing/creator-module', { headers: billingJsonHeaders })
+            router.reload()
+        } catch (err) {
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to remove Creator module. Please try again.')
+        } finally {
+            setBillingAddonBusy(null)
+        }
+    }
+
+    const handleCreatorSeatPack = async (packId) => {
+        if (!packId || billingAddonBusy || !canManageBilling) return
+        setBillingAddonError(null)
+        setBillingAddonBusy(`creator-seats:${packId}`)
+        try {
+            await window.axios.post('/app/billing/creator-seats', { pack_id: packId }, { headers: billingJsonHeaders })
+            router.reload()
+        } catch (err) {
+            setBillingAddonError(err.response?.data?.message ?? 'Failed to update creator seats. Please try again.')
+        } finally {
+            setBillingAddonBusy(null)
         }
     }
 
@@ -280,11 +354,19 @@ export default function BillingOverview({
                     </div>
 
                     {/* Additional Storage - for paid plans */}
-                    {['starter', 'pro', 'premium', 'enterprise'].includes(current_plan?.id) && (
+                    {current_plan?.id && current_plan.id !== 'free' && (
                         <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                             <div className="px-6 py-5 border-b border-gray-200">
                                 <h2 className="text-lg font-semibold text-gray-900">Additional Storage</h2>
-                                <p className="mt-1 text-sm text-gray-500">Add extra storage to your plan. Storage is prorated and billed monthly.</p>
+                                <p className="mt-1 text-sm text-gray-500">
+                                    Extra storage is billed monthly on your subscription. When you add or change an add-on, Stripe invoices
+                                    the prorated amount right away and charges your default payment method—if the charge cannot complete,
+                                    the add-on is not applied. See{' '}
+                                    <Link href="/app/billing/invoices" className="font-medium text-indigo-600 hover:text-indigo-800">
+                                        invoices
+                                    </Link>{' '}
+                                    for line items.
+                                </p>
                             </div>
                             <div className="px-6 py-5">
                                 {storage_info && (
@@ -307,8 +389,14 @@ export default function BillingOverview({
                                     </div>
                                 )}
 
-                                {storageAddonError && (
-                                    <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{storageAddonError}</div>
+                                {!canManageBilling && (
+                                    <p className="mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+                                        Only users with billing permission can purchase or remove add-ons.
+                                    </p>
+                                )}
+
+                                {billingAddonError && (
+                                    <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{billingAddonError}</div>
                                 )}
 
                                 {subscription?.status_lower === 'active' && storage_addon_packages?.length > 0 ? (
@@ -318,10 +406,10 @@ export default function BillingOverview({
                                             <button
                                                 type="button"
                                                 onClick={handleRemoveStorageAddon}
-                                                disabled={storageAddonSubmitting}
+                                                disabled={billingAddonBusy !== null || !canManageBilling}
                                                 className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
                                             >
-                                                {storageAddonSubmitting ? 'Removing...' : 'Remove add-on'}
+                                                {billingAddonBusy === 'storage' ? 'Removing...' : 'Remove add-on'}
                                             </button>
                                         </div>
                                     ) : (
@@ -331,7 +419,7 @@ export default function BillingOverview({
                                                     key={pkg.id}
                                                     type="button"
                                                     onClick={() => handleAddStorageAddon(pkg.id)}
-                                                    disabled={storageAddonSubmitting}
+                                                    disabled={billingAddonBusy !== null || !canManageBilling}
                                                     className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-center shadow-sm hover:bg-gray-50 disabled:opacity-50"
                                                 >
                                                     <span className="text-sm font-medium text-gray-900">{pkg.label}</span>
@@ -343,16 +431,109 @@ export default function BillingOverview({
                                     )
                                 ) : subscription?.status_lower === 'active' && (!storage_addon_packages || storage_addon_packages.length === 0) ? (
                                     <p className="text-sm text-gray-500">
-                                        Storage add-ons are not configured. Add <code className="rounded bg-gray-100 px-1 py-0.5 text-xs">STRIPE_PRICE_STORAGE_50GB</code> etc. to .env.
+                                        No storage add-ons are available on your current plan, or Stripe prices are not configured.
                                     </p>
                                 ) : (
                                     <p className="text-sm text-gray-600">
                                         Add storage requires an active subscription.{' '}
-                                        <Link href="/app/billing" className="font-medium text-indigo-600 hover:text-indigo-500">
+                                        <Link href="/app/billing/plans" className="font-medium text-indigo-600 hover:text-indigo-500">
                                             Manage plan →
                                         </Link>
                                     </p>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {creator_billing_state?.show_card && current_plan?.id && current_plan.id !== 'free' && (
+                        <div className="mb-6 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+                            <div className="px-6 py-5 border-b border-gray-200">
+                                <h2 className="text-lg font-semibold text-gray-900">Creator module & seats</h2>
+                                <p className="mt-1 text-sm text-gray-500">
+                                    External creators get a scoped upload portal. Add-ons bill immediately to your saved card (same as storage).
+                                </p>
+                            </div>
+                            <div className="px-6 py-5 space-y-4">
+                                {!canManageBilling && (
+                                    <p className="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+                                        Only users with billing permission can purchase or remove this module.
+                                    </p>
+                                )}
+                                {creator_billing_state?.plan_includes_module ? (
+                                    <p className="text-sm text-gray-700">
+                                        <strong>Included</strong> in your plan
+                                        {creator_billing_state?.seats_limit != null ? (
+                                            <span className="text-gray-600">
+                                                {' '}
+                                                — {creator_billing_state.seats_limit} creator seats
+                                                {creator_billing_state?.active_seat_pack_id ? ' (with seat add-on)' : ''}.
+                                            </span>
+                                        ) : null}
+                                    </p>
+                                ) : null}
+                                {creator_billing_state?.can_purchase_base_module &&
+                                !creator_billing_state?.stripe_base_subscription_active &&
+                                subscription?.status_lower === 'active' ? (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={handleCreatorModuleAdd}
+                                            disabled={billingAddonBusy !== null || !canManageBilling}
+                                            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-800 disabled:opacity-50"
+                                        >
+                                            {billingAddonBusy === 'creator-module'
+                                                ? 'Adding…'
+                                                : `Add Creator module ($${Number(creator_addon_config?.base?.monthly_price ?? 0).toFixed(2)}/mo)`}
+                                        </button>
+                                    </div>
+                                ) : null}
+                                {creator_billing_state?.stripe_base_subscription_active && !creator_billing_state?.plan_includes_module ? (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <span className="text-sm text-green-800 font-medium">Creator module is active on your subscription.</span>
+                                        <button
+                                            type="button"
+                                            onClick={handleCreatorModuleRemove}
+                                            disabled={billingAddonBusy !== null || !canManageBilling}
+                                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                                        >
+                                            {billingAddonBusy === 'creator-module' ? 'Removing…' : 'Remove module'}
+                                        </button>
+                                    </div>
+                                ) : null}
+                                {creator_billing_state?.can_manage_seat_packs && subscription?.status_lower === 'active' ? (
+                                    <div>
+                                        <h3 className="text-sm font-medium text-gray-900 mb-2">Creator seat packs</h3>
+                                        {(creator_addon_config?.seat_packs || []).length === 0 ? (
+                                            <p className="text-sm text-gray-500">Seat pack prices are not configured.</p>
+                                        ) : (
+                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                {(creator_addon_config?.seat_packs || []).map((pack) => (
+                                                    <button
+                                                        key={pack.id}
+                                                        type="button"
+                                                        onClick={() => handleCreatorSeatPack(pack.id)}
+                                                        disabled={billingAddonBusy !== null || !canManageBilling}
+                                                        className={`flex flex-col items-start rounded-md border px-4 py-3 text-left shadow-sm disabled:opacity-50 ${
+                                                            creator_billing_state?.active_seat_pack_id === pack.id
+                                                                ? 'border-indigo-500 bg-indigo-50'
+                                                                : 'border-gray-300 bg-white hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        <span className="text-sm font-medium text-gray-900">+{pack.seats} seats</span>
+                                                        <span className="text-sm font-semibold text-indigo-600">
+                                                            ${Number(pack.monthly_price).toFixed(2)}/mo
+                                                        </span>
+                                                        {creator_billing_state?.active_seat_pack_id === pack.id ? (
+                                                            <span className="mt-1 text-xs text-indigo-800">Current add-on</span>
+                                                        ) : (
+                                                            <span className="mt-1 text-xs text-gray-500">Select pack</span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
                     )}
@@ -406,6 +587,63 @@ export default function BillingOverview({
                                         </div>
                                     )}
                                 </div>
+
+                                {!ai_credits.is_unlimited &&
+                                    current_plan?.id &&
+                                    current_plan.id !== 'free' &&
+                                    subscription?.status_lower === 'active' &&
+                                    (ai_credits_addon_packages?.length > 0 || ai_credits_addon_state?.active) && (
+                                    <div className="mt-4 border-t border-gray-100 pt-4">
+                                        <h4 className="text-sm font-medium text-gray-900 mb-1">Monthly credit add-on</h4>
+                                        <p className="text-sm text-gray-500 mb-3">
+                                            Adds recurring credits each billing cycle. Proration is charged immediately to your default
+                                            card; if payment fails, the add-on is not applied.
+                                        </p>
+                                        {!canManageBilling && (
+                                            <p className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+                                                Only users with billing permission can purchase or remove credit add-ons.
+                                            </p>
+                                        )}
+                                        {ai_credits_addon_state?.active ? (
+                                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
+                                                <span className="text-sm text-gray-700">
+                                                    Active add-on: <strong>+{ai_credits_addon_state.monthly_credits?.toLocaleString()}</strong>{' '}
+                                                    credits per month. Remove to change packs.
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRemoveAiCreditsAddon}
+                                                    disabled={billingAddonBusy !== null || !canManageBilling}
+                                                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                                                >
+                                                    {billingAddonBusy === 'ai' ? 'Removing…' : 'Remove add-on'}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="grid gap-2 sm:grid-cols-3">
+                                                {(ai_credits_addon_packages || []).map((pkg) => (
+                                                    <button
+                                                        key={pkg.id}
+                                                        type="button"
+                                                        onClick={() => handleAddAiCreditsAddon(pkg.id)}
+                                                        disabled={billingAddonBusy !== null || !canManageBilling}
+                                                        className="flex flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-center shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                                                    >
+                                                        <span className="text-sm font-medium text-gray-900">
+                                                            +{pkg.credits?.toLocaleString()} credits/mo
+                                                        </span>
+                                                        <span className="mt-1 text-sm font-semibold text-indigo-600">
+                                                            ${Number(pkg.monthly_price).toFixed(2)}/mo
+                                                        </span>
+                                                        <span className="mt-1 text-xs text-gray-500">
+                                                            {billingAddonBusy === `ai:${pkg.id}` ? 'Adding…' : 'Add'}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Per-feature breakdown */}
                                 {ai_credits.per_feature && Object.keys(ai_credits.per_feature).length > 0 && (

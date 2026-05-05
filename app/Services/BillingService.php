@@ -14,6 +14,7 @@ use Laravel\Cashier\Exceptions\IncompletePayment;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
+use Stripe\Subscription;
 use Stripe\SubscriptionItem;
 
 /**
@@ -756,7 +757,7 @@ class BillingService
                 $this->removeStorageAddonStripeItem($tenant->storage_addon_stripe_subscription_item_id);
             }
 
-            $item = SubscriptionItem::create([
+            $item = $this->createSubscriptionAddonItem([
                 'subscription' => $subscription->stripe_id,
                 'price' => $stripePriceId,
                 'quantity' => 1,
@@ -769,6 +770,26 @@ class BillingService
                 'storage_addon_stripe_price_id' => $stripePriceId,
                 'storage_addon_stripe_subscription_item_id' => $item->id,
             ]);
+
+            try {
+                $stripeSub = Subscription::retrieve($subscription->stripe_id, [
+                    'expand' => ['latest_invoice'],
+                ]);
+                Log::info('billing.storage_addon.added', [
+                    'tenant_id' => $tenant->id,
+                    'package_id' => $packageId,
+                    'stripe_price_id' => $stripePriceId,
+                    'subscription_item_id' => $item->id,
+                    'latest_invoice_id' => $stripeSub->latest_invoice->id ?? null,
+                    'latest_invoice_status' => $stripeSub->latest_invoice->status ?? null,
+                    'latest_invoice_amount_paid' => $stripeSub->latest_invoice->amount_paid ?? null,
+                ]);
+            } catch (\Throwable $t) {
+                Log::warning('billing.storage_addon.added_invoice_snapshot_failed', [
+                    'tenant_id' => $tenant->id,
+                    'message' => $t->getMessage(),
+                ]);
+            }
 
             return (new PlanService())->getStorageInfo($tenant);
         } catch (ApiErrorException $e) {
@@ -851,7 +872,7 @@ class BillingService
                 $this->removeStripeSubscriptionItem($tenant->ai_credits_addon_stripe_subscription_item_id);
             }
 
-            $item = SubscriptionItem::create([
+            $item = $this->createSubscriptionAddonItem([
                 'subscription' => $subscription->stripe_id,
                 'price' => $stripePriceId,
                 'quantity' => 1,
@@ -935,7 +956,7 @@ class BillingService
         Stripe::setApiKey($stripeSecret);
 
         try {
-            $item = SubscriptionItem::create([
+            $item = $this->createSubscriptionAddonItem([
                 'subscription' => $subscription->stripe_id,
                 'price' => $stripePriceId,
                 'quantity' => 1,
@@ -1065,12 +1086,12 @@ class BillingService
                 $this->removeStripeSubscriptionItem($module->seat_pack_stripe_subscription_item_id);
             }
 
-            $item = SubscriptionItem::create([
+            $item = $this->createSubscriptionAddonItem([
                 'subscription' => $subscription->stripe_id,
                 'price' => $stripePriceId,
                 'quantity' => 1,
             ], [
-                'idempotency_key' => "tenant-{$tenant->id}-creator-seats",
+                'idempotency_key' => "tenant-{$tenant->id}-creator-seats-{$packId}",
             ]);
 
             $baseSeats = (int) ($module->seats_limit ?? 25);
@@ -1091,6 +1112,21 @@ class BillingService
     // -------------------------------------------------------------------------
 
     /**
+     * Recurring add-ons: invoice prorations immediately and require payment on the default payment method.
+     *
+     * Stripe SubscriptionItem create: {@code proration_behavior: always_invoice} finalizes prorations into an
+     * invoice now; {@code payment_behavior: error_if_incomplete} fails the request if that invoice cannot be
+     * paid (card declined, etc.) so entitlements stay aligned with successful collection.
+     */
+    private function createSubscriptionAddonItem(array $params, array $requestOptions = []): \Stripe\SubscriptionItem
+    {
+        return SubscriptionItem::create(array_merge($params, [
+            'proration_behavior' => 'always_invoice',
+            'payment_behavior' => 'error_if_incomplete',
+        ]), $requestOptions);
+    }
+
+    /**
      * Delete a Stripe subscription item (storage add-on).
      */
     private function removeStorageAddonStripeItem(string $stripeSubscriptionItemId): void
@@ -1100,6 +1136,39 @@ class BillingService
 
     private function removeStripeSubscriptionItem(string $stripeSubscriptionItemId): void
     {
-        SubscriptionItem::retrieve($stripeSubscriptionItemId)->delete();
+        try {
+            SubscriptionItem::retrieve($stripeSubscriptionItemId)->delete();
+        } catch (ApiErrorException $e) {
+            if ($this->stripeSubscriptionItemAlreadyRemoved($e)) {
+                Log::warning('billing.stripe_subscription_item.already_removed', [
+                    'subscription_item_id' => $stripeSubscriptionItemId,
+                    'stripe_code' => $e->getStripeCode(),
+                ]);
+
+                return;
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * True when Stripe has no such item (Dashboard delete, new subscription, env mismatch, etc.).
+     */
+    private function stripeSubscriptionItemAlreadyRemoved(ApiErrorException $e): bool
+    {
+        if ($e->getHttpStatus() === 404) {
+            return true;
+        }
+
+        $code = $e->getStripeCode();
+        if ($code === 'resource_missing') {
+            return true;
+        }
+
+        $msg = strtolower($e->getMessage());
+
+        return str_contains($msg, 'no such subscription_item')
+            || str_contains($msg, 'invalid subscription_item');
     }
 }

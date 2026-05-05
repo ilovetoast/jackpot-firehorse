@@ -73,12 +73,18 @@ export default function CompanySelector({ companies }) {
                             <div className="flex items-center gap-5">
                                 <CompanyIcon company={company} color={color} />
                                 <div className="flex-1 min-w-0">
-                                    <h2 className="text-lg font-medium text-white truncate">
-                                        {company.name}
-                                    </h2>
-                                    <p className="text-sm text-white/40 mt-0.5">
-                                        {company.slug}
-                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2 gap-y-1 min-w-0">
+                                        <h2 className="text-lg font-medium text-white truncate">{company.name}</h2>
+                                        {company.is_agency ? (
+                                            <span
+                                                className="shrink-0 rounded-full border border-white/20 bg-white/[0.08] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white/80"
+                                                title="Agency workspace"
+                                            >
+                                                Agency
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <p className="text-sm text-white/40 mt-0.5">{company.slug}</p>
                                 </div>
                                 <svg
                                     className="w-5 h-5 text-white/20 group-hover:text-white/50 transition-colors duration-300"

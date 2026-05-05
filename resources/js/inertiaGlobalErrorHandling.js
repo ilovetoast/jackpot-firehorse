@@ -10,6 +10,22 @@ import { showGlobalError } from './stores/errorStore'
 import { parsePermissionDeniedHtml } from './utils/parsePermissionDeniedHtml'
 import { resolvePermissionTheme } from './utils/resolvePermissionTheme'
 
+/**
+ * Laravel's `Inertia::location($url)` returns HTTP 409 with `X-Inertia-Location` so the client
+ * performs a full page load (e.g. gateway register → /app). Do not treat that as an error.
+ */
+function inertiaLocationUrl(response) {
+    if (!response?.headers) {
+        return null
+    }
+    const h = response.headers
+    if (typeof h.get === 'function') {
+        return h.get('X-Inertia-Location') || h.get('x-inertia-location') || null
+    }
+    const raw = h['x-inertia-location'] ?? h['X-Inertia-Location']
+    return typeof raw === 'string' && raw.length > 0 ? raw : null
+}
+
 function messageFromInvalidResponse(response) {
     const data = response?.data
     if (data && typeof data === 'object' && data.message) {
@@ -88,11 +104,17 @@ router.on('invalid', (event) => {
     if (!res) return
     if (event.defaultPrevented) return
 
+    const status = res.status ?? 0
+    if (status === 409 && inertiaLocationUrl(res)) {
+        // Let Inertia perform the hard redirect (window.location = X-Inertia-Location).
+        return
+    }
+
     event.preventDefault()
 
-    const status = res.status ?? 500
+    const statusForModal = res.status ?? 500
     const message = messageFromInvalidResponse(res)
-    const type = status >= 500 ? 'server' : 'server'
+    const type = statusForModal >= 500 ? 'server' : 'server'
     const raw = res?.data
     const title =
         raw && typeof raw === 'object' && raw.title ? String(raw.title) : undefined
@@ -101,7 +123,7 @@ router.on('invalid', (event) => {
         message,
         title,
         type,
-        statusCode: status,
+        statusCode: statusForModal,
         retry: () =>
             router.reload({
                 preserveScroll: true,

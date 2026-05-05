@@ -142,11 +142,16 @@ class BillingController extends Controller
 
         $currentPlanLimits = $planService->getPlanLimits($tenant);
 
-        // Storage add-on packages (only those with Stripe price IDs configured)
-        $storageAddonPackages = collect(config('storage_addons.packages', []))
-            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
-            ->values()
-            ->all();
+        $storageAddonPackages = $this->filterAddonPackagesForPlan(
+            config('storage_addons.packages', []),
+            $currentPlan,
+            'storage'
+        );
+        $aiCreditsAddonPackages = $this->filterAddonPackagesForPlan(
+            config('ai_credits.addons', []),
+            $currentPlan,
+            'ai_credits'
+        );
 
         // Use site-wide branding color (not tenant-specific)
         $sitePrimaryColor = '#7c3aed'; // Jackpot product violet (see brandWorkspaceTokens JACKPOT_VIOLET)
@@ -225,10 +230,7 @@ class BillingController extends Controller
             ] : null,
             'storage_info' => $storageInfo,
             'storage_addon_packages' => $storageAddonPackages,
-            'ai_credits_addon_packages' => collect(config('ai_credits.addons', []))
-                ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
-                ->values()
-                ->all(),
+            'ai_credits_addon_packages' => $aiCreditsAddonPackages,
             'credit_weights' => config('ai_credits.weights', []),
             'creator_addon_config' => [
                 'base' => config('creator_addon.base'),
@@ -707,10 +709,16 @@ class BillingController extends Controller
         }
 
         $storageInfo = $planService->getStorageInfo($tenant);
-        $storageAddonPackages = collect(config('storage_addons.packages', []))
-            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
-            ->values()
-            ->all();
+        $storageAddonPackages = $this->filterAddonPackagesForPlan(
+            config('storage_addons.packages', []),
+            $currentPlan,
+            'storage'
+        );
+        $aiCreditsAddonPackages = $this->filterAddonPackagesForPlan(
+            config('ai_credits.addons', []),
+            $currentPlan,
+            'ai_credits'
+        );
 
         return Inertia::render('Billing/Overview', [
             'tenant' => [
@@ -745,10 +753,11 @@ class BillingController extends Controller
             'currency' => $currency,
             'ai_credits' => $this->aiUsageService->getUsageStatus($tenant),
             'credit_weights' => config('ai_credits.weights', []),
-            'ai_credits_addon_packages' => collect(config('ai_credits.addons', []))
-                ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
-                ->values()
-                ->all(),
+            'ai_credits_addon_packages' => $aiCreditsAddonPackages,
+            'ai_credits_addon_state' => [
+                'active' => ((int) $tenant->ai_credits_addon) > 0,
+                'monthly_credits' => (int) ($tenant->ai_credits_addon ?? 0),
+            ],
             'creator_addon_config' => [
                 'base' => config('creator_addon.base'),
                 'seat_packs' => collect(config('creator_addon.seat_packs', []))
@@ -1320,6 +1329,25 @@ class BillingController extends Controller
                 'payment' => 'Failed to process payment confirmation: ' . $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $packages
+     * @return array<int, array<string, mixed>>
+     */
+    protected function filterAddonPackagesForPlan(array $packages, string $planKey, string $allowListKey): array
+    {
+        $plan = config("plans.{$planKey}", config('plans.free'));
+        $allowed = $plan['addons_available'][$allowListKey] ?? [];
+        if (! is_array($allowed) || $allowed === []) {
+            return [];
+        }
+
+        return collect($packages)
+            ->filter(fn ($pkg) => in_array($pkg['id'] ?? '', $allowed, true))
+            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+            ->values()
+            ->all();
     }
 
     /**

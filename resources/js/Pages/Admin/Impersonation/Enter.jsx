@@ -1,11 +1,50 @@
 import axios from 'axios'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useForm, usePage } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AdminShell from '../../../Components/Admin/AdminShell'
 import AdminSupportSectionSidebar from '../../../Components/Admin/AdminSupportSectionSidebar'
+
+/** Match PHP `ucfirst` for tenant role labels (e.g. agency_admin → Agency_admin). */
+function phpUcfirst(str) {
+    if (!str) {
+        return null
+    }
+    return str.charAt(0).toUpperCase() + str.slice(1)
+}
+
+/**
+ * Map {@see SiteAdminController::companyUsers} rows into the same shape as {@see SiteAdminController::allUsers}
+ * so existing `selectUser` / brand logic keeps working.
+ */
+function normalizeCompanyUserRow(row, tenantMeta) {
+    const tid = tenantMeta ? Number(tenantMeta.id) : null
+    const tname = tenantMeta?.name ?? ''
+    const tslug = tenantMeta?.slug ?? ''
+    const roleLabel = phpUcfirst(row.tenant_role ?? 'member')
+    const brands = (row.brand_assignments ?? []).map((b) => ({
+        id: b.id,
+        name: b.name,
+        slug: '',
+        tenant_id: tid,
+        tenant_name: tname,
+        is_default: Boolean(b.is_default),
+        role: b.role,
+    }))
+
+    return {
+        id: row.id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        email: row.email,
+        avatar_url: row.avatar_url,
+        is_suspended: Boolean(row.is_suspended),
+        companies: tid ? [{ id: tid, name: tname, slug: tslug, role: roleLabel }] : [],
+        brands,
+    }
+}
 
 function pickDefaultBrandForTenant(user, tenantId) {
     if (!user?.brands?.length || !tenantId) {
@@ -31,10 +70,10 @@ function isTenantWideAccess(roleLabel) {
 export default function AdminImpersonationEnter({ can_start_full = false, company_options = [] }) {
     const { auth, flash } = usePage().props
     const [companyQuery, setCompanyQuery] = useState('')
-    const [search, setSearch] = useState('')
-    const [debouncedSearch, setDebouncedSearch] = useState('')
-    const [loadingUsers, setLoadingUsers] = useState(false)
-    const [userHits, setUserHits] = useState([])
+    const [userListFilter, setUserListFilter] = useState('')
+    const [loadingCompanyUsers, setLoadingCompanyUsers] = useState(false)
+    const [companyUsers, setCompanyUsers] = useState([])
+    const [companyUsersLoadError, setCompanyUsersLoadError] = useState(null)
     const [selectedUser, setSelectedUser] = useState(null)
     const [fetchedTenantBrands, setFetchedTenantBrands] = useState(null)
 
@@ -60,32 +99,84 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
         )
     }, [company_options, companyQuery])
 
-    useEffect(() => {
-        const t = setTimeout(() => setDebouncedSearch(search.trim()), 350)
-        return () => clearTimeout(t)
-    }, [search])
+    const selectedTenantMeta = useMemo(() => {
+        if (!data.tenant_id) {
+            return null
+        }
+        return company_options.find((c) => String(c.id) === String(data.tenant_id)) ?? null
+    }, [company_options, data.tenant_id])
 
-    const loadUsers = useCallback(async () => {
-        if (!data.tenant_id || debouncedSearch.length < 2) {
-            setUserHits([])
+    useEffect(() => {
+        if (!data.tenant_id) {
+            setCompanyUsers([])
+            setCompanyUsersLoadError(null)
             return
         }
-        setLoadingUsers(true)
-        try {
-            const res = await axios.get(route('admin.api.users'), {
-                params: { search: debouncedSearch, per_page: 25, tenant_id: data.tenant_id },
-            })
-            setUserHits(res.data?.data ?? res.data ?? [])
-        } catch {
-            setUserHits([])
-        } finally {
-            setLoadingUsers(false)
-        }
-    }, [debouncedSearch, data.tenant_id])
 
-    useEffect(() => {
-        loadUsers()
-    }, [loadUsers])
+        let cancelled = false
+        setLoadingCompanyUsers(true)
+        setCompanyUsersLoadError(null)
+
+        axios
+            .get(route('admin.api.companies.users', { tenant: data.tenant_id }))
+            .then((res) => {
+                if (cancelled) {
+                    return
+                }
+                const rows = Array.isArray(res.data) ? res.data : []
+                const meta = selectedTenantMeta ?? {
+                    id: data.tenant_id,
+                    name: 'Company',
+                    slug: '',
+                }
+                setCompanyUsers(rows.map((row) => normalizeCompanyUserRow(row, meta)))
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setCompanyUsers([])
+                    setCompanyUsersLoadError('Could not load users for this company.')
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoadingCompanyUsers(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [data.tenant_id, selectedTenantMeta])
+
+    const sortedCompanyUsers = useMemo(() => {
+        return [...companyUsers].sort((a, b) => {
+            const an = `${a.last_name || ''} ${a.first_name || ''} ${a.email || ''}`.toLowerCase().trim()
+            const bn = `${b.last_name || ''} ${b.first_name || ''} ${b.email || ''}`.toLowerCase().trim()
+            return an.localeCompare(bn)
+        })
+    }, [companyUsers])
+
+    const filteredCompanyUsers = useMemo(() => {
+        const q = userListFilter.trim().toLowerCase()
+        if (!q) {
+            return sortedCompanyUsers
+        }
+        return sortedCompanyUsers.filter((u) => {
+            const blob = `${u.first_name || ''} ${u.last_name || ''} ${u.email || ''}`.toLowerCase()
+            return blob.includes(q)
+        })
+    }, [sortedCompanyUsers, userListFilter])
+
+    /** Keep the chosen user visible in the native select even when the filter hides them. */
+    const selectOptions = useMemo(() => {
+        if (!selectedUser) {
+            return filteredCompanyUsers
+        }
+        if (filteredCompanyUsers.some((u) => u.id === selectedUser.id)) {
+            return filteredCompanyUsers
+        }
+        return [selectedUser, ...filteredCompanyUsers]
+    }, [filteredCompanyUsers, selectedUser])
 
     const brandsForTenant = useMemo(() => {
         if (!selectedUser?.brands?.length || !data.tenant_id) {
@@ -159,9 +250,9 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
     const onTenantPicked = (tenantId) => {
         setFetchedTenantBrands(null)
         setSelectedUser(null)
-        setSearch('')
-        setDebouncedSearch('')
-        setUserHits([])
+        setUserListFilter('')
+        setCompanyUsers([])
+        setCompanyUsersLoadError(null)
         setData('tenant_id', tenantId)
         setData('target_user_id', '')
         setData('brand_id', '')
@@ -261,47 +352,73 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-700">Find user in this company</label>
+                            <label htmlFor="user_in_company" className="block text-sm font-medium text-slate-700">
+                                User in this company <span className="text-red-600">*</span>
+                            </label>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                                Everyone with access to this company is listed. Use the filter to narrow the list.
+                            </p>
                             <input
+                                id="user_in_company_filter"
                                 type="search"
                                 className={inputCls}
-                                placeholder={data.tenant_id ? 'Name or email (min. 2 characters)' : 'Select a company first'}
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                disabled={!data.tenant_id}
+                                placeholder={data.tenant_id ? 'Filter by name or email…' : 'Select a company first'}
+                                value={userListFilter}
+                                onChange={(e) => setUserListFilter(e.target.value)}
+                                disabled={!data.tenant_id || loadingCompanyUsers}
                                 autoComplete="off"
                             />
+                            <select
+                                id="user_in_company"
+                                className={`${inputCls} mt-2`}
+                                value={data.target_user_id}
+                                disabled={!data.tenant_id || loadingCompanyUsers}
+                                required
+                                onChange={(e) => {
+                                    const id = e.target.value
+                                    if (!id) {
+                                        clearSelection()
+                                        return
+                                    }
+                                    const u = companyUsers.find((x) => String(x.id) === id)
+                                    if (u) {
+                                        selectUser(u)
+                                    }
+                                }}
+                            >
+                                <option value="">
+                                    {loadingCompanyUsers ? 'Loading users…' : data.tenant_id ? 'Choose a user…' : 'Select a company first'}
+                                </option>
+                                {selectOptions.map((u) => {
+                                    const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || '—'
+                                    const tag = u.is_suspended ? ' — suspended' : ''
+                                    return (
+                                        <option key={u.id} value={String(u.id)}>
+                                            {name} ({u.email}){tag}
+                                        </option>
+                                    )
+                                })}
+                            </select>
                             {!data.tenant_id ? (
-                                <p className="mt-1 text-xs text-slate-500">Choose a company before searching users.</p>
+                                <p className="mt-1 text-xs text-slate-500">Choose a company to load its members.</p>
                             ) : null}
-                            {data.tenant_id && debouncedSearch.length > 0 && debouncedSearch.length < 2 ? (
-                                <p className="mt-1 text-xs text-slate-500">Type at least two characters to search.</p>
+                            {companyUsersLoadError ? (
+                                <p className="mt-1 text-xs text-red-600">{companyUsersLoadError}</p>
                             ) : null}
-                            {loadingUsers ? <p className="mt-2 text-xs text-slate-500">Searching…</p> : null}
-                            {!loadingUsers && data.tenant_id && debouncedSearch.length >= 2 && userHits.length === 0 ? (
-                                <p className="mt-2 text-xs text-slate-500">No users matched in this company.</p>
+                            {!loadingCompanyUsers &&
+                            data.tenant_id &&
+                            !companyUsersLoadError &&
+                            companyUsers.length === 0 ? (
+                                <p className="mt-1 text-xs text-slate-500">No users found for this company.</p>
                             ) : null}
-                            {userHits.length > 0 ? (
-                                <ul className="mt-2 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white text-sm shadow-sm">
-                                    {userHits.map((u) => (
-                                        <li key={u.id}>
-                                            <button
-                                                type="button"
-                                                className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
-                                                onClick={() => selectUser(u)}
-                                            >
-                                                <span className="font-medium text-slate-900">
-                                                    {[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}
-                                                </span>
-                                                <span className="text-xs text-slate-600">{u.email}</span>
-                                                {u.is_suspended ? (
-                                                    <span className="text-xs font-medium text-red-700">Suspended</span>
-                                                ) : null}
-                                            </button>
-                                        </li>
-                                    ))}
-                                </ul>
+                            {!loadingCompanyUsers &&
+                            data.tenant_id &&
+                            companyUsers.length > 0 &&
+                            filteredCompanyUsers.length === 0 &&
+                            !selectedUser ? (
+                                <p className="mt-1 text-xs text-slate-500">No users match this filter.</p>
                             ) : null}
+                            {errors.target_user_id ? <p className="mt-1 text-xs text-red-600">{errors.target_user_id}</p> : null}
                         </div>
 
                         {selectedUser ? (
@@ -413,7 +530,6 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
                                 </div>
 
                                 {errors.impersonation ? <p className="text-sm text-red-600">{errors.impersonation}</p> : null}
-                                {errors.target_user_id ? <p className="text-sm text-red-600">{errors.target_user_id}</p> : null}
 
                                 <div className="flex flex-wrap gap-3">
                                     <button

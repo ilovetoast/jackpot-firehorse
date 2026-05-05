@@ -83,9 +83,9 @@ class HandleInertiaRequests extends Middleware
         if (! $tenant && $currentTenantId) {
             $tenant = \App\Models\Tenant::find($currentTenantId);
             if ($tenant) {
-                // If user is no longer a member of this tenant (e.g. removed from company), clear session
-                // so we don't show their old company/brand in the header on /app/companies or errors.no-companies
-                if ($authUser instanceof User && ! $authUser->belongsToTenant($tenant->id)) {
+                // If the *acting* user is not a member of this tenant, clear workspace session.
+                // Use $user (target during internal support impersonation), not $authUser (initiator may be site staff with no tenant row).
+                if ($user instanceof User && ! $user->belongsToTenant($tenant->id)) {
                     session()->forget(['tenant_id', 'brand_id', 'collection_id']);
                     $tenant = null;
                 } else {

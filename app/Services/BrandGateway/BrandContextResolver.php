@@ -272,6 +272,7 @@ class BrandContextResolver
             'id' => $tenant->id,
             'name' => $tenant->name,
             'slug' => $tenant->slug,
+            'is_agency' => (bool) $tenant->is_agency,
             'logo_url' => $logoUrl,
             'primary_color' => $defaultBrand?->primary_color,
             'icon_bg_color' => $defaultBrand?->icon_bg_color,

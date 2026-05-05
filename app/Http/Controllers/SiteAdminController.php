@@ -434,6 +434,7 @@ class SiteAdminController extends Controller
                     'tenant_role' => strtolower($tenantRole ?? 'member'),
                     'is_owner' => $isOwner,
                     'is_disabled_by_plan_limit' => $isDisabledByPlanLimit,
+                    'is_suspended' => $user->isSuspended(),
                     'join_order' => $index + 1,
                     'brand_assignments' => $brands,
                 ];
