@@ -53,6 +53,13 @@ class HelpAskEndpointTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('kind', 'fallback');
         $this->assertLessThan(12, (int) $response->json('best_score'));
+        $this->assertNotNull($response->json('help_ai_question_id'));
+        $this->assertDatabaseHas('help_ai_questions', [
+            'id' => $response->json('help_ai_question_id'),
+            'response_kind' => 'no_strong_match',
+            'tenant_id' => $tenant->id,
+            'user_id' => $user->id,
+        ]);
     }
 
     public function test_strong_match_calls_ai_and_returns_structured_answer(): void
@@ -107,6 +114,12 @@ class HelpAskEndpointTest extends TestCase
         $response->assertJsonPath('answer.confidence', 'high');
         $response->assertJsonPath('usage.agent_run_id', 4242);
         $response->assertJsonPath('usage.model', 'gpt-4o-mini');
+        $this->assertNotNull($response->json('help_ai_question_id'));
+        $this->assertDatabaseHas('help_ai_questions', [
+            'id' => $response->json('help_ai_question_id'),
+            'response_kind' => 'ai',
+            'agent_run_id' => 4242,
+        ]);
     }
 
     public function test_ai_disabled_on_tenant_returns_kind_ai_disabled(): void
@@ -125,6 +138,64 @@ class HelpAskEndpointTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('kind', 'ai_disabled');
+        $this->assertDatabaseHas('help_ai_questions', [
+            'id' => $response->json('help_ai_question_id'),
+            'response_kind' => 'ai_disabled',
+        ]);
+    }
+
+    public function test_global_feature_disabled_returns_feature_disabled_kind(): void
+    {
+        config(['ai.help_ask.enabled' => false]);
+
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $response = $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'upload files to assets']);
+
+        $response->assertOk();
+        $response->assertJsonPath('kind', 'feature_disabled');
+        $this->assertDatabaseHas('help_ai_questions', [
+            'id' => $response->json('help_ai_question_id'),
+            'response_kind' => 'feature_disabled',
+        ]);
+    }
+
+    public function test_user_can_submit_feedback_for_own_help_ask(): void
+    {
+        [$tenant, $brand, $user] = $this->actingTenantUser();
+
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldNotReceive('executeAgent');
+        $this->app->instance(AIService::class, $mock);
+
+        $ask = $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'zzzzzzzzzzzzzz']);
+
+        $ask->assertOk();
+        $id = $ask->json('help_ai_question_id');
+        $this->assertNotNull($id);
+
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson("/app/help/ask/{$id}/feedback", [
+                'feedback_rating' => 'helpful',
+                'feedback_note' => 'Clear enough',
+            ])
+            ->assertOk()
+            ->assertJsonPath('ok', true);
+
+        $this->assertDatabaseHas('help_ai_questions', [
+            'id' => $id,
+            'feedback_rating' => 'helpful',
+            'feedback_note' => 'Clear enough',
+        ]);
     }
 
     public function test_question_validation(): void

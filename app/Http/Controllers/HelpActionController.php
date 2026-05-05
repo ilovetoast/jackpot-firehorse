@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\HelpAiQuestion;
 use App\Models\Tenant;
 use App\Services\AuthPermissionService;
 use App\Services\HelpActionService;
@@ -22,10 +23,24 @@ class HelpActionController extends Controller
         $rawQ = $request->query('q');
         $query = is_string($rawQ) ? $rawQ : null;
 
+        $rawRoute = $request->query('route_name');
+        $contextRoute = is_string($rawRoute) ? trim($rawRoute) : null;
+        if ($contextRoute === '') {
+            $contextRoute = null;
+        }
+
+        $rawPage = $request->query('page_context');
+        $contextPage = is_string($rawPage) ? trim($rawPage) : null;
+        if ($contextPage === '') {
+            $contextPage = null;
+        }
+
         $payload = $helpActionService->forRequest(
             $query,
             $permissions,
-            $brand
+            $brand,
+            $contextRoute,
+            $contextPage,
         );
 
         return response()->json($payload);
@@ -53,5 +68,35 @@ class HelpActionController extends Controller
         );
 
         return response()->json($payload);
+    }
+
+    /**
+     * User feedback on a specific help AI row (same user + tenant only).
+     */
+    public function feedback(Request $request, HelpAiQuestion $helpAiQuestion): JsonResponse
+    {
+        $validated = $request->validate([
+            'feedback_rating' => ['required', 'string', 'in:helpful,not_helpful'],
+            'feedback_note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $user = $request->user();
+        if (! $user || (int) $helpAiQuestion->user_id !== (int) $user->id) {
+            abort(403);
+        }
+
+        /** @var Tenant $tenant */
+        $tenant = app('tenant');
+        if ((int) $helpAiQuestion->tenant_id !== (int) $tenant->id) {
+            abort(403);
+        }
+
+        $helpAiQuestion->update([
+            'feedback_rating' => $validated['feedback_rating'],
+            'feedback_note' => isset($validated['feedback_note']) ? trim((string) $validated['feedback_note']) : null,
+            'feedback_submitted_at' => now(),
+        ]);
+
+        return response()->json(['ok' => true]);
     }
 }

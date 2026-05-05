@@ -549,6 +549,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
 
     // AI Dashboard routes (no tenant middleware - system-level only)
     Route::get('/admin/ai', [\App\Http\Controllers\Admin\AIDashboardController::class, 'index'])->name('admin.ai.index');
+    Route::get('/admin/ai/help-diagnostics', [\App\Http\Controllers\Admin\HelpAiDiagnosticsController::class, 'index'])->name('admin.ai.help-diagnostics');
     Route::get('/admin/ai/activity', [\App\Http\Controllers\Admin\AIDashboardController::class, 'activity'])->name('admin.ai.activity');
     Route::get('/admin/ai/analyzed-content', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'index'])->name('admin.ai.analyzed-content');
     Route::get('/admin/ai/analyzed-content/video-insights/runs/{run}', [\App\Http\Controllers\Admin\AdminAnalyzedContentController::class, 'videoInsightRunDetail'])->name('admin.ai.analyzed-content.video-insight-run');
@@ -648,6 +649,9 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/help/ask', [\App\Http\Controllers\HelpActionController::class, 'ask'])
             ->middleware('throttle:20,1')
             ->name('help.ask');
+        Route::post('/help/ask/{helpAiQuestion}/feedback', [\App\Http\Controllers\HelpActionController::class, 'feedback'])
+            ->middleware('throttle:30,1')
+            ->name('help.ask.feedback');
     });
 
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.

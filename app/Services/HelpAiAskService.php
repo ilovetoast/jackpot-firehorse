@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\AITaskType;
 use App\Models\Brand;
+use App\Models\HelpAiQuestion;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Log;
  * Phase 2: grounded AI answers for in-app help (retrieved help_actions only).
  *
  * Uses {@see AIService} with agent {@see config('ai.help_ask.agent_id')} and gpt-4o-mini.
+ * Persists each ask to {@see HelpAiQuestion} for admin diagnostics.
  */
 class HelpAiAskService
 {
@@ -59,7 +61,7 @@ class HelpAiAskService
         if (($tenant->settings['ai_enabled'] ?? true) === false) {
             Log::info('help.ask.ai_disabled_tenant', $baseLog);
 
-            return [
+            $payload = [
                 'kind' => 'ai_disabled',
                 'matched_keys' => $matchedKeys,
                 'best_score' => $bestScore,
@@ -67,25 +69,29 @@ class HelpAiAskService
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
+
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'ai_disabled', $matchedKeys, $bestScore, null, null, null);
         }
 
         if (! config('ai.help_ask.enabled', true)) {
             Log::info('help.ask.feature_disabled', $baseLog);
 
-            return [
-                'kind' => 'ai_disabled',
+            $payload = [
+                'kind' => 'feature_disabled',
                 'matched_keys' => $matchedKeys,
                 'best_score' => $bestScore,
                 'message' => 'AI help is temporarily unavailable.',
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
+
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'feature_disabled', $matchedKeys, $bestScore, null, null, null);
         }
 
         if ($matches === [] || $bestScore < $strongMin) {
             Log::info('help.ask.no_strong_match', $baseLog);
 
-            return [
+            $payload = [
                 'kind' => 'fallback',
                 'matched_keys' => $matchedKeys,
                 'best_score' => $bestScore,
@@ -93,6 +99,8 @@ class HelpAiAskService
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
+
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'no_strong_match', $matchedKeys, $bestScore, null, null, null);
         }
 
         $allowedKeys = array_fill_keys($matchedKeys, true);
@@ -130,35 +138,63 @@ class HelpAiAskService
             }
             $sanitized = $this->sanitizeAiPayload($parsed, $matches, $allowedForSanitize);
 
-            Log::info('help.ask.success', $baseLog + [
-                'model' => $ai['model'] ?? null,
+            $usage = [
                 'agent_run_id' => $ai['agent_run_id'] ?? null,
+                'model' => $ai['model'] ?? null,
                 'tokens_in' => $ai['tokens_in'] ?? null,
                 'tokens_out' => $ai['tokens_out'] ?? null,
                 'cost' => $ai['cost'] ?? null,
+            ];
+
+            Log::info('help.ask.success', $baseLog + [
+                'model' => $usage['model'],
+                'agent_run_id' => $usage['agent_run_id'],
+                'tokens_in' => $usage['tokens_in'],
+                'tokens_out' => $usage['tokens_out'],
+                'cost' => $usage['cost'],
             ]);
 
-            return [
+            $recommendedKey = null;
+            if (isset($sanitized['recommended_page']['key']) && is_string($sanitized['recommended_page']['key'])) {
+                $recommendedKey = $sanitized['recommended_page']['key'];
+            }
+
+            $confidenceTier = isset($sanitized['confidence']) && is_string($sanitized['confidence'])
+                ? $sanitized['confidence']
+                : null;
+
+            $payload = [
                 'kind' => 'ai',
                 'matched_keys' => $matchedKeys,
                 'best_score' => $bestScore,
                 'answer' => $sanitized,
-                'usage' => [
-                    'agent_run_id' => $ai['agent_run_id'] ?? null,
-                    'model' => $ai['model'] ?? null,
-                    'tokens_in' => $ai['tokens_in'] ?? null,
-                    'tokens_out' => $ai['tokens_out'] ?? null,
-                    'cost' => $ai['cost'] ?? null,
-                ],
+                'usage' => $usage,
             ];
+
+            return $this->attachPersistedId(
+                $payload,
+                $question,
+                $tenant,
+                $user,
+                $brand,
+                'ai',
+                $matchedKeys,
+                $bestScore,
+                $confidenceTier,
+                $recommendedKey,
+                $usage
+            );
         } catch (\Throwable $e) {
             Log::warning('help.ask.ai_failed', $baseLog + [
                 'error' => $e->getMessage(),
             ]);
 
             $primary = $matches[0] ?? null;
+            $recommendedKey = is_array($primary) && ! empty($primary['key']) && is_string($primary['key'])
+                ? $primary['key']
+                : null;
 
-            return [
+            $payload = [
                 'kind' => 'fallback_action',
                 'matched_keys' => $matchedKeys,
                 'best_score' => $bestScore,
@@ -167,7 +203,66 @@ class HelpAiAskService
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
+
+            return $this->attachPersistedId(
+                $payload,
+                $question,
+                $tenant,
+                $user,
+                $brand,
+                'ai_failed',
+                $matchedKeys,
+                $bestScore,
+                null,
+                $recommendedKey,
+                null
+            );
         }
+    }
+
+    /**
+     * @param  list<string>  $matchedKeys
+     * @param  array<string, mixed>|null  $usage
+     * @return array<string, mixed>
+     */
+    private function attachPersistedId(
+        array $payload,
+        string $question,
+        Tenant $tenant,
+        User $user,
+        ?Brand $brand,
+        string $responseKind,
+        array $matchedKeys,
+        int $bestScore,
+        ?string $confidence,
+        ?string $recommendedKey,
+        ?array $usage,
+    ): array {
+        $row = HelpAiQuestion::create([
+            'tenant_id' => $tenant->id,
+            'user_id' => $user->id,
+            'brand_id' => $brand?->id,
+            'question' => mb_substr(trim($question), 0, 2000),
+            'response_kind' => $responseKind,
+            'matched_action_keys' => $matchedKeys,
+            'best_score' => $bestScore,
+            'confidence' => $confidence,
+            'recommended_action_key' => $recommendedKey,
+            'agent_run_id' => $usage !== null && isset($usage['agent_run_id']) && $usage['agent_run_id'] !== null
+                ? (int) $usage['agent_run_id']
+                : null,
+            'cost' => $usage !== null && array_key_exists('cost', $usage) && $usage['cost'] !== null
+                ? (string) $usage['cost']
+                : null,
+            'tokens_in' => $usage !== null && isset($usage['tokens_in']) && $usage['tokens_in'] !== null
+                ? (int) $usage['tokens_in']
+                : null,
+            'tokens_out' => $usage !== null && isset($usage['tokens_out']) && $usage['tokens_out'] !== null
+                ? (int) $usage['tokens_out']
+                : null,
+        ]);
+
+        return array_merge($payload, ['help_ai_question_id' => $row->id]);
     }
 
     private function buildPrompt(string $userQuestion, string $helpActionsJson): string

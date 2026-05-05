@@ -49,6 +49,7 @@ export default function AdminAiSectionSidebar() {
             {
                 label: 'Quality & monitoring',
                 links: [
+                    { href: '/app/admin/ai/help-diagnostics', label: 'Help AI' },
                     { href: '/app/admin/brand-intelligence', label: 'Brand intelligence' },
                     { href: '/app/admin/ai-agents', label: 'Agent health' },
                     { href: '/app/admin/ai-error-monitoring', label: 'AI error monitoring' },

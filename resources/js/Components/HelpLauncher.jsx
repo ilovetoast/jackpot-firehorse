@@ -4,17 +4,29 @@ import { router, usePage } from '@inertiajs/react'
 import {
     ArrowLeftIcon,
     ArrowPathIcon,
+    HandThumbDownIcon,
+    HandThumbUpIcon,
     QuestionMarkCircleIcon,
     SparklesIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline'
+
+/** Labels aligned with `page_context` in `config/help_actions.php` (case-insensitive server-side). */
+const HELP_PAGE_LABEL_BY_ROUTE = {
+    'assets.index': 'Assets',
+    'assets.staged': 'Assets',
+    'assets.processing': 'Assets',
+    'collections.index': 'Collections',
+    'downloads.index': 'Downloads',
+}
 
 /**
  * App help: slide-over panel with search (debounced) against /app/help/actions.
  * Uses Headless UI Dialog for focus trap, Escape/outside dismiss, and scroll locking.
  */
 export default function HelpLauncher({ textColor = '#000000' }) {
-    const { auth } = usePage().props
+    const page = usePage()
+    const { auth, help_panel_context: helpPanelContext } = page.props
     const activeBrand = auth?.activeBrand
     const [open, setOpen] = useState(false)
     const [query, setQuery] = useState('')
@@ -22,7 +34,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     const [loading, setLoading] = useState(false)
     const [loadError, setLoadError] = useState(false)
     const [retryToken, setRetryToken] = useState(0)
-    const [payload, setPayload] = useState({ query: null, results: [], common: [] })
+    const [payload, setPayload] = useState({ query: null, results: [], common: [], contextual: [] })
     const [selected, setSelected] = useState(null)
     const [askQuestion, setAskQuestion] = useState('')
     const [askLoading, setAskLoading] = useState(false)
@@ -43,9 +55,21 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         let cancelled = false
         setLoading(true)
         setLoadError(false)
-        const url = debouncedQuery
-            ? `/app/help/actions?q=${encodeURIComponent(debouncedQuery)}`
-            : '/app/help/actions'
+        const routeName =
+            typeof helpPanelContext?.route_name === 'string' ? helpPanelContext.route_name.trim() : ''
+        const pageLabel = routeName ? HELP_PAGE_LABEL_BY_ROUTE[routeName] : ''
+        const params = new URLSearchParams()
+        if (debouncedQuery) {
+            params.set('q', debouncedQuery)
+        }
+        if (routeName) {
+            params.set('route_name', routeName)
+        }
+        if (pageLabel) {
+            params.set('page_context', pageLabel)
+        }
+        const qs = params.toString()
+        const url = qs ? `/app/help/actions?${qs}` : '/app/help/actions'
         fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
             .then((data) => {
@@ -54,13 +78,19 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                         query: data.query ?? null,
                         results: Array.isArray(data.results) ? data.results : [],
                         common: Array.isArray(data.common) ? data.common : [],
+                        contextual: Array.isArray(data.contextual) ? data.contextual : [],
                     })
                 }
             })
             .catch(() => {
                 if (!cancelled) {
                     setLoadError(true)
-                    setPayload({ query: debouncedQuery || null, results: [], common: [] })
+                    setPayload({
+                        query: debouncedQuery || null,
+                        results: [],
+                        common: [],
+                        contextual: [],
+                    })
                 }
             })
             .finally(() => {
@@ -71,7 +101,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         return () => {
             cancelled = true
         }
-    }, [open, debouncedQuery, retryToken])
+    }, [open, debouncedQuery, retryToken, helpPanelContext?.route_name, page.url])
 
     useEffect(() => {
         setSelected(null)
@@ -213,8 +243,16 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     )
 
     const listItems = debouncedQuery ? payload.results : payload.common
+    const contextualItems = Array.isArray(payload.contextual) ? payload.contextual : []
+    const showContextualBand = !debouncedQuery && contextualItems.length > 0 && !loadError
     const showSecondaryCommon =
         Boolean(debouncedQuery) && payload.results.length === 0 && payload.common.length > 0 && !loadError
+    const showEmptyTopicState =
+        listItems.length === 0 &&
+        !showSecondaryCommon &&
+        !showContextualBand &&
+        !loadError &&
+        !loading
 
     return (
         <>
@@ -357,7 +395,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                     <div className="h-2 w-full animate-pulse rounded bg-gray-100" />
                                     <div className="h-2 w-[83%] animate-pulse rounded bg-gray-100" />
                                 </div>
-                            ) : listItems.length === 0 && !showSecondaryCommon ? (
+                            ) : showEmptyTopicState ? (
                                 <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center">
                                     <p className="text-sm text-gray-600">
                                         {debouncedQuery
@@ -373,7 +411,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                         </div>
                                     )}
                                     {askResult && (
-                                        <div className="mb-4">
+                                        <div className="mb-4 space-y-3">
                                             <HelpAskResultBlock
                                                 result={askResult}
                                                 onPickTopic={(item) => {
@@ -382,25 +420,58 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                                 }}
                                                 resolveVisitHref={resolveVisitHref}
                                             />
+                                            {askResult.help_ai_question_id ? (
+                                                <HelpAskAiFeedback askLogId={askResult.help_ai_question_id} />
+                                            ) : null}
+                                        </div>
+                                    )}
+                                    {showContextualBand && (
+                                        <div className={listItems.length > 0 ? 'mb-6' : ''}>
+                                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                Suggested for this page
+                                            </p>
+                                            <ul className="space-y-1">
+                                                {contextualItems.map((item) => (
+                                                    <li key={item.key}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelected(item)}
+                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
+                                                        >
+                                                            <span className="font-medium text-gray-900">{item.title}</span>
+                                                            {item.category ? (
+                                                                <span className="text-xs text-gray-500">{item.category}</span>
+                                                            ) : null}
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
                                         </div>
                                     )}
                                     {listItems.length > 0 && (
-                                        <ul className="space-y-1">
-                                            {listItems.map((item) => (
-                                                <li key={item.key}>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setSelected(item)}
-                                                        className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
-                                                    >
-                                                        <span className="font-medium text-gray-900">{item.title}</span>
-                                                        {item.category ? (
-                                                            <span className="text-xs text-gray-500">{item.category}</span>
-                                                        ) : null}
-                                                    </button>
-                                                </li>
-                                            ))}
-                                        </ul>
+                                        <>
+                                            {showContextualBand ? (
+                                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                                    Common topics
+                                                </p>
+                                            ) : null}
+                                            <ul className="space-y-1">
+                                                {listItems.map((item) => (
+                                                    <li key={item.key}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelected(item)}
+                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
+                                                        >
+                                                            <span className="font-medium text-gray-900">{item.title}</span>
+                                                            {item.category ? (
+                                                                <span className="text-xs text-gray-500">{item.category}</span>
+                                                            ) : null}
+                                                        </button>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </>
                                     )}
                                     {showSecondaryCommon && (
                                         <div className="mt-6">
@@ -429,6 +500,94 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                 </div>
             </Dialog>
         </>
+    )
+}
+
+function HelpAskAiFeedback({ askLogId }) {
+    const [note, setNote] = useState('')
+    const [sending, setSending] = useState(false)
+    const [done, setDone] = useState(false)
+    const [error, setError] = useState(false)
+
+    const send = async (rating) => {
+        if (sending || done || !askLogId) {
+            return
+        }
+        setSending(true)
+        setError(false)
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
+        try {
+            const body = { feedback_rating: rating }
+            const trimmed = note.trim()
+            if (trimmed) {
+                body.feedback_note = trimmed
+            }
+            const r = await fetch(`/app/help/ask/${askLogId}/feedback`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrf,
+                },
+                body: JSON.stringify(body),
+            })
+            if (!r.ok) {
+                throw new Error(String(r.status))
+            }
+            setDone(true)
+        } catch {
+            setError(true)
+        } finally {
+            setSending(false)
+        }
+    }
+
+    if (done) {
+        return (
+            <p className="text-center text-xs text-gray-600" role="status">
+                Thanks — your feedback helps us improve help topics.
+            </p>
+        )
+    }
+
+    return (
+        <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm">
+            <p className="mb-2 text-center text-xs font-medium text-gray-600">Was this helpful?</p>
+            <div className="flex flex-wrap justify-center gap-2">
+                <button
+                    type="button"
+                    disabled={sending}
+                    onClick={() => send('helpful')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                >
+                    <HandThumbUpIcon className="h-4 w-4" aria-hidden />
+                    Helpful
+                </button>
+                <button
+                    type="button"
+                    disabled={sending}
+                    onClick={() => send('not_helpful')}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                >
+                    <HandThumbDownIcon className="h-4 w-4" aria-hidden />
+                    Not helpful
+                </button>
+            </div>
+            <label htmlFor="jp-help-feedback-note" className="mt-3 block text-xs text-gray-500">
+                Optional note
+            </label>
+            <textarea
+                id="jp-help-feedback-note"
+                rows={2}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                disabled={sending}
+                placeholder="What was missing or wrong?"
+                className="mt-1 block w-full resize-y rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-900"
+            />
+            {error ? <p className="mt-2 text-center text-xs text-red-700">Could not save feedback. Try again.</p> : null}
+        </div>
     )
 }
 
@@ -498,7 +657,7 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
             </div>
         )
     }
-    if (kind === 'fallback' || kind === 'ai_disabled') {
+    if (kind === 'fallback' || kind === 'ai_disabled' || kind === 'feature_disabled') {
         const suggested = Array.isArray(result.suggested) ? result.suggested : []
         return (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">

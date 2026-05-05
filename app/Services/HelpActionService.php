@@ -9,11 +9,25 @@ class HelpActionService
 {
     /**
      * @param  list<string>  $userPermissions
-     * @return array{query: string|null, results: list<array<string, mixed>>, common: list<array<string, mixed>>}
+     * @return array{query: string|null, contextual: list<array<string, mixed>>, results: list<array<string, mixed>>, common: list<array<string, mixed>>}
      */
-    public function forRequest(?string $query, array $userPermissions, ?Brand $brand): array
-    {
+    public function forRequest(
+        ?string $query,
+        array $userPermissions,
+        ?Brand $brand,
+        ?string $contextRouteName = null,
+        ?string $contextPageLabel = null,
+    ): array {
         $visible = $this->visibleActions($userPermissions);
+
+        $routeCtx = $this->normalizeContextRouteName($contextRouteName);
+        $pageCtx = $this->normalizeContextPageLabel($contextPageLabel);
+
+        $contextualRaw = $this->pickContextualActions($visible, $routeCtx, $pageCtx);
+        $contextualKeys = [];
+        foreach ($contextualRaw as $a) {
+            $contextualKeys[(string) $a['key']] = true;
+        }
 
         $q = $query !== null ? trim($query) : '';
         if ($q !== '' && mb_strlen($q) > 256) {
@@ -22,18 +36,26 @@ class HelpActionService
         $normalizedQuery = $q === '' ? null : $q;
 
         $common = $this->pickCommon($visible);
+        $commonFiltered = array_values(array_filter($common, function (array $a) use ($contextualKeys) {
+            return ! isset($contextualKeys[(string) $a['key']]);
+        }));
+
+        $serialize = fn (array $a) => $this->serializeAction($a, $brand, $visible);
+        $contextualOut = array_map($serialize, $contextualRaw);
 
         if ($normalizedQuery === null) {
             return [
                 'query' => null,
+                'contextual' => $contextualOut,
                 'results' => [],
-                'common' => array_map(fn (array $a) => $this->serializeAction($a, $brand, $visible), $common),
+                'common' => array_map($serialize, $commonFiltered),
             ];
         }
 
         $scored = [];
+        $lowerQ = mb_strtolower($normalizedQuery);
         foreach ($visible as $action) {
-            $score = $this->scoreAction($action, mb_strtolower($normalizedQuery));
+            $score = $this->scoreAction($action, $lowerQ, $routeCtx, $pageCtx);
             if ($score > 0) {
                 $scored[] = ['action' => $action, 'score' => $score];
             }
@@ -50,8 +72,9 @@ class HelpActionService
 
         return [
             'query' => $normalizedQuery,
+            'contextual' => $contextualOut,
             'results' => $results,
-            'common' => array_map(fn (array $a) => $this->serializeAction($a, $brand, $visible), $common),
+            'common' => array_map($serialize, $commonFiltered),
         ];
     }
 
@@ -104,8 +127,14 @@ class HelpActionService
      * @param  list<string>  $userPermissions
      * @return array{serialized: list<array<string, mixed>>, best_score: int, matched_keys: list<string>}
      */
-    public function rankForNaturalLanguageQuestion(string $question, array $userPermissions, ?Brand $brand, int $limit = 5): array
-    {
+    public function rankForNaturalLanguageQuestion(
+        string $question,
+        array $userPermissions,
+        ?Brand $brand,
+        int $limit = 5,
+        ?string $contextRouteName = null,
+        ?string $contextPageLabel = null,
+    ): array {
         $visible = $this->visibleActions($userPermissions);
         $q = trim($question);
         if ($q !== '' && mb_strlen($q) > 2000) {
@@ -115,9 +144,11 @@ class HelpActionService
             return ['serialized' => [], 'best_score' => 0, 'matched_keys' => []];
         }
         $lower = mb_strtolower($q);
+        $routeCtx = $this->normalizeContextRouteName($contextRouteName);
+        $pageCtx = $this->normalizeContextPageLabel($contextPageLabel);
         $scored = [];
         foreach ($visible as $action) {
-            $score = $this->scoreAction($action, $lower);
+            $score = $this->scoreAction($action, $lower, $routeCtx, $pageCtx);
             if ($score > 0) {
                 $scored[] = ['action' => $action, 'score' => $score];
             }
@@ -500,8 +531,12 @@ class HelpActionService
     /**
      * @param  array<string, mixed>  $action
      */
-    public function scoreAction(array $action, string $queryLower): int
-    {
+    public function scoreAction(
+        array $action,
+        string $queryLower,
+        ?string $contextRouteName = null,
+        ?string $contextPageLabel = null,
+    ): int {
         $tokens = array_values(array_filter(preg_split('/\s+/u', $queryLower) ?: [], fn ($t) => $t !== ''));
         if ($tokens === []) {
             return 0;
@@ -540,6 +575,107 @@ class HelpActionService
             }
         }
 
+        if ($this->matchesRouteOrPageContext($action, $contextRouteName, $contextPageLabel)) {
+            $prio = (int) ($action['priority'] ?? 0);
+            $score += 20 + min(100, max(0, $prio));
+        }
+
         return $score;
+    }
+
+    private function normalizeContextRouteName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+        $name = trim($name);
+        if ($name === '' || mb_strlen($name) > 191) {
+            return null;
+        }
+
+        return $name;
+    }
+
+    private function normalizeContextPageLabel(?string $label): ?string
+    {
+        if ($label === null) {
+            return null;
+        }
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 128) {
+            return null;
+        }
+
+        return $label;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $visible
+     * @return list<array<string, mixed>>
+     */
+    private function pickContextualActions(array $visible, ?string $routeName, ?string $pageLabel): array
+    {
+        if ($routeName === null && $pageLabel === null) {
+            return [];
+        }
+        $picked = [];
+        foreach ($visible as $action) {
+            if ($this->matchesRouteOrPageContext($action, $routeName, $pageLabel)) {
+                $picked[] = $action;
+            }
+        }
+        usort($picked, function (array $a, array $b) {
+            $pa = (int) ($a['priority'] ?? 0);
+            $pb = (int) ($b['priority'] ?? 0);
+            if ($pa !== $pb) {
+                return $pb <=> $pa;
+            }
+            $ca = (int) ($a['common_sort'] ?? 1000);
+            $cb = (int) ($b['common_sort'] ?? 1000);
+            if ($ca !== $cb) {
+                return $ca <=> $cb;
+            }
+
+            return strcmp((string) ($a['title'] ?? ''), (string) ($b['title'] ?? ''));
+        });
+
+        return $picked;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function matchesRouteOrPageContext(array $action, ?string $currentRouteName, ?string $requestPageLabel): bool
+    {
+        $routeHit = false;
+        if ($currentRouteName !== null) {
+            $routes = $action['routes'] ?? null;
+            if (is_array($routes) && $routes !== []) {
+                foreach ($routes as $r) {
+                    if (is_string($r) && $r !== '' && $r === $currentRouteName) {
+                        $routeHit = true;
+                        break;
+                    }
+                }
+            } else {
+                $primary = isset($action['route_name']) && is_string($action['route_name']) ? $action['route_name'] : null;
+                if ($primary !== null && $primary === $currentRouteName) {
+                    $routeHit = true;
+                }
+            }
+        }
+
+        $pageHit = false;
+        if ($requestPageLabel !== null) {
+            $want = mb_strtolower($requestPageLabel);
+            foreach ($action['page_context'] ?? [] as $p) {
+                if (is_string($p) && mb_strtolower(trim($p)) === $want) {
+                    $pageHit = true;
+                    break;
+                }
+            }
+        }
+
+        return $routeHit || $pageHit;
     }
 }

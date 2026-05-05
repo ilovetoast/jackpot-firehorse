@@ -49,6 +49,7 @@ class HelpActionServiceTest extends TestCase
         $out = $service->forRequest(null, [], null);
 
         $this->assertNull($out['query']);
+        $this->assertSame([], $out['contextual']);
         $this->assertSame([], $out['results']);
         $this->assertCount(1, $out['common']);
         $this->assertSame('Alpha', $out['common'][0]['title']);
@@ -673,5 +674,147 @@ class HelpActionServiceTest extends TestCase
         $this->assertSame('x', $row['highlight']['selector']);
         $this->assertSame(200, mb_strlen($row['highlight']['label']));
         $this->assertSame(str_repeat('a', 200), $row['highlight']['label']);
+    }
+
+    public function test_for_request_includes_contextual_matching_route(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'ctx1',
+                'title' => 'Ctx one',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => '',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'routes' => ['my.page'],
+                'page_context' => [],
+                'priority' => 2,
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest(null, [], null, 'my.page', null);
+
+        $this->assertCount(1, $out['contextual']);
+        $this->assertSame('ctx1', $out['contextual'][0]['key']);
+        $this->assertSame([], $out['common'], 'contextual keys are removed from common when not searching');
+    }
+
+    public function test_contextual_respects_permissions(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'secret_ctx',
+                'title' => 'Secret',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => '',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'routes' => ['my.page'],
+                'page_context' => [],
+                'priority' => 0,
+                'page_label' => 'P',
+                'permissions' => ['tenants.impossible_permission_for_unit_test'],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest(null, [], null, 'my.page', null);
+
+        $this->assertSame([], $out['contextual']);
+    }
+
+    public function test_search_boosts_action_matching_current_route(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'lose',
+                'title' => 'zebra alpha',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => '',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'routes' => ['nowhere.index'],
+                'page_context' => [],
+                'priority' => 0,
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 1,
+            ],
+            [
+                'key' => 'win',
+                'title' => 'zebra beta',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => '',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'routes' => ['assets.index'],
+                'page_context' => [],
+                'priority' => 0,
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 2,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('zebra', [], null, 'assets.index', null);
+
+        $this->assertGreaterThanOrEqual(2, count($out['results']));
+        $this->assertSame('win', $out['results'][0]['key']);
+    }
+
+    public function test_search_still_matches_without_route_context_association(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'tag_only',
+                'title' => 'X',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => '',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_context' => [],
+                'priority' => 0,
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => ['unique_tag_help_ctx_99'],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $out = $service->forRequest('unique_tag_help_ctx_99', [], null, 'assets.index', 'Assets');
+
+        $this->assertCount(1, $out['results']);
+        $this->assertSame('tag_only', $out['results'][0]['key']);
     }
 }
