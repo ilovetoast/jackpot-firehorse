@@ -11,6 +11,7 @@ import {
     InboxIcon,
     EnvelopeIcon,
     AcademicCapIcon,
+    CreditCardIcon,
 } from '@heroicons/react/24/outline'
 
 const card =
@@ -22,6 +23,13 @@ export default function AdminPlatformIndex() {
 
     const items = [
         { name: 'Permissions', description: 'Site and company role permissions', href: '/app/admin/permissions', icon: LockClosedIcon, show: perms.canManagePermissions },
+        {
+            name: 'Stripe integration',
+            description: 'API connection, price sync, and subscription diagnostics',
+            href: '/app/admin/stripe-status',
+            icon: CreditCardIcon,
+            show: true,
+        },
         { name: 'Metadata registry', description: 'System metadata fields', href: '/app/admin/metadata/registry', icon: TagIcon, show: perms.canViewMetadataRegistry },
         { name: 'System categories', description: 'Category templates', href: '/app/admin/system-categories', icon: FolderIcon, show: true },
         { name: 'Notifications', description: 'Email templates', href: '/app/admin/notifications', icon: BellIcon, show: true },
@@ -38,7 +46,7 @@ export default function AdminPlatformIndex() {
                     centerKey="platform"
                     breadcrumbs={[{ label: 'Admin', href: '/app/admin' }, { label: 'Platform configuration' }]}
                     title="Platform configuration"
-                    description="How the platform behaves: permissions, metadata, notifications, mail, and onboarding templates."
+                    description="How the platform behaves: permissions, billing integration, metadata, notifications, mail, and onboarding templates."
                 >
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                         {items.map((item) => (

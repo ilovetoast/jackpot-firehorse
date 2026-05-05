@@ -74,6 +74,8 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
     const [loadingCompanyUsers, setLoadingCompanyUsers] = useState(false)
     const [companyUsers, setCompanyUsers] = useState([])
     const [companyUsersLoadError, setCompanyUsersLoadError] = useState(null)
+    const [companyOpenTickets, setCompanyOpenTickets] = useState([])
+    const [loadingCompanyOpenTickets, setLoadingCompanyOpenTickets] = useState(false)
     const [selectedUser, setSelectedUser] = useState(null)
     const [fetchedTenantBrands, setFetchedTenantBrands] = useState(null)
 
@@ -147,6 +149,40 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
             cancelled = true
         }
     }, [data.tenant_id, selectedTenantMeta])
+
+    useEffect(() => {
+        if (!data.tenant_id) {
+            setCompanyOpenTickets([])
+            return
+        }
+
+        let cancelled = false
+        setLoadingCompanyOpenTickets(true)
+
+        axios
+            .get(route('admin.impersonation.company-open-tickets', { tenant: data.tenant_id }))
+            .then((res) => {
+                if (cancelled) {
+                    return
+                }
+                const list = res.data?.tickets
+                setCompanyOpenTickets(Array.isArray(list) ? list : [])
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setCompanyOpenTickets([])
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setLoadingCompanyOpenTickets(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [data.tenant_id])
 
     const sortedCompanyUsers = useMemo(() => {
         return [...companyUsers].sort((a, b) => {
@@ -253,6 +289,7 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
         setUserListFilter('')
         setCompanyUsers([])
         setCompanyUsersLoadError(null)
+        setCompanyOpenTickets([])
         setData('tenant_id', tenantId)
         setData('target_user_id', '')
         setData('brand_id', '')
@@ -506,9 +543,35 @@ export default function AdminImpersonationEnter({ can_start_full = false, compan
                                         placeholder="e.g. JIRA-1234, SF-00055012"
                                         maxLength={128}
                                         autoComplete="off"
+                                        list={
+                                            companyOpenTickets.length > 0 ? 'impersonation-company-open-tickets' : undefined
+                                        }
                                     />
+                                    {companyOpenTickets.length > 0 ? (
+                                        <datalist id="impersonation-company-open-tickets">
+                                            {companyOpenTickets.map((t) => (
+                                                <option
+                                                    key={t.id}
+                                                    value={t.ticket_number}
+                                                    label={`${t.ticket_number} — ${t.status_label ?? t.status}`}
+                                                />
+                                            ))}
+                                        </datalist>
+                                    ) : null}
                                     {errors.ticket_id ? <p className="mt-1 text-xs text-red-600">{errors.ticket_id}</p> : null}
-                                    <p className="mt-1 text-xs text-slate-500">
+                                    {loadingCompanyOpenTickets ? (
+                                        <p className="mt-1 text-xs text-slate-500">Checking for open in-app tickets…</p>
+                                    ) : companyOpenTickets.length > 0 ? (
+                                        <p className="mt-1 text-xs text-slate-500">
+                                            This company has open support tickets in Jackpot — pick a suggestion or type an external
+                                            case ID (Jira, Salesforce, etc.).
+                                        </p>
+                                    ) : (
+                                        <p className="mt-1 text-xs text-slate-500">
+                                            No open in-app tickets for this company — enter an external reference if you have one.
+                                        </p>
+                                    )}
+                                    <p className="mt-1 text-xs text-slate-400">
                                         Stored on the session row and in the start audit event for enterprise support traceability.
                                     </p>
                                 </div>

@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 /**
- * Self-serve SaaS billing emails (subscribe / plan change / cancel / end).
- * Uses {@see PlanChangedTenant} and dedicated mailables; all are system/automated (EmailGate).
+ * Self-serve SaaS billing emails (subscribe / plan change / cancel / end / refund).
+ * Mailables use {@see EmailGate::TYPE_USER} so they send on staging without {@see config('mail.automations_enabled')}.
  */
 class SubscriptionBillingNotifier
 {

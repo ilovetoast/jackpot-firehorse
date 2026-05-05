@@ -392,6 +392,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
     Route::get('/admin/platform', [\App\Http\Controllers\Admin\AdminPlatformHubController::class, 'index'])->name('admin.platform.index');
     Route::get('/admin/support', [\App\Http\Controllers\Admin\AdminSupportHubController::class, 'index'])->name('admin.support.hub');
     Route::get('/admin/impersonation/enter', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'enter'])->name('admin.impersonation.enter');
+    Route::get('/admin/impersonation/companies/{tenant}/open-tickets', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'openTicketsForCompany'])->name('admin.impersonation.company-open-tickets');
     Route::post('/admin/impersonation/enter', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'start'])->name('admin.impersonation.start');
     Route::get('/admin/impersonation', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'index'])->name('admin.impersonation.index');
     Route::get('/admin/impersonation/{impersonation_session}', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'show'])->name('admin.impersonation.show');

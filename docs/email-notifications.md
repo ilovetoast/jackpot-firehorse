@@ -48,6 +48,8 @@ Examples:
 
 - Login / session-related (if added)
 - Password reset
+- Self-serve Stripe billing: plan changes, cancel scheduled, subscription ended, refund confirmation (`PlanChangedTenant`, `SubscriptionCancelScheduledTenant`, `SubscriptionEndedTenant`, `RefundProcessedTenant`)
+- Admin-initiated plan updates to a tenant (`PlanChangedTenant`, `PlanChangedAdmin`)
 - Share / download link emails
 - Team invites, collection invites
 - Ownership transfer flow messages
@@ -60,7 +62,6 @@ Implement as `protected string $emailType = 'user';` (or rely on the default on 
 Examples (current or planned):
 
 - Billing / trial / comped expiry and warnings (scheduled commands)
-- Plan change notifications driven by billing automation
 - Asset pending approval notifications (queued listener)
 - Future: inactivity reminders, digests, marketing, AI-driven suggestions
 

@@ -52,7 +52,7 @@ function isActiveCenter(activeKey, path, key) {
         return path.startsWith('/app/admin/organization') || path.startsWith('/app/admin/activity-logs') || path.startsWith('/app/admin/companies/')
     }
     if (key === 'billing') {
-        return path.startsWith('/app/admin/billing') || path.startsWith('/app/admin/stripe-status')
+        return path.startsWith('/app/admin/billing')
     }
     if (key === 'platform') {
         return (
@@ -63,7 +63,8 @@ function isActiveCenter(activeKey, path, key) {
             path.startsWith('/app/admin/notifications') ||
             path.startsWith('/app/admin/mail-system') ||
             path.startsWith('/app/admin/email-test') ||
-            path.startsWith('/app/admin/onboarding/defaults')
+            path.startsWith('/app/admin/onboarding/defaults') ||
+            path.startsWith('/app/admin/stripe-status')
         )
     }
     if (key === 'support') {

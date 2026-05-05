@@ -18,7 +18,7 @@ class PlanChangedAdmin extends BaseMailable
     use AppliesTenantMailBranding;
     use Queueable, SerializesModels;
 
-    protected string $emailType = 'system';
+    protected string $emailType = 'user';
 
     public $tenant;
     public $oldPlan;

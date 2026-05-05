@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\ImpersonationMode;
+use App\Enums\TicketStatus;
+use App\Enums\TicketType;
 use App\Http\Controllers\Controller;
 use App\Models\ImpersonationAudit;
 use App\Models\ImpersonationSession;
 use App\Models\Tenant;
+use App\Models\Ticket;
 use App\Models\User;
 use App\Services\ImpersonationService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -86,6 +90,40 @@ class ImpersonationAdminController extends Controller
                 'id' => $t->id,
                 'name' => $t->name,
                 'slug' => $t->slug,
+            ]),
+        ]);
+    }
+
+    /**
+     * Open tenant-scoped support tickets for autocomplete on the "Start support session" form.
+     * Only returned when the company has in-app tickets (Jackpot {@see Ticket} rows); external systems stay free-text.
+     */
+    public function openTicketsForCompany(Tenant $tenant): JsonResponse
+    {
+        $this->authorizeInternalSupportStarter();
+
+        $openStatuses = [
+            TicketStatus::OPEN,
+            TicketStatus::WAITING_ON_USER,
+            TicketStatus::WAITING_ON_SUPPORT,
+            TicketStatus::IN_PROGRESS,
+            TicketStatus::BLOCKED,
+        ];
+
+        $tickets = Ticket::query()
+            ->where('tenant_id', $tenant->id)
+            ->whereIn('type', [TicketType::TENANT, TicketType::TENANT_INTERNAL])
+            ->whereIn('status', $openStatuses)
+            ->orderByDesc('updated_at')
+            ->limit(50)
+            ->get(['id', 'ticket_number', 'status']);
+
+        return response()->json([
+            'tickets' => $tickets->map(fn (Ticket $t) => [
+                'id' => $t->id,
+                'ticket_number' => $t->ticket_number,
+                'status' => $t->status->value,
+                'status_label' => ucfirst(str_replace('_', ' ', $t->status->value)),
             ]),
         ]);
     }

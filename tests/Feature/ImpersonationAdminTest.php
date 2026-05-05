@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\TicketStatus;
+use App\Enums\TicketType;
 use App\Models\Brand;
 use App\Models\ImpersonationAudit;
 use App\Models\ImpersonationSession;
 use App\Models\Tenant;
+use App\Models\Ticket;
 use App\Models\User;
 use App\Services\ImpersonationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -345,6 +348,41 @@ class ImpersonationAdminTest extends TestCase
     {
         $this->actingAs($this->tenantAdmin)
             ->get('/app/admin/impersonation/enter')
+            ->assertForbidden();
+    }
+
+    public function test_internal_support_can_list_open_company_tickets_for_session_ticket_autocomplete(): void
+    {
+        Ticket::withoutEvents(function () {
+            Ticket::query()->create([
+                'ticket_number' => 'SUP-ACME-OPEN',
+                'type' => TicketType::TENANT,
+                'status' => TicketStatus::OPEN,
+                'tenant_id' => $this->tenant->id,
+                'created_by_user_id' => $this->target->id,
+            ]);
+            Ticket::query()->create([
+                'ticket_number' => 'SUP-ACME-OLD',
+                'type' => TicketType::TENANT,
+                'status' => TicketStatus::RESOLVED,
+                'tenant_id' => $this->tenant->id,
+                'created_by_user_id' => $this->target->id,
+            ]);
+        });
+
+        $this->actingAs($this->siteSupport)
+            ->getJson(route('admin.impersonation.company-open-tickets', ['tenant' => $this->tenant->id]))
+            ->assertOk()
+            ->assertJsonCount(1, 'tickets')
+            ->assertJsonPath('tickets.0.ticket_number', 'SUP-ACME-OPEN')
+            ->assertJsonPath('tickets.0.status', 'open')
+            ->assertJsonPath('tickets.0.status_label', 'Open');
+    }
+
+    public function test_tenant_admin_cannot_list_impersonation_company_open_tickets(): void
+    {
+        $this->actingAs($this->tenantAdmin)
+            ->getJson(route('admin.impersonation.company-open-tickets', ['tenant' => $this->tenant->id]))
             ->assertForbidden();
     }
 

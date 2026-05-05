@@ -55,6 +55,11 @@ export default function AdminReliabilitySectionSidebar({ tabSwitchRouteName = 'a
                         label: 'Sentry / AI error monitoring',
                         active: under('/app/admin/ai-error-monitoring'),
                     },
+                    {
+                        href: '/app/admin/activity-logs',
+                        label: 'Activity history',
+                        active: under('/app/admin/activity-logs'),
+                    },
                 ],
             },
         ]
