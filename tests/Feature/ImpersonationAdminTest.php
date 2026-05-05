@@ -389,6 +389,33 @@ class ImpersonationAdminTest extends TestCase
         $this->assertNotNull(session(ImpersonationService::SESSION_KEY));
     }
 
+    public function test_ensure_gateway_entry_allows_app_assets_during_impersonation_when_initiator_lacks_brand_membership(): void
+    {
+        $this->target->brands()->attach($this->brand->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $this->actingAs($this->siteSupport)
+            ->post(route('admin.impersonation.start'), [
+                'target_user_id' => $this->target->id,
+                'tenant_id' => $this->tenant->id,
+                'brand_id' => $this->brand->id,
+                'mode' => 'read_only',
+                'reason' => 'PHPUnit gateway entry + assets',
+            ])
+            ->assertRedirect(route('app'));
+
+        $this->assertFalse(
+            $this->siteSupport->brands()->where('brands.id', $this->brand->id)->whereNull('brand_user.removed_at')->exists(),
+            'initiator must not have brand_user on the customer brand (reproduces staff support session)'
+        );
+
+        $this->actingAs($this->siteSupport)
+            ->get('/app/assets')
+            ->assertOk();
+
+        $this->assertSame($this->tenant->id, (int) session('tenant_id'));
+        $this->assertSame($this->brand->id, (int) session('brand_id'));
+    }
+
     public function test_site_support_cannot_start_full_mode(): void
     {
         $this->target->brands()->attach($this->brand->id, ['role' => 'contributor', 'removed_at' => null]);

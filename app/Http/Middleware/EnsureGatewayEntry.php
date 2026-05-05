@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Brand;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\ImpersonationService;
 use App\Services\PlanService;
 use Closure;
 use Illuminate\Http\Request;
@@ -46,7 +47,10 @@ class EnsureGatewayEntry
 
         $brandId = session('brand_id');
         $tenantId = session('tenant_id');
-        $user = Auth::user();
+        // Global `web` stack runs this middleware before route `ImpersonationMiddleware`, so Auth is still
+        // the initiator. Workspace session (tenant/brand) belongs to the impersonation target — validate
+        // membership with the acting user, not the staff account (otherwise we clear session → /gateway).
+        $user = app(ImpersonationService::class)->actingUser() ?? Auth::user();
 
         if (! $tenantId) {
             session(['intended_url' => $request->fullUrl()]);
