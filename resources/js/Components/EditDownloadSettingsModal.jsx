@@ -337,7 +337,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
             )}
 
             {showPassword && (
-              <div className="mb-4">
+              <div className="mb-4" data-help="download-password-protection">
                 <label htmlFor="edit-download-password" className="block text-sm font-medium text-gray-700">
                   Password (optional)
                 </label>

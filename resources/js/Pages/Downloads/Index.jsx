@@ -332,7 +332,7 @@ export default function DownloadsIndex({
     <div className="min-h-screen flex flex-col bg-slate-50">
       <AppHead title="Downloads" />
       <AppNav />
-      <main className="flex-1 py-6 px-4 sm:px-6 lg:px-8">
+      <main className="flex-1 py-6 px-4 sm:px-6 lg:px-8" data-help="downloads-index">
         <div className="mx-auto max-w-7xl">
           {/* Tabs: My Downloads (default) | All Downloads */}
           <div className="mb-6">

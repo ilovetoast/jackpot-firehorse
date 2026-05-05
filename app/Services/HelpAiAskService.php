@@ -33,16 +33,8 @@ class HelpAiAskService
         Tenant $tenant,
         User $user,
     ): array {
-        $rank = $this->helpActionService->rankForNaturalLanguageQuestion(
-            $question,
-            $userPermissions,
-            $brand,
-            (int) config('ai.help_ask.max_actions_for_prompt', 3)
-        );
-        $bestScore = $rank['best_score'];
-        $matchedKeys = $rank['matched_keys'];
-        $matches = $rank['serialized'];
-        $visible = $this->helpActionService->visibleActions($userPermissions);
+        $ctx = new HelpActionVisibilityContext($user, $tenant, $brand);
+        $visible = $this->helpActionService->visibleActions($userPermissions, $ctx);
         $common = $this->helpActionService->pickCommon($visible);
         $commonOut = array_map(fn (array $a) => $this->helpActionService->serializeAction($a, $brand, $visible), $common);
         $commonSlice = array_slice($commonOut, 0, 8);
@@ -54,8 +46,8 @@ class HelpAiAskService
             'tenant_id' => $tenant->id,
             'brand_id' => $brand?->id,
             'query' => mb_substr(trim($question), 0, 2000),
-            'matched_action_keys' => $matchedKeys,
-            'best_score' => $bestScore,
+            'matched_action_keys' => [],
+            'best_score' => 0,
         ];
 
         if (($tenant->settings['ai_enabled'] ?? true) === false) {
@@ -63,14 +55,14 @@ class HelpAiAskService
 
             $payload = [
                 'kind' => 'ai_disabled',
-                'matched_keys' => $matchedKeys,
-                'best_score' => $bestScore,
+                'matched_keys' => [],
+                'best_score' => 0,
                 'message' => 'AI-assisted answers are turned off for this workspace.',
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
 
-            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'ai_disabled', $matchedKeys, $bestScore, null, null, null);
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'ai_disabled', [], 0, null, null, null);
         }
 
         if (! config('ai.help_ask.enabled', true)) {
@@ -78,15 +70,48 @@ class HelpAiAskService
 
             $payload = [
                 'kind' => 'feature_disabled',
-                'matched_keys' => $matchedKeys,
-                'best_score' => $bestScore,
+                'matched_keys' => [],
+                'best_score' => 0,
                 'message' => 'AI help is temporarily unavailable.',
                 'suggested' => $commonSlice,
                 'usage' => null,
             ];
 
-            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'feature_disabled', $matchedKeys, $bestScore, null, null, null);
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'feature_disabled', [], 0, null, null, null);
         }
+
+        $blocked = $this->blockedForUnavailableProductEntitlements(trim($question), $tenant, $user, $brand);
+        if ($blocked !== null) {
+            Log::info('help.ask.feature_unavailable', $baseLog + ['feature' => $blocked['feature']]);
+
+            $payload = [
+                'kind' => 'feature_unavailable',
+                'feature' => $blocked['feature'],
+                'matched_keys' => [],
+                'best_score' => 0,
+                'message' => $blocked['message'],
+                'suggested' => $commonSlice,
+                'usage' => null,
+            ];
+
+            return $this->attachPersistedId($payload, $question, $tenant, $user, $brand, 'feature_unavailable', [], 0, null, null, null);
+        }
+
+        $rank = $this->helpActionService->rankForNaturalLanguageQuestion(
+            $question,
+            $userPermissions,
+            $brand,
+            (int) config('ai.help_ask.max_actions_for_prompt', 3),
+            null,
+            null,
+            $ctx
+        );
+        $bestScore = $rank['best_score'];
+        $matchedKeys = $rank['matched_keys'];
+        $matches = $rank['serialized'];
+
+        $baseLog['matched_action_keys'] = $matchedKeys;
+        $baseLog['best_score'] = $bestScore;
 
         if ($matches === [] || $bestScore < $strongMin) {
             Log::info('help.ask.no_strong_match', $baseLog);
@@ -241,6 +266,38 @@ class HelpAiAskService
                 null
             );
         }
+    }
+
+    /**
+     * When the question clearly targets a product area that is off for this workspace, block before ranking
+     * so hidden help actions are never sent to the model.
+     *
+     * @return array{feature: string, message: string}|null
+     */
+    private function blockedForUnavailableProductEntitlements(string $question, Tenant $tenant, User $user, ?Brand $brand): ?array
+    {
+        if ($question === '') {
+            return null;
+        }
+        $q = mb_strtolower($question);
+
+        if (preg_match('/\b(studio|generative|composition editor|creative beta)\b/u', $q)
+            && ! $this->helpActionService->isUserFacingFeatureEnabled('generative', $user, $tenant, $brand)) {
+            return [
+                'feature' => 'studio',
+                'message' => 'Studio does not appear to be available in this workspace. Ask an admin if you think you should have access.',
+            ];
+        }
+
+        if (preg_match('/\b(creator module|prostaff|creators tab|external creator)\b/u', $q)
+            && ! $this->helpActionService->isUserFacingFeatureEnabled('creator_module', $user, $tenant, $brand)) {
+            return [
+                'feature' => 'creators',
+                'message' => 'The Creator / contributor module does not appear to be enabled for this workspace. Ask a company admin if you need it.',
+            ];
+        }
+
+        return null;
     }
 
     /**

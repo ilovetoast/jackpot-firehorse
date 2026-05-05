@@ -121,6 +121,14 @@ class FeatureGate
         return (bool) ($plan['public_collection_downloads_enabled'] ?? false);
     }
 
+    /**
+     * Whether packaged download links can use an optional recipient password (plan download_management).
+     */
+    public function downloadPasswordProtectionEnabled(Tenant $tenant): bool
+    {
+        return $this->planService->canPasswordProtectDownload($tenant);
+    }
+
     // -------------------------------------------------------------------------
     // Brand Portal
     // -------------------------------------------------------------------------

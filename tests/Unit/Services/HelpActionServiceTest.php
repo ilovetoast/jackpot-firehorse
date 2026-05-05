@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Models\Brand;
+use App\Models\Tenant;
 use App\Services\HelpActionService;
 use Tests\TestCase;
 
@@ -816,5 +817,207 @@ class HelpActionServiceTest extends TestCase
 
         $this->assertCount(1, $out['results']);
         $this->assertSame('tag_only', $out['results'][0]['key']);
+    }
+
+    public function test_search_full_query_phrase_prefers_alias_match(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'narrow_topic',
+                'title' => 'Narrow topic',
+                'aliases' => ['alpha beta gamma exact phrase here'],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => ['alpha', 'beta', 'gamma'],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 1,
+            ],
+            [
+                'key' => 'broad_topic',
+                'title' => 'Broad topic',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'Lots of alpha beta gamma repeated alpha beta gamma',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => false,
+                'common_sort' => 2,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $q = 'exact phrase here';
+        $out = $service->forRequest($q, [], null);
+
+        $this->assertGreaterThanOrEqual(2, count($out['results']));
+        $this->assertSame('narrow_topic', $out['results'][0]['key']);
+    }
+
+    public function test_highlight_normalizes_bracket_data_help_selector(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'bracket_sel',
+                'title' => 'Bracket',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => '[data-help="my-widget"]',
+                    'label' => 'L',
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], null)['common'][0];
+        $this->assertSame('my-widget', $row['highlight']['selector']);
+        $this->assertSame('L', $row['highlight']['label']);
+    }
+
+    public function test_highlight_serializes_fallback_missing_fields_and_requires_context(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'full_hi',
+                'title' => 'Full',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'primary-x',
+                    'fallback_selector' => 'fallback-y',
+                    'fallback_label' => 'Fb label',
+                    'missing_title' => 'Need state',
+                    'missing_message' => 'Do something first.',
+                    'missing_cta_label' => 'Go',
+                    'missing_cta_route' => 'assets.index',
+                ],
+                'requires_context' => [
+                    'type' => 'asset_open',
+                    'message' => 'Open an asset first.',
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], null)['common'][0];
+        $h = $row['highlight'];
+        $this->assertSame('primary-x', $h['selector']);
+        $this->assertSame('fallback-y', $h['fallback_selector']);
+        $this->assertSame('Fb label', $h['fallback_label']);
+        $this->assertSame('Need state', $h['missing_title']);
+        $this->assertSame('Do something first.', $h['missing_message']);
+        $this->assertSame('Go', $h['missing_cta_label']);
+        $this->assertArrayHasKey('missing_cta_url', $h);
+        $this->assertIsString($h['missing_cta_url']);
+        $this->assertNotSame('', $h['missing_cta_url']);
+
+        $this->assertIsArray($row['requires_context']);
+        $this->assertSame('asset_open', $row['requires_context']['type']);
+        $this->assertSame('Open an asset first.', $row['requires_context']['message']);
+    }
+
+    public function test_invalid_missing_cta_route_does_not_throw_and_omits_url(): void
+    {
+        config(['help_actions.actions' => [
+            [
+                'key' => 'bad_cta',
+                'title' => 'Bad CTA route',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'x',
+                    'missing_cta_route' => 'not.a.real.route.help.test',
+                    'missing_cta_label' => 'Nope',
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], null)['common'][0];
+        $this->assertArrayNotHasKey('missing_cta_url', $row['highlight']);
+    }
+
+    public function test_missing_cta_resolves_with_active_brand_bindings(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'THi',
+            'slug' => 't-hi-cta',
+        ]);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'BHi',
+            'slug' => 'b-hi-cta',
+        ]);
+
+        config(['help_actions.actions' => [
+            [
+                'key' => 'brand_cta',
+                'title' => 'Brand CTA',
+                'aliases' => [],
+                'category' => 'C',
+                'short_answer' => 'S',
+                'steps' => [],
+                'route_name' => null,
+                'route_bindings' => [],
+                'highlight' => [
+                    'selector' => 'q',
+                    'missing_cta_route' => 'brands.approvals',
+                    'missing_cta_route_bindings' => ['brand' => 'active_brand'],
+                    'missing_cta_label' => 'Approvals',
+                ],
+                'page_label' => 'P',
+                'permissions' => [],
+                'tags' => [],
+                'related' => [],
+                'in_common' => true,
+                'common_sort' => 1,
+            ],
+        ]]);
+
+        $service = app(HelpActionService::class);
+        $row = $service->forRequest(null, [], $brand)['common'][0];
+        $this->assertArrayHasKey('missing_cta_url', $row['highlight']);
+        $this->assertStringContainsString('/app/brands/'.$brand->id.'/approvals', $row['highlight']['missing_cta_url']);
     }
 }

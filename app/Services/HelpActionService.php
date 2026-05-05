@@ -3,10 +3,17 @@
 namespace App\Services;
 
 use App\Models\Brand;
+use App\Models\Tenant;
+use App\Models\User;
+use App\Support\Roles\PermissionMap;
 use Illuminate\Support\Facades\Route;
 
 class HelpActionService
 {
+    public function __construct(
+        protected FeatureGate $featureGate,
+    ) {}
+
     /**
      * @param  list<string>  $userPermissions
      * @return array{query: string|null, contextual: list<array<string, mixed>>, results: list<array<string, mixed>>, common: list<array<string, mixed>>}
@@ -17,8 +24,9 @@ class HelpActionService
         ?Brand $brand,
         ?string $contextRouteName = null,
         ?string $contextPageLabel = null,
+        ?HelpActionVisibilityContext $visibilityContext = null,
     ): array {
-        $visible = $this->visibleActions($userPermissions);
+        $visible = $this->visibleActions($userPermissions, $visibilityContext);
 
         $routeCtx = $this->normalizeContextRouteName($contextRouteName);
         $pageCtx = $this->normalizeContextPageLabel($contextPageLabel);
@@ -79,6 +87,19 @@ class HelpActionService
     }
 
     /**
+     * Whether a workspace feature flag / entitlement is on for this user+tenant(+brand).
+     * Used by help visibility and Ask AI guardrails.
+     *
+     * Known keys: generative, ai, creator_module, workspace_insights, agency_workspace
+     */
+    public function isUserFacingFeatureEnabled(string $featureKey, User $user, Tenant $tenant, ?Brand $brand): bool
+    {
+        $ctx = new HelpActionVisibilityContext($user, $tenant, $brand);
+
+        return $this->featureEnabledForContext($featureKey, $ctx);
+    }
+
+    /**
      * @param  array<string, mixed>  $action
      * @param  list<string>  $userPermissions
      */
@@ -105,7 +126,7 @@ class HelpActionService
      * @param  list<string>  $userPermissions
      * @return list<array<string, mixed>>
      */
-    public function visibleActions(array $userPermissions): array
+    public function visibleActions(array $userPermissions, ?HelpActionVisibilityContext $context = null): array
     {
         $actions = config('help_actions.actions', []);
         $visible = [];
@@ -113,9 +134,13 @@ class HelpActionService
             if (! is_array($action) || empty($action['key'])) {
                 continue;
             }
-            if ($this->userCanAccess($action, $userPermissions)) {
-                $visible[] = $action;
+            if (! $this->userCanAccess($action, $userPermissions)) {
+                continue;
             }
+            if ($context !== null && ! $this->actionVisibleInWorkspaceContext($action, $context)) {
+                continue;
+            }
+            $visible[] = $action;
         }
 
         return $visible;
@@ -134,8 +159,9 @@ class HelpActionService
         int $limit = 5,
         ?string $contextRouteName = null,
         ?string $contextPageLabel = null,
+        ?HelpActionVisibilityContext $visibilityContext = null,
     ): array {
-        $visible = $this->visibleActions($userPermissions);
+        $visible = $this->visibleActions($userPermissions, $visibilityContext);
         $q = trim($question);
         if ($q !== '' && mb_strlen($q) > 2000) {
             $q = mb_substr($q, 0, 2000);
@@ -208,7 +234,8 @@ class HelpActionService
         $bindings = isset($action['route_bindings']) && is_array($action['route_bindings']) ? $action['route_bindings'] : [];
         $url = $this->resolvePrimaryUrl($action, $routeName, $bindings, $brand);
         $deepLinkOut = $this->serializeDeepLinkForResponse($action['deep_link'] ?? null, $brand);
-        $highlightOut = $this->sanitizeHighlight($action['highlight'] ?? null);
+        $highlightOut = $this->sanitizeHighlight($action['highlight'] ?? null, $brand);
+        $requiresContextOut = $this->sanitizeRequiresContext($action['requires_context'] ?? null);
 
         $relatedOut = [];
         $visibleKeys = [];
@@ -241,6 +268,7 @@ class HelpActionService
             'url' => $url,
             'deep_link' => $deepLinkOut,
             'highlight' => $highlightOut,
+            'requires_context' => $requiresContextOut,
             'tags' => $this->sanitizeStringList($action['tags'] ?? null),
             'related' => $relatedOut,
         ];
@@ -267,7 +295,8 @@ class HelpActionService
             'route_name' => $routeName,
             'url' => $this->resolvePrimaryUrl($target, $routeName, $bindings, $brand),
             'deep_link' => $this->serializeDeepLinkForResponse($target['deep_link'] ?? null, $brand),
-            'highlight' => $this->sanitizeHighlight($target['highlight'] ?? null),
+            'highlight' => $this->sanitizeHighlight($target['highlight'] ?? null, $brand),
+            'requires_context' => $this->sanitizeRequiresContext($target['requires_context'] ?? null),
             'tags' => $this->sanitizeStringList($target['tags'] ?? null),
             'related' => [],
         ];
@@ -361,22 +390,21 @@ class HelpActionService
     }
 
     /**
-     * @return array{selector: string, label?: string}|null
+     * Highlight targets use `[data-help="selector"]` on the frontend. Config may use a bare token or `[data-help="token"]`.
+     *
+     * @return array<string, mixed>|null
      */
-    public function sanitizeHighlight(mixed $highlight): ?array
+    public function sanitizeHighlight(mixed $highlight, ?Brand $brand = null): ?array
     {
         if (! is_array($highlight)) {
             return null;
         }
-        $selector = $highlight['selector'] ?? null;
-        if (! is_string($selector)) {
-            return null;
-        }
-        $selector = trim($selector);
-        if ($selector === '' || ! preg_match('/^[a-z0-9][a-z0-9_.-]{0,63}$/', $selector)) {
+        $selector = $this->normalizeHelpDataSelector($highlight['selector'] ?? null);
+        if ($selector === null) {
             return null;
         }
         $out = ['selector' => $selector];
+
         $label = $highlight['label'] ?? null;
         if (is_string($label)) {
             $label = trim($label);
@@ -390,7 +418,129 @@ class HelpActionService
             }
         }
 
+        $fb = $this->normalizeHelpDataSelector($highlight['fallback_selector'] ?? null);
+        if ($fb !== null) {
+            $out['fallback_selector'] = $fb;
+        }
+        $fbl = $highlight['fallback_label'] ?? null;
+        if (is_string($fbl)) {
+            $fbl = trim($fbl);
+            if ($fbl !== '') {
+                $out['fallback_label'] = mb_strlen($fbl) > 200 ? mb_substr($fbl, 0, 200) : $fbl;
+            }
+        }
+
+        foreach (
+            [
+                'missing_title' => 160,
+                'missing_message' => 600,
+                'missing_cta_label' => 120,
+            ] as $field => $max
+        ) {
+            $v = $highlight[$field] ?? null;
+            if (! is_string($v)) {
+                continue;
+            }
+            $v = trim($v);
+            if ($v === '') {
+                continue;
+            }
+            $out[$field] = mb_strlen($v) > $max ? mb_substr($v, 0, $max) : $v;
+        }
+
+        $ctaRoute = $highlight['missing_cta_route'] ?? null;
+        if (is_string($ctaRoute)) {
+            $ctaRoute = trim($ctaRoute);
+            if ($ctaRoute !== '' && preg_match('/^[a-zA-Z_][a-zA-Z0-9_.]*$/', $ctaRoute)) {
+                $ctaBindings = $this->sanitizeHighlightCtaBindings($highlight['missing_cta_route_bindings'] ?? null);
+                $ctaUrl = $this->resolveHighlightMissingCtaUrl($ctaRoute, $brand, $ctaBindings);
+                if ($ctaUrl !== null) {
+                    $out['missing_cta_url'] = $ctaUrl;
+                }
+            }
+        }
+
         return $out;
+    }
+
+    /**
+     * @return array{type: string, message?: string}|null
+     */
+    public function sanitizeRequiresContext(mixed $value): ?array
+    {
+        if (! is_array($value)) {
+            return null;
+        }
+        $type = $value['type'] ?? null;
+        if (! is_string($type) || ! preg_match('/^[a-z][a-z0-9_]{0,63}$/', $type)) {
+            return null;
+        }
+        $out = ['type' => $type];
+        $msg = $value['message'] ?? null;
+        if (is_string($msg)) {
+            $msg = trim($msg);
+            if ($msg !== '') {
+                $out['message'] = mb_strlen($msg) > 500 ? mb_substr($msg, 0, 500) : $msg;
+            }
+        }
+
+        return $out;
+    }
+
+    private function normalizeHelpDataSelector(mixed $raw): ?string
+    {
+        if (! is_string($raw)) {
+            return null;
+        }
+        $s = trim($raw);
+        if ($s === '') {
+            return null;
+        }
+        if (preg_match('/^\[data-help="([a-z0-9][a-z0-9_.-]{0,63})"\]$/', $s, $m)) {
+            return $m[1];
+        }
+        if (preg_match('/^[a-z0-9][a-z0-9_.-]{0,63}$/', $s)) {
+            return $s;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, string>  $bindings  route parameter => active_brand
+     */
+    private function sanitizeHighlightCtaBindings(mixed $raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $k => $v) {
+            if (! is_string($k) || ! preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $k)) {
+                continue;
+            }
+            if ($v === 'active_brand') {
+                $out[$k] = 'active_brand';
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, string>  $bindings
+     */
+    private function resolveHighlightMissingCtaUrl(string $routeName, ?Brand $brand, array $bindings = []): ?string
+    {
+        if (! Route::has($routeName)) {
+            return null;
+        }
+
+        try {
+            return $this->resolveUrl($routeName, $bindings, $brand);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
@@ -542,6 +692,48 @@ class HelpActionService
             return 0;
         }
 
+        $haystacks = $this->helpActionSearchHaystacks($action);
+
+        $score = 0;
+        foreach ($tokens as $token) {
+            foreach ($haystacks as $h) {
+                if ($h === '') {
+                    continue;
+                }
+                if (str_starts_with($h, $token)) {
+                    $score += 12;
+                } elseif (str_contains($h, $token)) {
+                    $score += 6;
+                }
+            }
+        }
+
+        $full = trim($queryLower);
+        if ($full !== '' && (mb_strlen($full) >= 10 || substr_count($full, ' ') >= 2)) {
+            foreach ($haystacks as $h) {
+                if ($h !== '' && str_contains($h, $full)) {
+                    $score += 50;
+                    break;
+                }
+            }
+        }
+
+        if ($this->matchesRouteOrPageContext($action, $contextRouteName, $contextPageLabel)) {
+            $prio = (int) ($action['priority'] ?? 0);
+            $score += 20 + min(100, max(0, $prio));
+        }
+
+        return $score;
+    }
+
+    /**
+     * Text sources used for help search scoring (token + phrase match).
+     *
+     * @param  array<string, mixed>  $action
+     * @return list<string>
+     */
+    private function helpActionSearchHaystacks(array $action): array
+    {
         $haystacks = [];
         $haystacks[] = mb_strtolower((string) ($action['title'] ?? ''));
         foreach ($action['aliases'] ?? [] as $alias) {
@@ -561,26 +753,237 @@ class HelpActionService
             }
         }
 
-        $score = 0;
-        foreach ($tokens as $token) {
-            foreach ($haystacks as $h) {
-                if ($h === '') {
-                    continue;
-                }
-                if (str_starts_with($h, $token)) {
-                    $score += 12;
-                } elseif (str_contains($h, $token)) {
-                    $score += 6;
-                }
+        return $haystacks;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function actionVisibleInWorkspaceContext(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        if (! $this->passesRequiredDisabledFeatures($action, $ctx)) {
+            return false;
+        }
+        if (! $this->passesTenantRoleGates($action, $ctx)) {
+            return false;
+        }
+        if (! $this->passesRequiredModules($action, $ctx)) {
+            return false;
+        }
+        if (! $this->passesRequiredPlanFeatures($action, $ctx)) {
+            return false;
+        }
+        if (! $this->passesRequiredPlanFeaturesAny($action, $ctx)) {
+            return false;
+        }
+        if (! $this->passesRequiredDisabledPlanFeatures($action, $ctx)) {
+            return false;
+        }
+        $mustBeOn = array_merge(
+            $this->stringPermissionLikeList($action['required_features'] ?? null),
+            $this->stringPermissionLikeList($action['hidden_when_features_disabled'] ?? null),
+        );
+        foreach (array_unique($mustBeOn) as $featureKey) {
+            if (! $this->featureEnabledForContext($featureKey, $ctx)) {
+                return false;
+            }
+        }
+        if (! empty($action['requires_brand_approver']) && ! $this->userCanApproveOnActiveBrand($ctx)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function passesRequiredDisabledFeatures(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $req = $action['required_disabled_features'] ?? null;
+        if (! is_array($req) || $req === []) {
+            return true;
+        }
+        foreach ($req as $f) {
+            if (! is_string($f) || $f === '') {
+                continue;
+            }
+            if ($this->featureEnabledForContext($f, $ctx)) {
+                return false;
             }
         }
 
-        if ($this->matchesRouteOrPageContext($action, $contextRouteName, $contextPageLabel)) {
-            $prio = (int) ($action['priority'] ?? 0);
-            $score += 20 + min(100, max(0, $prio));
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function passesTenantRoleGates(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $role = strtolower((string) ($ctx->user->getRoleForTenant($ctx->tenant) ?? ''));
+        if (! empty($action['requires_owner']) && $role !== 'owner') {
+            return false;
+        }
+        if (! empty($action['requires_admin']) && ! in_array($role, ['owner', 'admin', 'agency_admin'], true)) {
+            return false;
         }
 
-        return $score;
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function passesRequiredModules(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $mods = $action['required_modules'] ?? null;
+        if (! is_array($mods) || $mods === []) {
+            return true;
+        }
+        foreach ($mods as $m) {
+            if (! is_string($m) || $m === '') {
+                continue;
+            }
+            if ($m === 'creator_module' && ! $this->featureGate->creatorModuleEnabled($ctx->tenant)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $action
+     */
+    private function passesRequiredPlanFeatures(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $keys = $action['required_plan_features'] ?? null;
+        if (! is_array($keys) || $keys === []) {
+            return true;
+        }
+        foreach ($keys as $k) {
+            if (! is_string($k) || $k === '') {
+                continue;
+            }
+            if (! $this->planCapabilityEnabled($ctx->tenant, $k)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * When set, at least one listed plan capability must be enabled (OR).
+     *
+     * @param  array<string, mixed>  $action
+     */
+    private function passesRequiredPlanFeaturesAny(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $keys = $action['required_plan_features_any'] ?? null;
+        if (! is_array($keys) || $keys === []) {
+            return true;
+        }
+        foreach ($keys as $k) {
+            if (! is_string($k) || $k === '') {
+                continue;
+            }
+            if ($this->planCapabilityEnabled($ctx->tenant, $k)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * When set, every listed plan capability must be disabled (AND NOT) — for honest “not available” explainers.
+     *
+     * @param  array<string, mixed>  $action
+     */
+    private function passesRequiredDisabledPlanFeatures(array $action, HelpActionVisibilityContext $ctx): bool
+    {
+        $keys = $action['required_disabled_plan_features'] ?? null;
+        if (! is_array($keys) || $keys === []) {
+            return true;
+        }
+        foreach ($keys as $k) {
+            if (! is_string($k) || $k === '') {
+                continue;
+            }
+            if ($this->planCapabilityEnabled($ctx->tenant, $k)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function planCapabilityEnabled(Tenant $tenant, string $key): bool
+    {
+        if (str_contains($key, 'approvals.') || str_contains($key, 'notifications.') || str_contains($key, 'approval_summaries')) {
+            return $this->featureGate->allows($tenant, $key);
+        }
+
+        return match ($key) {
+            'public_collections_enabled' => $this->featureGate->publicCollectionsEnabled($tenant),
+            'download_password_protection' => $this->featureGate->downloadPasswordProtectionEnabled($tenant),
+            default => true,
+        };
+    }
+
+    private function featureEnabledForContext(string $featureKey, HelpActionVisibilityContext $ctx): bool
+    {
+        return match ($featureKey) {
+            'generative', 'studio' => ($ctx->tenant->settings['generative_enabled'] ?? true) === true,
+            'ai' => ($ctx->tenant->settings['ai_enabled'] ?? true) === true,
+            'creator_module' => $this->featureGate->creatorModuleEnabled($ctx->tenant),
+            'workspace_insights' => $ctx->brand !== null && $ctx->user->canViewBrandWorkspaceInsights($ctx->tenant, $ctx->brand),
+            'agency_workspace' => $this->userHasAgencyWorkspaceAccess($ctx),
+            default => true,
+        };
+    }
+
+    private function userHasAgencyWorkspaceAccess(HelpActionVisibilityContext $ctx): bool
+    {
+        if ($ctx->tenant->is_agency) {
+            return true;
+        }
+
+        return $ctx->user->tenants()->where('tenants.is_agency', true)->exists();
+    }
+
+    private function userCanApproveOnActiveBrand(HelpActionVisibilityContext $ctx): bool
+    {
+        if ($ctx->brand === null) {
+            return false;
+        }
+        $membership = $ctx->user->activeBrandMembership($ctx->brand);
+        $role = $membership['role'] ?? null;
+        if (! is_string($role) || $role === '') {
+            return false;
+        }
+
+        return PermissionMap::canApproveAssets($role);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function stringPermissionLikeList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+        $out = [];
+        foreach ($value as $item) {
+            if (is_string($item) && $item !== '') {
+                $out[] = $item;
+            }
+        }
+
+        return $out;
     }
 
     private function normalizeContextRouteName(?string $name): ?string

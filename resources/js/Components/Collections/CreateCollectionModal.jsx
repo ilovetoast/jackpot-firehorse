@@ -359,7 +359,11 @@ export default function CreateCollectionModal({
                                 )}
 
                                 <SectionDivider>Share link</SectionDivider>
-                                <div id="create-share-link-section" className={`rounded-xl border p-4 ${publicCollectionsEnabled ? 'border-gray-200 bg-gray-50/80' : 'border-gray-200 bg-gray-50 opacity-90'}`}>
+                                <div
+                                    id="create-share-link-section"
+                                    data-help="share-link-access-settings"
+                                    className={`rounded-xl border p-4 ${publicCollectionsEnabled ? 'border-gray-200 bg-gray-50/80' : 'border-gray-200 bg-gray-50 opacity-90'}`}
+                                >
                                     <div className="flex gap-3">
                                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
                                             <LinkIcon className="h-5 w-5 text-gray-600" aria-hidden="true" />

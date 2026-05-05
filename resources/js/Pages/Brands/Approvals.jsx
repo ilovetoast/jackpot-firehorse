@@ -129,7 +129,10 @@ export default function Approvals({ brand }) {
                         </div>
                     ) : (
                         <div className="bg-white shadow rounded-lg overflow-hidden">
-                            <ul className="divide-y divide-gray-200">
+                            <ul
+                                className="divide-y divide-gray-200"
+                                data-help="approvals-queue-list"
+                            >
                                 {assets.map((asset) => (
                                     <li key={asset.id} className={`p-6 ${asset.is_aged ? 'bg-amber-50 border-l-4 border-amber-400' : ''}`}>
                                         <div className="flex items-start justify-between">

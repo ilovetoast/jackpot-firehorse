@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Brand;
 use App\Models\HelpAiQuestion;
 use App\Models\Tenant;
 use App\Services\AuthPermissionService;
 use App\Services\HelpActionService;
+use App\Services\HelpActionVisibilityContext;
 use App\Services\HelpAiAskService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,10 +17,13 @@ class HelpActionController extends Controller
     public function index(Request $request, AuthPermissionService $authPermissionService, HelpActionService $helpActionService): JsonResponse
     {
         $user = $request->user();
-        $tenant = app()->bound('tenant') ? app('tenant') : null;
-        $brand = app()->bound('brand') ? app('brand') : null;
+        [$tenant, $brand] = $this->resolveWorkspaceFromAppOrSession($request);
 
         $permissions = $authPermissionService->effectivePermissions($user, $tenant, $brand);
+
+        $visibilityContext = ($tenant instanceof Tenant && $user)
+            ? new HelpActionVisibilityContext($user, $tenant, $brand)
+            : null;
 
         $rawQ = $request->query('q');
         $query = is_string($rawQ) ? $rawQ : null;
@@ -41,6 +46,7 @@ class HelpActionController extends Controller
             $brand,
             $contextRoute,
             $contextPage,
+            $visibilityContext,
         );
 
         return response()->json($payload);
@@ -53,7 +59,9 @@ class HelpActionController extends Controller
         ]);
 
         $user = $request->user();
-        if (! app()->bound('tenant')) {
+        [$tenant, $brand] = $this->resolveWorkspaceFromAppOrSession($request);
+
+        if (! $tenant instanceof Tenant) {
             return response()->json([
                 'kind' => 'workspace_required',
                 'message' => 'Choose a company and brand from the workspace menu, then try Ask AI again. You can still search help topics above.',
@@ -64,10 +72,6 @@ class HelpActionController extends Controller
                 'help_ai_question_id' => null,
             ]);
         }
-
-        /** @var Tenant $tenant */
-        $tenant = app('tenant');
-        $brand = app()->bound('brand') ? app('brand') : null;
 
         $permissions = $authPermissionService->effectivePermissions($user, $tenant, $brand);
 
@@ -110,5 +114,35 @@ class HelpActionController extends Controller
         ]);
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Help routes intentionally skip ResolveTenant; align permissions + visibility with session when needed.
+     *
+     * @return array{0: Tenant|null, 1: Brand|null}
+     */
+    private function resolveWorkspaceFromAppOrSession(Request $request): array
+    {
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        $brand = app()->bound('brand') ? app('brand') : null;
+
+        if (! $tenant instanceof Tenant) {
+            $tid = $request->session()->get('tenant_id');
+            if (is_numeric($tid)) {
+                $tenant = Tenant::query()->find((int) $tid);
+            }
+        }
+
+        if ($tenant instanceof Tenant && ! $brand instanceof Brand) {
+            $bid = $request->session()->get('brand_id');
+            if (is_numeric($bid)) {
+                $brand = Brand::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('id', (int) $bid)
+                    ->first();
+            }
+        }
+
+        return [$tenant instanceof Tenant ? $tenant : null, $brand instanceof Brand ? $brand : null];
     }
 }

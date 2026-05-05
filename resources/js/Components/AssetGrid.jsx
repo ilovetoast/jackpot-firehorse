@@ -453,6 +453,7 @@ export default function AssetGrid({
     return (
         <div
             ref={containerRef}
+            data-help="asset-grid"
             data-enhanced-grid-mode={isEnhancedGridMode ? 'true' : 'false'}
             className={['relative -m-1 rounded-lg p-1', enhancedGridContainerClass].filter(Boolean).join(' ')}
             onPointerDownCapture={handleContainerPointerDown}

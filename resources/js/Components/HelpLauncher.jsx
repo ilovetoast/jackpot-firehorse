@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { router, usePage } from '@inertiajs/react'
 import { applyCsrfTokenToPage } from '../utils/csrf'
+import { HELP_HIGHLIGHT_TOKEN_RE, SHOWME_STORAGE_KEY } from '../hooks/useHelpHighlightFromUrl'
+import { HelpTopicListRow } from '../utils/helpCategoryIcons'
 import {
     ArrowLeftIcon,
     ArrowPathIcon,
@@ -298,6 +300,9 @@ export default function HelpLauncher({ textColor = '#000000' }) {
         if (!action?.highlight?.selector || typeof action.highlight.selector !== 'string') {
             return null
         }
+        if (!HELP_HIGHLIGHT_TOKEN_RE.test(action.highlight.selector)) {
+            return null
+        }
         const base = resolveVisitHref(action)
         if (!base) {
             return null
@@ -311,11 +316,37 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             if (lab) {
                 u.searchParams.set('highlight_label', lab)
             }
+            const fb = action.highlight.fallback_selector
+            if (typeof fb === 'string' && HELP_HIGHLIGHT_TOKEN_RE.test(fb)) {
+                u.searchParams.set('highlight_fb', fb)
+            }
             return u.pathname + u.search + u.hash
         } catch {
             return null
         }
     }, [resolveVisitHref])
+
+    const persistShowMeFallbackContext = useCallback((action) => {
+        const hl = action?.highlight
+        if (!hl || typeof hl.selector !== 'string') {
+            return
+        }
+        try {
+            const payload = {
+                helpKey: String(action.key || ''),
+                savedAt: Date.now(),
+                fallbackSelector: typeof hl.fallback_selector === 'string' ? hl.fallback_selector : undefined,
+                fallbackLabel: typeof hl.fallback_label === 'string' ? hl.fallback_label : undefined,
+                missingTitle: typeof hl.missing_title === 'string' ? hl.missing_title : undefined,
+                missingMessage: typeof hl.missing_message === 'string' ? hl.missing_message : undefined,
+                missingCtaLabel: typeof hl.missing_cta_label === 'string' ? hl.missing_cta_label : undefined,
+                missingCtaUrl: typeof hl.missing_cta_url === 'string' ? hl.missing_cta_url : undefined,
+            }
+            sessionStorage.setItem(SHOWME_STORAGE_KEY, JSON.stringify(payload))
+        } catch {
+            /* quota / private mode */
+        }
+    }, [])
 
     const showMe = useCallback(
         (action) => {
@@ -323,11 +354,12 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             if (!href) {
                 return
             }
+            persistShowMeFallbackContext(action)
             setOpen(false)
             setSelected(null)
             router.visit(href)
         },
-        [buildShowMeHref]
+        [buildShowMeHref, persistShowMeFallbackContext]
     )
 
     const listItems = debouncedQuery ? payload.results : payload.common
@@ -518,19 +550,13 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                                                 Suggested for this page
                                             </p>
-                                            <ul className="space-y-1">
+                                            <ul className="space-y-0.5">
                                                 {contextualItems.map((item) => (
                                                     <li key={item.key}>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelected(item)}
-                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
-                                                        >
-                                                            <span className="font-medium text-gray-900">{item.title}</span>
-                                                            {item.category ? (
-                                                                <span className="text-xs text-gray-500">{item.category}</span>
-                                                            ) : null}
-                                                        </button>
+                                                        <HelpTopicListRow
+                                                            item={item}
+                                                            onPick={() => setSelected(item)}
+                                                        />
                                                     </li>
                                                 ))}
                                             </ul>
@@ -543,19 +569,13 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                                     Common topics
                                                 </p>
                                             ) : null}
-                                            <ul className="space-y-1">
+                                            <ul className="space-y-0.5">
                                                 {listItems.map((item) => (
                                                     <li key={item.key}>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelected(item)}
-                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
-                                                        >
-                                                            <span className="font-medium text-gray-900">{item.title}</span>
-                                                            {item.category ? (
-                                                                <span className="text-xs text-gray-500">{item.category}</span>
-                                                            ) : null}
-                                                        </button>
+                                                        <HelpTopicListRow
+                                                            item={item}
+                                                            onPick={() => setSelected(item)}
+                                                        />
                                                     </li>
                                                 ))}
                                             </ul>
@@ -566,16 +586,13 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                                                 Common topics
                                             </p>
-                                            <ul className="space-y-1">
+                                            <ul className="space-y-0.5">
                                                 {payload.common.map((item) => (
                                                     <li key={item.key}>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setSelected(item)}
-                                                            className="flex w-full min-h-[44px] flex-col justify-center rounded-md px-2 py-2 text-left text-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset"
-                                                        >
-                                                            <span className="font-medium text-gray-900">{item.title}</span>
-                                                        </button>
+                                                        <HelpTopicListRow
+                                                            item={item}
+                                                            onPick={() => setSelected(item)}
+                                                        />
                                                     </li>
                                                 ))}
                                             </ul>
@@ -718,14 +735,24 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
                 )}
                 {Array.isArray(a.related_actions) && a.related_actions.length > 0 && (
                     <div className="mt-3">
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Related</p>
-                        <div className="flex flex-wrap gap-2">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Related topics</p>
+                        <ul className="space-y-0.5">
                             {a.related_actions.map((rel) => (
-                                <span key={rel.key} className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
-                                    {rel.title}
-                                </span>
+                                <li key={rel.key}>
+                                    <HelpTopicListRow
+                                        item={{
+                                            key: rel.key,
+                                            title: rel.title,
+                                            category: '',
+                                            page_label: '',
+                                            short_answer: '',
+                                        }}
+                                        asStatic
+                                        showDescription={false}
+                                    />
+                                </li>
                             ))}
-                        </div>
+                        </ul>
                     </div>
                 )}
             </div>
@@ -735,17 +762,17 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
         return (
             <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-sm text-gray-800">
                 <p className="mb-2">{result.message}</p>
-                <button
-                    type="button"
-                    onClick={() => onPickTopic(result.primary)}
-                    className="text-left font-medium text-violet-700 underline decoration-violet-200 underline-offset-2 hover:text-violet-900"
-                >
-                    Open: {result.primary.title}
-                </button>
+                <HelpTopicListRow item={result.primary} onPick={() => onPickTopic(result.primary)} />
             </div>
         )
     }
-    if (kind === 'fallback' || kind === 'ai_disabled' || kind === 'feature_disabled' || kind === 'workspace_required') {
+    if (
+        kind === 'fallback' ||
+        kind === 'ai_disabled' ||
+        kind === 'feature_disabled' ||
+        kind === 'workspace_required' ||
+        kind === 'feature_unavailable'
+    ) {
         const suggested = Array.isArray(result.suggested) ? result.suggested : []
         return (
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
@@ -753,16 +780,10 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
                 {suggested.length > 0 && (
                     <>
                         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Suggested topics</p>
-                        <ul className="space-y-1">
+                        <ul className="space-y-0.5">
                             {suggested.map((item) => (
                                 <li key={item.key}>
-                                    <button
-                                        type="button"
-                                        onClick={() => onPickTopic(item)}
-                                        className="text-left text-sm font-medium text-violet-700 hover:text-violet-900"
-                                    >
-                                        {item.title}
-                                    </button>
+                                    <HelpTopicListRow item={item} onPick={() => onPickTopic(item)} />
                                 </li>
                             ))}
                         </ul>
@@ -822,19 +843,18 @@ function HelpActionDetail({ action, onGo, onShowMe, onPickRelated, resolveVisitH
             </div>
             {Array.isArray(action.related) && action.related.length > 0 && (
                 <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Related</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Related topics</p>
+                    <ul className="mt-1 space-y-0.5">
                         {action.related.map((rel) => (
-                            <button
-                                key={rel.key}
-                                type="button"
-                                onClick={() => onPickRelated(rel)}
-                                className="min-h-[36px] rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                            >
-                                {rel.title}
-                            </button>
+                            <li key={rel.key}>
+                                <HelpTopicListRow
+                                    item={rel}
+                                    showDescription={Boolean(rel.short_answer)}
+                                    onPick={() => onPickRelated(rel)}
+                                />
+                            </li>
                         ))}
-                    </div>
+                    </ul>
                 </div>
             )}
         </div>
