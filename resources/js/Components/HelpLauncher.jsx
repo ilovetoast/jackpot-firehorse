@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { router, usePage } from '@inertiajs/react'
 import {
     ArrowLeftIcon,
@@ -125,74 +126,70 @@ export default function HelpLauncher({ textColor = '#000000' }) {
     const showSecondaryCommon =
         Boolean(debouncedQuery) && payload.results.length === 0 && payload.common.length > 0
 
-    return (
-        <>
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className="rounded-full p-1.5 transition-colors hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                style={{ color: textColor }}
-                aria-expanded={open}
-                aria-haspopup="dialog"
-                title="Help"
+    /**
+     * Portal to document.body: cinematic nav uses backdrop-filter, which creates a containing block and
+     * breaks fixed-position overlays / solid backgrounds for descendants (same class of issue as mobile
+     * bottom nav in AppNav.jsx).
+     */
+    const helpOverlay =
+        open && typeof document !== 'undefined' ? (
+            <div
+                className="fixed inset-0 z-[220] flex justify-end"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="jp-help-title"
             >
-                <span className="sr-only">Open help</span>
-                <QuestionMarkCircleIcon className="h-6 w-6" aria-hidden />
-            </button>
-
-            {open && (
-                <div className="fixed inset-0 z-[220] flex justify-end" role="dialog" aria-modal="true" aria-labelledby="jp-help-title">
-                    <button
-                        type="button"
-                        className="absolute inset-0 bg-gray-900/40"
-                        aria-label="Close help"
-                        onClick={() => setOpen(false)}
-                    />
-                    <div className="relative flex h-full w-full max-w-md flex-col bg-white shadow-xl border-l border-gray-200">
-                        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
-                            {selected ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setSelected(null)}
-                                    className="inline-flex items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900"
-                                >
-                                    <ArrowLeftIcon className="h-4 w-4" />
-                                    Back
-                                </button>
-                            ) : (
-                                <h2 id="jp-help-title" className="text-sm font-semibold text-gray-900">
-                                    Help
-                                </h2>
-                            )}
+                <button
+                    type="button"
+                    className="absolute inset-0 bg-gray-900/40"
+                    aria-label="Close help"
+                    onClick={() => setOpen(false)}
+                />
+                <div className="relative isolate flex h-full w-full max-w-md flex-col bg-white shadow-xl border-l border-gray-200">
+                    <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+                        {selected ? (
                             <button
                                 type="button"
-                                onClick={() => setOpen(false)}
-                                className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                                aria-label="Close"
+                                onClick={() => setSelected(null)}
+                                className="inline-flex items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900"
                             >
-                                <XMarkIcon className="h-5 w-5" />
+                                <ArrowLeftIcon className="h-4 w-4" />
+                                Back
                             </button>
-                        </div>
-
-                        {!selected && (
-                            <div className="shrink-0 border-b border-gray-100 px-4 py-3">
-                                <label htmlFor="jp-help-search" className="sr-only">
-                                    Search help
-                                </label>
-                                <input
-                                    ref={searchRef}
-                                    id="jp-help-search"
-                                    type="search"
-                                    autoComplete="off"
-                                    placeholder="Search topics…"
-                                    value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
-                                    className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                                />
-                            </div>
+                        ) : (
+                            <h2 id="jp-help-title" className="text-sm font-semibold text-gray-900">
+                                Help
+                            </h2>
                         )}
+                        <button
+                            type="button"
+                            onClick={() => setOpen(false)}
+                            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                            aria-label="Close"
+                        >
+                            <XMarkIcon className="h-5 w-5" />
+                        </button>
+                    </div>
 
-                        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                    {!selected && (
+                        <div className="shrink-0 border-b border-gray-100 bg-white px-4 py-3">
+                            <label htmlFor="jp-help-search" className="sr-only">
+                                Search help
+                            </label>
+                            <input
+                                ref={searchRef}
+                                id="jp-help-search"
+                                type="search"
+                                autoComplete="off"
+                                placeholder="Search topics…"
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                        </div>
+                    )}
+
+                    <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 py-3">
                             {selected ? (
                                 <HelpActionDetail
                                     action={selected}
@@ -252,10 +249,26 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                     )}
                                 </>
                             )}
-                        </div>
                     </div>
                 </div>
-            )}
+            </div>
+        ) : null
+
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="rounded-full p-1.5 transition-colors hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                style={{ color: textColor }}
+                aria-expanded={open}
+                aria-haspopup="dialog"
+                title="Help"
+            >
+                <span className="sr-only">Open help</span>
+                <QuestionMarkCircleIcon className="h-6 w-6" aria-hidden />
+            </button>
+            {helpOverlay ? createPortal(helpOverlay, document.body) : null}
         </>
     )
 }

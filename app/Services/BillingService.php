@@ -10,6 +10,7 @@ use App\Services\Billing\StripeCustomerVerifier;
 use App\Services\PlanService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Laravel\Cashier\Exceptions\IncompletePayment;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
@@ -749,7 +750,15 @@ class BillingService
         }
         Stripe::setApiKey($stripeSecret);
 
-        $idempotencyKey = "tenant-{$tenant->id}-storage-addon";
+        // Stripe binds idempotency keys to the exact request body; a fixed key breaks after
+        // subscription/price changes, config changes, or a retry with a different create payload.
+        $idempotencyKey = sprintf(
+            't%d-stg-addon-%s-%s-%s',
+            $tenant->id,
+            $subscription->stripe_id,
+            $stripePriceId,
+            Str::lower((string) Str::ulid())
+        );
 
         try {
             // If tenant already has an add-on, remove it first
@@ -877,7 +886,13 @@ class BillingService
                 'price' => $stripePriceId,
                 'quantity' => 1,
             ], [
-                'idempotency_key' => "tenant-{$tenant->id}-ai-credits-addon",
+                'idempotency_key' => sprintf(
+                    't%d-ai-credits-%s-%s-%s',
+                    $tenant->id,
+                    $subscription->stripe_id,
+                    $stripePriceId,
+                    Str::lower((string) Str::ulid())
+                ),
             ]);
 
             $tenant->update([
@@ -961,7 +976,13 @@ class BillingService
                 'price' => $stripePriceId,
                 'quantity' => 1,
             ], [
-                'idempotency_key' => "tenant-{$tenant->id}-creator-module",
+                'idempotency_key' => sprintf(
+                    't%d-creator-module-%s-%s-%s',
+                    $tenant->id,
+                    $subscription->stripe_id,
+                    $stripePriceId,
+                    Str::lower((string) Str::ulid())
+                ),
             ]);
 
             $module = \App\Models\TenantModule::updateOrCreate(
@@ -1091,7 +1112,14 @@ class BillingService
                 'price' => $stripePriceId,
                 'quantity' => 1,
             ], [
-                'idempotency_key' => "tenant-{$tenant->id}-creator-seats-{$packId}",
+                'idempotency_key' => sprintf(
+                    't%d-creator-seats-%s-%s-%s-%s',
+                    $tenant->id,
+                    preg_replace('/[^A-Za-z0-9_-]/', '-', $packId),
+                    $subscription->stripe_id,
+                    $stripePriceId,
+                    Str::lower((string) Str::ulid())
+                ),
             ]);
 
             $baseSeats = (int) ($module->seats_limit ?? 25);
