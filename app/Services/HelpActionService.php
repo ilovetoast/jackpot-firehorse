@@ -27,7 +27,7 @@ class HelpActionService
         $q = $query !== null ? trim($query) : '';
         $normalizedQuery = $q === '' ? null : $q;
 
-        $common = $this->pickCommon($visible, $brand);
+        $common = $this->pickCommon($visible);
 
         if ($normalizedQuery === null) {
             return [
@@ -84,7 +84,7 @@ class HelpActionService
      * @param  list<array<string, mixed>>  $visible
      * @return list<array<string, mixed>>
      */
-    public function pickCommon(array $visible, ?Brand $brand): array
+    public function pickCommon(array $visible): array
     {
         $pinned = [];
         foreach ($visible as $action) {
@@ -129,10 +129,7 @@ class HelpActionService
                 }
                 foreach ($visible as $v) {
                     if ((string) $v['key'] === $rk) {
-                        $relatedOut[] = [
-                            'key' => $rk,
-                            'title' => (string) ($v['title'] ?? $rk),
-                        ];
+                        $relatedOut[] = $this->serializeRelatedTarget($v, $brand);
                         break;
                     }
                 }
@@ -150,6 +147,31 @@ class HelpActionService
             'url' => $url,
             'tags' => is_array($action['tags'] ?? null) ? $action['tags'] : [],
             'related' => $relatedOut,
+        ];
+    }
+
+    /**
+     * Related topic payload for the panel (no nested related — avoids large graphs).
+     *
+     * @param  array<string, mixed>  $target
+     * @return array<string, mixed>
+     */
+    public function serializeRelatedTarget(array $target, ?Brand $brand): array
+    {
+        $routeName = isset($target['route_name']) && is_string($target['route_name']) ? $target['route_name'] : null;
+        $bindings = isset($target['route_bindings']) && is_array($target['route_bindings']) ? $target['route_bindings'] : [];
+
+        return [
+            'key' => (string) $target['key'],
+            'title' => (string) ($target['title'] ?? ''),
+            'category' => (string) ($target['category'] ?? ''),
+            'short_answer' => (string) ($target['short_answer'] ?? ''),
+            'steps' => is_array($target['steps'] ?? null) ? $target['steps'] : [],
+            'page_label' => (string) ($target['page_label'] ?? ''),
+            'route_name' => $routeName,
+            'url' => $this->resolveUrl($routeName, $bindings, $brand),
+            'tags' => is_array($target['tags'] ?? null) ? $target['tags'] : [],
+            'related' => [],
         ];
     }
 

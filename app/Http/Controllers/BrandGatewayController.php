@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\BrandGateway\BrandContextResolver;
 use App\Services\BrandGateway\BrandThemeBuilder;
+use App\Support\GatewayIntendedUrl;
 use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
 use App\Mail\EmailVerification;
 use Illuminate\Http\RedirectResponse;
@@ -680,7 +681,7 @@ class BrandGatewayController extends Controller
 
         if ($intended) {
             $path = parse_url($intended, PHP_URL_PATH) ?? '';
-            if ($path !== '' && str_starts_with($path, '/app/api')) {
+            if ($path !== '' && GatewayIntendedUrl::shouldDiscardPath($path)) {
                 $intended = null;
             }
         }

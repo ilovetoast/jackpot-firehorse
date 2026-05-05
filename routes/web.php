@@ -457,6 +457,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
     Route::post('/admin/email-test/send', [\App\Http\Controllers\Admin\EmailTestController::class, 'send'])->name('admin.email-test.send');
     Route::get('/admin/email-test/log', [\App\Http\Controllers\Admin\EmailTestController::class, 'log'])->name('admin.email-test.log');
     Route::post('/admin/stripe/sync-subscription/{tenant}', [\App\Http\Controllers\SiteAdminController::class, 'syncSubscription'])->name('admin.stripe.sync-subscription');
+    Route::post('/admin/companies/{tenant}/billing/reconcile-addons', [\App\Http\Controllers\SiteAdminController::class, 'reconcileTenantBillingAddons'])->name('admin.companies.billing-reconcile-addons');
     Route::post('/admin/stripe/reset-subscriptions/{tenant}', [\App\Http\Controllers\SiteAdminController::class, 'resetSubscriptions'])->name('admin.stripe.reset-subscriptions');
     Route::post('/admin/stripe/refund', [\App\Http\Controllers\SiteAdminController::class, 'processRefund'])->name('admin.stripe.refund');
     Route::get('/admin/activity-logs', [\App\Http\Controllers\SiteAdminController::class, 'activityLogs'])->name('admin.activity-logs');
@@ -636,6 +637,11 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/onboarding/upload-guideline', [\App\Http\Controllers\OnboardingController::class, 'uploadGuideline'])->name('onboarding.upload-guideline');
         Route::post('/onboarding/category-preferences', [\App\Http\Controllers\OnboardingController::class, 'saveCategoryPreferences'])->name('onboarding.category-preferences');
         Route::post('/onboarding/reset', [\App\Http\Controllers\OnboardingController::class, 'resetOnboarding'])->name('onboarding.reset');
+    });
+
+    // In-app help (tenant context for permissions; outside RestrictCollectionOnlyUser so collection guests can load topics)
+    Route::middleware(['tenant'])->group(function () {
+        Route::get('/help/actions', [\App\Http\Controllers\HelpActionController::class, 'index'])->name('help.actions');
     });
 
     // C12: RestrictCollectionOnlyUser gates collection-only users from dashboard/assets/collections/etc.

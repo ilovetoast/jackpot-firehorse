@@ -85,6 +85,8 @@ export default function AdminCompanyView({
     const [creatorBusy, setCreatorBusy] = useState(false)
     /** Add-on modules: pick (Creator, Space, …) then module-specific step */
     const [addonsModal, setAddonsModal] = useState({ open: false, step: 'pick' })
+    const [billingReconcileBusy, setBillingReconcileBusy] = useState(false)
+    const [billingSyncBusy, setBillingSyncBusy] = useState(false)
 
     const closeAddonsModal = () => setAddonsModal({ open: false, step: 'pick' })
 
@@ -390,6 +392,11 @@ export default function AdminCompanyView({
                     {flash?.error && (
                         <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
                             {flash.error}
+                        </div>
+                    )}
+                    {pageErrors?.error && (
+                        <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
+                            {pageErrors.error}
                         </div>
                     )}
 
@@ -899,6 +906,108 @@ export default function AdminCompanyView({
                                                                 : '—'}
                                                         </dd>
                                                     </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {company.stripe_connected && company.billing_addons && (
+                                            <div className="col-span-full border-t border-gray-200 pt-5 mt-2">
+                                                <h3 className="text-sm font-semibold text-gray-900">
+                                                    Stripe add-ons &amp; billing data
+                                                </h3>
+                                                <p className="text-xs text-gray-500 mt-1 mb-3 max-w-3xl">
+                                                    Storage and AI credit add-ons are stored on the company row and must match
+                                                    subscription items in Stripe. Use{' '}
+                                                    <strong>Reconcile add-ons</strong> to clear local quota when the Stripe item
+                                                    is missing or no longer on this subscription (fixes “ghost” add-ons in the
+                                                    app). Use <strong>Sync subscription</strong> to refresh Cashier’s copy of the
+                                                    Stripe subscription. Customer-facing <strong>invoices</strong> are read from
+                                                    Stripe — remove, void, or fix duplicates in the{' '}
+                                                    <a
+                                                        href="/app/admin/stripe-status"
+                                                        className="font-medium text-indigo-600 hover:text-indigo-800"
+                                                    >
+                                                        Stripe integration page
+                                                    </a>{' '}
+                                                    or Stripe Dashboard; they are not stored separately here.
+                                                </p>
+                                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm mb-4">
+                                                    <div>
+                                                        <dt className="text-gray-500">Storage add-on (MB)</dt>
+                                                        <dd className="mt-0.5 font-mono text-xs text-gray-900">
+                                                            {company.billing_addons.storage_addon_mb ?? 0}
+                                                        </dd>
+                                                    </div>
+                                                    <div className="sm:col-span-2">
+                                                        <dt className="text-gray-500">Storage Stripe subscription item</dt>
+                                                        <dd className="mt-0.5 font-mono text-xs text-gray-900 break-all">
+                                                            {company.billing_addons.storage_addon_stripe_subscription_item_id || '—'}
+                                                        </dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-gray-500">AI credits add-on</dt>
+                                                        <dd className="mt-0.5 font-mono text-xs text-gray-900">
+                                                            {company.billing_addons.ai_credits_addon ?? 0}
+                                                        </dd>
+                                                    </div>
+                                                    <div className="sm:col-span-2">
+                                                        <dt className="text-gray-500">AI credits Stripe subscription item</dt>
+                                                        <dd className="mt-0.5 font-mono text-xs text-gray-900 break-all">
+                                                            {company.billing_addons.ai_credits_addon_stripe_subscription_item_id ||
+                                                                '—'}
+                                                        </dd>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        disabled={billingReconcileBusy || billingSyncBusy}
+                                                        onClick={() => {
+                                                            if (
+                                                                !window.confirm(
+                                                                    'Reconcile storage and AI credit add-on fields with Stripe? This clears local add-on quota only when the Stripe subscription item is missing or not on this subscription.',
+                                                                )
+                                                            ) {
+                                                                return
+                                                            }
+                                                            setBillingReconcileBusy(true)
+                                                            router.post(
+                                                                route('admin.companies.billing-reconcile-addons', company.id),
+                                                                {},
+                                                                {
+                                                                    preserveScroll: true,
+                                                                    onFinish: () => setBillingReconcileBusy(false),
+                                                                },
+                                                            )
+                                                        }}
+                                                        className="inline-flex items-center rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        {billingReconcileBusy ? 'Reconciling…' : 'Reconcile add-ons with Stripe'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={billingReconcileBusy || billingSyncBusy}
+                                                        onClick={() => {
+                                                            if (
+                                                                !window.confirm(
+                                                                    'Pull subscription rows from Stripe into this database? Use after fixing subscription issues in Stripe.',
+                                                                )
+                                                            ) {
+                                                                return
+                                                            }
+                                                            setBillingSyncBusy(true)
+                                                            router.post(
+                                                                route('admin.stripe.sync-subscription', company.id),
+                                                                {},
+                                                                {
+                                                                    preserveScroll: true,
+                                                                    onFinish: () => setBillingSyncBusy(false),
+                                                                },
+                                                            )
+                                                        }}
+                                                        className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        {billingSyncBusy ? 'Syncing…' : 'Sync subscription from Stripe'}
+                                                    </button>
                                                 </div>
                                             </div>
                                         )}

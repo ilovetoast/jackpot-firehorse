@@ -1127,6 +1127,157 @@ class BillingService
     }
 
     /**
+     * Fix drift between tenant add-on columns and Stripe subscription items.
+     *
+     * Clears local storage / AI credit add-on fields when:
+     * - Extra MB or price IDs exist without a subscription item ID (orphaned DB row), or
+     * - The stored subscription item ID is missing in Stripe, or
+     * - The stored subscription item ID is not on the tenant's default Cashier subscription.
+     *
+     * Invoices shown in the product UI come from Stripe via Cashier — they cannot be deleted here.
+     *
+     * @return array{ok: bool, cleared: array{storage: bool, ai_credits: bool}, messages: list<string>}
+     */
+    public function reconcileTenantStripeAddonColumns(Tenant $tenant): array
+    {
+        $cleared = ['storage' => false, 'ai_credits' => false];
+        $messages = [];
+
+        $stripeSecret = config('services.stripe.secret');
+        if (empty($stripeSecret)) {
+            return [
+                'ok' => false,
+                'cleared' => $cleared,
+                'messages' => ['Stripe is not configured in this environment.'],
+            ];
+        }
+
+        Stripe::setApiKey($stripeSecret);
+        $tenant->refresh();
+
+        $itemIdsOnSubscription = [];
+        $cashierSub = $tenant->subscription('default');
+        $hasQueryableSubscription = $cashierSub
+            && $cashierSub->stripe_id
+            && in_array($cashierSub->stripe_status, ['active', 'trialing', 'past_due'], true);
+
+        $subscriptionItemsResolved = false;
+        if ($hasQueryableSubscription) {
+            try {
+                $stripeSub = Subscription::retrieve($cashierSub->stripe_id, [
+                    'expand' => ['items.data.price'],
+                ]);
+                foreach ($stripeSub->items->data as $item) {
+                    $itemIdsOnSubscription[] = $item->id;
+                }
+                $subscriptionItemsResolved = true;
+            } catch (ApiErrorException $e) {
+                $messages[] = 'Could not load Stripe subscription to compare items: '.$e->getMessage();
+            }
+        }
+
+        // --- Storage add-on ---
+        $storageItemId = $tenant->storage_addon_stripe_subscription_item_id;
+        $storageOrphanLocal = ($tenant->storage_addon_mb > 0 || ! empty($tenant->storage_addon_stripe_price_id))
+            && empty($storageItemId);
+
+        if ($storageOrphanLocal) {
+            $tenant->forceFill([
+                'storage_addon_mb' => 0,
+                'storage_addon_stripe_price_id' => null,
+                'storage_addon_stripe_subscription_item_id' => null,
+            ])->save();
+            $cleared['storage'] = true;
+            $messages[] = 'Cleared orphaned storage add-on fields (extra quota or price ID without a Stripe subscription item).';
+        } elseif (! empty($storageItemId)) {
+            $shouldClear = false;
+
+            if ($subscriptionItemsResolved) {
+                if (! in_array($storageItemId, $itemIdsOnSubscription, true)) {
+                    $shouldClear = true;
+                }
+            } else {
+                try {
+                    SubscriptionItem::retrieve($storageItemId);
+                    if (! $hasQueryableSubscription) {
+                        $messages[] = 'Storage add-on item still exists in Stripe, but this tenant has no active default subscription in the database — try “Sync subscription from Stripe” first.';
+                    }
+                } catch (ApiErrorException $e) {
+                    if ($this->stripeSubscriptionItemAlreadyRemoved($e)) {
+                        $shouldClear = true;
+                    } else {
+                        $messages[] = 'Could not verify storage add-on item: '.$e->getMessage();
+                    }
+                }
+            }
+
+            if ($shouldClear) {
+                $tenant->forceFill([
+                    'storage_addon_mb' => 0,
+                    'storage_addon_stripe_price_id' => null,
+                    'storage_addon_stripe_subscription_item_id' => null,
+                ])->save();
+                $cleared['storage'] = true;
+                $messages[] = 'Cleared storage add-on fields — the Stripe subscription item is gone or not on this subscription.';
+            }
+        }
+
+        $tenant->refresh();
+
+        // --- AI credits add-on ---
+        $aiItemId = $tenant->ai_credits_addon_stripe_subscription_item_id;
+        $aiOrphanLocal = ($tenant->ai_credits_addon > 0 || ! empty($tenant->ai_credits_addon_stripe_price_id))
+            && empty($aiItemId);
+
+        if ($aiOrphanLocal) {
+            $tenant->forceFill([
+                'ai_credits_addon' => 0,
+                'ai_credits_addon_stripe_price_id' => null,
+                'ai_credits_addon_stripe_subscription_item_id' => null,
+            ])->save();
+            $cleared['ai_credits'] = true;
+            $messages[] = 'Cleared orphaned AI credits add-on fields (credits or price ID without a Stripe subscription item).';
+        } elseif (! empty($aiItemId)) {
+            $shouldClearAi = false;
+
+            if ($subscriptionItemsResolved) {
+                if (! in_array($aiItemId, $itemIdsOnSubscription, true)) {
+                    $shouldClearAi = true;
+                }
+            } else {
+                try {
+                    SubscriptionItem::retrieve($aiItemId);
+                    if (! $hasQueryableSubscription) {
+                        $messages[] = 'AI credits add-on item still exists in Stripe, but this tenant has no active default subscription in the database — try “Sync subscription from Stripe” first.';
+                    }
+                } catch (ApiErrorException $e) {
+                    if ($this->stripeSubscriptionItemAlreadyRemoved($e)) {
+                        $shouldClearAi = true;
+                    } else {
+                        $messages[] = 'Could not verify AI credits add-on item: '.$e->getMessage();
+                    }
+                }
+            }
+
+            if ($shouldClearAi) {
+                $tenant->forceFill([
+                    'ai_credits_addon' => 0,
+                    'ai_credits_addon_stripe_price_id' => null,
+                    'ai_credits_addon_stripe_subscription_item_id' => null,
+                ])->save();
+                $cleared['ai_credits'] = true;
+                $messages[] = 'Cleared AI credits add-on fields — the Stripe subscription item is gone or not on this subscription.';
+            }
+        }
+
+        if ($messages === []) {
+            $messages[] = 'No orphaned add-on fields detected; tenant columns match the active Stripe subscription.';
+        }
+
+        return ['ok' => true, 'cleared' => $cleared, 'messages' => $messages];
+    }
+
+    /**
      * Delete a Stripe subscription item (storage add-on).
      */
     private function removeStorageAddonStripeItem(string $stripeSubscriptionItemId): void

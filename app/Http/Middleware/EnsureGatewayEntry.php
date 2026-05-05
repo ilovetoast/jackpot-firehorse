@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\ImpersonationService;
 use App\Services\PlanService;
+use App\Support\GatewayIntendedUrl;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -40,7 +41,7 @@ class EnsureGatewayEntry
         }
 
         if (! Auth::check()) {
-            session(['intended_url' => $request->fullUrl()]);
+            $this->rememberIntendedUrl($request);
 
             return redirect('/gateway');
         }
@@ -53,7 +54,7 @@ class EnsureGatewayEntry
         $user = app(ImpersonationService::class)->actingUser() ?? Auth::user();
 
         if (! $tenantId) {
-            session(['intended_url' => $request->fullUrl()]);
+            $this->rememberIntendedUrl($request);
 
             return redirect('/gateway');
         }
@@ -69,7 +70,7 @@ class EnsureGatewayEntry
                 return $next($request);
             }
 
-            session(['intended_url' => $request->fullUrl()]);
+            $this->rememberIntendedUrl($request);
 
             return redirect('/gateway');
         }
@@ -82,7 +83,7 @@ class EnsureGatewayEntry
 
         if (! $brand) {
             session()->forget(['brand_id', 'tenant_id']);
-            session(['intended_url' => $request->fullUrl()]);
+            $this->rememberIntendedUrl($request);
 
             return redirect('/gateway');
         }
@@ -124,13 +125,23 @@ class EnsureGatewayEntry
 
             if (! $hasAccess) {
                 session()->forget(['brand_id', 'tenant_id']);
-                session(['intended_url' => $request->fullUrl()]);
+                $this->rememberIntendedUrl($request);
 
                 return redirect('/gateway');
             }
         }
 
         return $next($request);
+    }
+
+    private function rememberIntendedUrl(Request $request): void
+    {
+        $path = $request->getPathInfo();
+        if (GatewayIntendedUrl::shouldDiscardPath($path)) {
+            return;
+        }
+
+        session(['intended_url' => $request->fullUrl()]);
     }
 
     /**

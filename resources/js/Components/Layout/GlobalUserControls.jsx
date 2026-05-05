@@ -4,6 +4,7 @@ import { BuildingOffice2Icon, Cog6ToothIcon, CreditCardIcon } from '@heroicons/r
 import PermissionGate from '../PermissionGate'
 import Avatar from '../Avatar'
 import NotificationBell from '../NotificationBell'
+import HelpLauncher from '../HelpLauncher'
 import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
 
 /**
@@ -85,7 +86,8 @@ export default function GlobalUserControls({
 
     return (
         <div className="flex items-center gap-2 lg:gap-4">
-            <div className="hidden sm:block">
+            <div className="hidden sm:flex sm:items-center sm:gap-0.5">
+                <HelpLauncher textColor={textColor} />
                 <NotificationBell textColor={textColor} />
             </div>
             <div className="relative">

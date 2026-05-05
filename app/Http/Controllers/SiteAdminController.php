@@ -21,6 +21,7 @@ use App\Models\UploadSession;
 use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
+use App\Services\BillingService;
 use App\Services\DocumentationService;
 use App\Services\GrantCreatorModuleToTenant;
 use App\Services\TenantAgencyService;
@@ -2458,6 +2459,22 @@ class SiteAdminController extends Controller
         ]);
 
         return back()->with('success', "Permission '{$permission->name}' created successfully. Use this slug in your frontend PermissionGate: '{$permission->name}'");
+    }
+
+    /**
+     * Clear orphaned storage / AI credit add-on columns when they no longer match Stripe subscription items.
+     */
+    public function reconcileTenantBillingAddons(Tenant $tenant): \Illuminate\Http\RedirectResponse
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can access this page.');
+
+        $result = app(BillingService::class)->reconcileTenantStripeAddonColumns($tenant);
+
+        if (! $result['ok']) {
+            return back()->withErrors(['error' => implode(' ', $result['messages'])]);
+        }
+
+        return back()->with('success', implode(' ', $result['messages']));
     }
 
     /**

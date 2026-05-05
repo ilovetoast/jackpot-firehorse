@@ -350,6 +350,14 @@ class CompanyViewController extends Controller
                     'granted_by_admin' => (bool) ($creatorModuleRow?->granted_by_admin),
                     'seats_limit' => $creatorModuleRow?->seats_limit,
                 ],
+                'billing_addons' => [
+                    'storage_addon_mb' => (int) ($tenant->storage_addon_mb ?? 0),
+                    'storage_addon_stripe_price_id' => $tenant->storage_addon_stripe_price_id,
+                    'storage_addon_stripe_subscription_item_id' => $tenant->storage_addon_stripe_subscription_item_id,
+                    'ai_credits_addon' => (int) ($tenant->ai_credits_addon ?? 0),
+                    'ai_credits_addon_stripe_price_id' => $tenant->ai_credits_addon_stripe_price_id,
+                    'ai_credits_addon_stripe_subscription_item_id' => $tenant->ai_credits_addon_stripe_subscription_item_id,
+                ],
                 'owner' => $owner ? [
                     'id' => $owner->id,
                     'name' => trim(($owner->first_name ?? '').' '.($owner->last_name ?? '')),
