@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use App\Enums\DownloadStatus;
 use App\Exceptions\BillingUserFacingException;
 use App\Models\Download;
+use App\Models\Tenant;
 use App\Models\TenantModule;
+use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\Billing\StripeSubscriptionSyncService;
 use App\Services\BillingService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
+use App\Services\TenantPermissionResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +28,8 @@ class BillingController extends Controller
 {
     public function __construct(
         protected BillingService $billingService,
-        protected AiUsageService $aiUsageService
+        protected AiUsageService $aiUsageService,
+        protected TenantPermissionResolver $tenantPermissionResolver,
     ) {
     }
 
@@ -47,13 +51,15 @@ class BillingController extends Controller
                 ]);
             }
         } else {
-            $tenant = \App\Models\Tenant::find($tenantId);
+            $tenant = Tenant::find($tenantId);
             if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
                 return redirect()->route('companies.index')->withErrors([
                     'billing' => 'You do not have access to this company.',
                 ]);
             }
         }
+
+        $this->authorizeBillingView($user, $tenant);
 
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
         // Query subscription directly instead of using Cashier's method (more reliable with Tenant model)
@@ -266,11 +272,13 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
         
         // Check if tenant already has an active subscription
         $existingSubscription = $tenant->subscription('default');
@@ -376,11 +384,13 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
 
         try {
             $planService = new PlanService();
@@ -476,11 +486,13 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
 
         try {
             $this->billingService->updatePaymentMethod($tenant, $request->payment_method);
@@ -511,11 +523,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('companies.index')->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingView($user, $tenant);
 
         $currentPlan = $this->billingService->getCurrentPlan($tenant);
         // Query subscription directly instead of using Cashier's method (more reliable with Tenant model)
@@ -777,11 +791,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('companies.index')->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingView($user, $tenant);
         $invoices = $this->billingService->getInvoices($tenant);
 
         return Inertia::render('Billing/Invoices', [
@@ -796,11 +812,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingView($user, $tenant);
 
         try {
             return $tenant->downloadInvoice($invoiceId, [
@@ -821,11 +839,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
 
         try {
             $this->billingService->cancelSubscription($tenant);
@@ -848,11 +868,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
 
         try {
             $this->billingService->resumeSubscription($tenant);
@@ -867,7 +889,7 @@ class BillingController extends Controller
 
     /**
      * Add storage add-on to tenant subscription.
-     * Requires tenant admin (owner or admin) role.
+     * Requires billing.manage for the workspace.
      */
     public function addStorageAddon(Request $request)
     {
@@ -877,15 +899,14 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage storage add-ons.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -904,21 +925,20 @@ class BillingController extends Controller
 
     /**
      * Remove storage add-on from tenant subscription.
-     * Requires tenant admin (owner or admin) role.
+     * Requires billing.manage for the workspace.
      */
     public function removeStorageAddon(Request $request)
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage storage add-ons.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -945,15 +965,14 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage add-ons.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -974,15 +993,14 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage add-ons.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -1005,15 +1023,14 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -1032,15 +1049,14 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -1063,15 +1079,14 @@ class BillingController extends Controller
 
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
 
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return response()->json(['message' => 'Invalid company.'], 403);
         }
 
-        $role = strtolower($user->getRoleForTenant($tenant) ?? '');
-        if (! in_array($role, ['owner', 'admin'])) {
-            return response()->json(['message' => 'Only company owners and admins can manage modules.'], 403);
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            return response()->json(['message' => 'You do not have permission to manage billing.'], 403);
         }
 
         try {
@@ -1094,6 +1109,13 @@ class BillingController extends Controller
      */
     public function success(Request $request)
     {
+        $user = $request->user();
+        $tenant = $this->resolveTenantForBillingRequest($request);
+        if (! $tenant) {
+            return redirect()->route('companies.index')->withErrors(['billing' => 'Invalid company.']);
+        }
+        $this->authorizeBillingView($user, $tenant);
+
         $sessionId = $request->query('session_id');
         if (is_string($sessionId) && $sessionId !== '' && config('services.stripe.secret')) {
             try {
@@ -1103,8 +1125,7 @@ class BillingController extends Controller
                 $subscriptionId = is_string($session->subscription ?? null) ? $session->subscription : null;
 
                 if ($customerId && $subscriptionId) {
-                    $tenant = \App\Models\Tenant::where('stripe_id', $customerId)->first();
-                    $user = $request->user();
+                    $tenant = Tenant::where('stripe_id', $customerId)->first();
                     if ($tenant && $user && $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
                         $stripeSubscription = \Stripe\Subscription::retrieve($subscriptionId);
                         app(StripeSubscriptionSyncService::class)->sync($tenant, $stripeSubscription);
@@ -1128,11 +1149,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingView($user, $tenant);
 
         try {
             $portalUrl = $this->billingService->getCustomerPortalUrl(
@@ -1156,6 +1179,44 @@ class BillingController extends Controller
                     'billing' => 'We couldn’t open the billing portal. Please try again, or contact support if the issue continues.',
                 ])
                 ->with('billing_error_code', 'BILLING_PORTAL_FAILED');
+        }
+    }
+
+    private function resolveTenantForBillingRequest(Request $request): ?Tenant
+    {
+        $user = $request->user();
+        if (! $user) {
+            return null;
+        }
+        $tenantId = session('tenant_id');
+        if ($tenantId) {
+            $tenant = Tenant::find($tenantId);
+            if ($tenant && $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+                return $tenant;
+            }
+
+            return null;
+        }
+
+        $tenant = $user->tenants->first();
+        if ($tenant && $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            return $tenant;
+        }
+
+        return null;
+    }
+
+    private function authorizeBillingView(User $user, Tenant $tenant): void
+    {
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.view')) {
+            abort(403, 'You do not have permission to view billing.');
+        }
+    }
+
+    private function authorizeBillingManage(User $user, Tenant $tenant): void
+    {
+        if (! $this->tenantPermissionResolver->has($user, $tenant, 'billing.manage')) {
+            abort(403, 'You do not have permission to manage billing.');
         }
     }
 
@@ -1255,11 +1316,13 @@ class BillingController extends Controller
     {
         $user = $request->user();
         $tenantId = session('tenant_id');
-        $tenant = $tenantId ? \App\Models\Tenant::find($tenantId) : $user->tenants->first();
+        $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
         
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('billing')->withErrors(['billing' => 'Invalid company.']);
         }
+
+        $this->authorizeBillingManage($user, $tenant);
 
         try {
             $stripeSecret = config('services.stripe.secret');

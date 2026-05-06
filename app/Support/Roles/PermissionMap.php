@@ -268,12 +268,11 @@ class PermissionMap
             'assets.tags.delete',
         ];
 
-        // Brand management permissions
+        // Brand management permissions (tenant-only capabilities such as billing.view stay off brand roles)
         $brandManagementPermissions = [
             'view brand',
             'brand_settings.manage',
             'brand_categories.manage',
-            'billing.view',
             'assets.retry_thumbnails',
         ];
 

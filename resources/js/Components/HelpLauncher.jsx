@@ -40,6 +40,7 @@ const HELP_PAGE_LABEL_BY_ROUTE = {
     'manage.fields': 'Manage',
     'manage.tags': 'Manage',
     'manage.values': 'Manage',
+    'profile.index': 'Account',
     'brands.edit': 'Brand settings',
     'brands.approvals': 'Brand settings',
     'brands.creators': 'Brand settings',

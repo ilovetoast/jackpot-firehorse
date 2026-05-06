@@ -37,8 +37,8 @@ export default function GlobalUserControls({
     const can = (p) => effectivePermissions.includes(p)
     const siteRoles = Array.isArray(auth?.user?.site_roles) ? auth.user.site_roles : []
     const isSiteAdminOrOwner = siteRoles.includes('site_admin') || siteRoles.includes('site_owner')
-    const isSiteOwner =
-        auth?.user?.id === 1 || can('company.manage') || can('permissions.manage') || isSiteAdminOrOwner
+    // Match /app/admin controllers: only user 1 or site_owner/site_admin (not tenant Spatie permissions).
+    const showPlatformAdminDashboard = auth?.user?.id === 1 || isSiteAdminOrOwner
 
     const hasAdminOrOwnerRole = can('team.manage')
 
@@ -400,7 +400,7 @@ export default function GlobalUserControls({
                                 </Link>
                             </div>
 
-                            {isSiteOwner && (
+                            {showPlatformAdminDashboard && (
                                 <div className="px-4 py-2 border-b border-gray-200">
                                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Admin</p>
                                     <Link

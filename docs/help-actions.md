@@ -2,7 +2,7 @@
 
 ## Purpose of `config/help_actions.php`
 
-`config/help_actions.php` is the **single structured source of truth** for first-party help topics in Jackpot. Each entry describes one user-facing “help action”: title, short answer, step-by-step text, category, search hooks (aliases, tags), optional permission gates, a primary route to send the user to, and related actions.
+`config/help_actions.php` is the **single structured source of truth** for first-party help topics in Jackpot. Each entry describes one user-facing “help action”: title, short answer, step-by-step text, category, search hooks (aliases, tags), optional permission gates, a primary route to send the user to, and related actions. Concept rows such as **`concepts.account_vs_brand`**, **`concepts.company_workspace`**, **`concepts.brand_settings`**, **`concepts.brand_insights`**, and **`concepts.brand_management`** disambiguate Account vs Company vs Brand vs Insights for search and Ask AI.
 
 V1 is **file-driven** (no database). The backend loads it through `App\Services\HelpActionService`, and the app shell queries `GET /app/help/actions` for the help panel.
 
@@ -199,6 +199,22 @@ Example (after deploying matching `data-help` attributes):
 - On load, the target control is spotlighted with the system overlay.
 
 Keep `selector` names stable; they are part of the public contract alongside `key`.
+
+## Terminology: Account, company workspace, and brand settings
+
+Jackpot separates **three layers** in help copy and in Ask AI grounding:
+
+1. **Account / Profile** — Personal to the signed-in user (name, email, password, notification preferences). These are **not** workspace administration and **not** brand configuration. See **`account.profile`** and **`concepts.account_vs_brand`**.
+
+2. **Company workspace (organization / tenant)** — The top-level area for the business: **users, roles, billing, agencies, plan-level features**, and policies that can affect **all brands** in that workspace. A workspace may include **one or many brands** depending on **plan limits** (see **`billing.plan`**, **`billing.upgrade`**, **`concepts.company_workspace`**). Do **not** describe Company settings as “brand settings.”
+
+3. **Brand (selected context)** — **Brand settings** apply only to the **currently selected brand**: identity, guidelines / Brand DNA, metadata behavior, uploads, and brand-specific workflows (**`brand.settings`**, **`guidelines.*`**). Switch brands with **`workspace.switch_brand`**; switch companies with **`workspace.switch_company`**.
+
+4. **Brand Insights** — **Analytics and intelligence** (overview, metadata coverage, AI review, activity) for the active brand context—not a settings screen. Use **`concepts.brand_insights`** and **`insights.*`** topics; distinguish them from Brand settings in `short_answer` text.
+
+5. **Brand management** — The **process** of organizing multiple brands, access, and governance (**`concepts.brand_management`**, Team, Permissions). It is broader than opening **one** brand’s settings page.
+
+**Ask AI / retrieval:** Prefer these concept keys when users conflate “account,” “company,” and “brand.” Do not treat **Company settings** and **Brand settings** as interchangeable; the config entries use explicit language so ranked topics reinforce the right destination.
 
 ## Moving from config to database / admin-managed content
 
