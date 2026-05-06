@@ -9,6 +9,7 @@ import {
     MULTI_VALUE_FILTER_KEYS,
     stripUrlParams,
     removeOneMultiValueParam,
+    collectParamValuesForKey,
 } from '../utils/filterUrlUtils'
 
 const SPECIAL_SINGLE_KEYS = [
@@ -81,13 +82,17 @@ export default function AssetFilterChipsBar({
         }
 
         for (const fk of filterKeys) {
-            if (MULTI_VALUE_FILTER_KEYS.has(fk)) {
-                const vals = u.getAll(fk)
+            const field = schemaByKey.get(fk)
+            const isMultiselectMetadata =
+                field?.type === 'multiselect' || field?.field_type === 'multiselect'
+            const isMultiValue = MULTI_VALUE_FILTER_KEYS.has(fk) || isMultiselectMetadata
+
+            if (isMultiValue) {
+                const vals = [...new Set(collectParamValuesForKey(u, fk))]
                 const seen = new Set()
                 for (const v of vals) {
                     if (!v || seen.has(v)) continue
                     seen.add(v)
-                    const field = schemaByKey.get(fk)
                     const display = field ? labelForValue(field, v, available_values, fk) : v
                     out.push({
                         id: `${fk}:${v}`,
@@ -98,7 +103,6 @@ export default function AssetFilterChipsBar({
             } else if (u.has(fk)) {
                 const v = u.get(fk)
                 if (v == null || v === '') continue
-                const field = schemaByKey.get(fk)
                 const display = field ? labelForValue(field, v, available_values, fk) : v
                 out.push({
                     id: `${fk}:${v}`,

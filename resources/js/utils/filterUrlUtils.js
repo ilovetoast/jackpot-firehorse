@@ -35,6 +35,24 @@ export const MULTI_VALUE_FILTER_KEYS = new Set(['tags', 'collection', 'dominant_
  * @param {unknown} value - Raw value from URL/state
  * @returns {string[]} Deduplicated array of string values
  */
+/**
+ * All values for a filter key from the query string, including `key[0]`…`key[n]` (and legacy plain `key` repeats).
+ * @param {URLSearchParams} searchParams
+ * @param {string} baseKey
+ * @returns {string[]}
+ */
+export function collectParamValuesForKey(searchParams, baseKey) {
+  const vals = []
+  if (!searchParams || !baseKey) return vals
+  for (const [k, v] of searchParams.entries()) {
+    if (v === '' || v === null || v === undefined) continue
+    if (k === baseKey || (k.startsWith(`${baseKey}[`) && k.endsWith(']'))) {
+      vals.push(String(v))
+    }
+  }
+  return vals
+}
+
 export function normalizeFilterParam(value) {
   if (Array.isArray(value)) {
     return [...new Set(value.map(String).filter(Boolean))]
@@ -62,9 +80,11 @@ export function filtersToFlatParams(filters, filterKeys = null) {
     if (Array.isArray(v)) {
       const nonEmpty = [...new Set(v.filter(x => x !== '' && x !== null && x !== undefined).map(String))]
       if (nonEmpty.length > 0) {
-        // Keep all values for URL when multiple are selected (e.g. multiselect product filters), not just the first.
-        // MULTI_VALUE_FILTER_KEYS (tags, collection, …) and any key with 2+ values get the full list.
-        out[key] = MULTI_VALUE_FILTER_KEYS.has(key) || nonEmpty.length > 1 ? nonEmpty : [nonEmpty[0]]
+        // PHP/Laravel merge duplicate query keys (product=a&product=b → last wins). Encode arrays as product[0]=…&product[1]=…
+        // so multiselect metadata filters and multi-value keys round-trip correctly.
+        nonEmpty.forEach((val, i) => {
+          out[`${key}[${i}]`] = val
+        })
       }
     } else if (v !== '' && v !== null && v !== undefined) {
       out[key] = String(v)
@@ -101,6 +121,13 @@ export function flatParamsToFilters(params, filterKeys = [], options = {}) {
   const entries = params instanceof URLSearchParams
     ? Array.from(params.entries())
     : Object.entries(params || {})
+  const bracketIndexedBases = new Set()
+  for (const [key] of entries) {
+    if (!key.includes('[')) continue
+    const baseKey = parsePhpArrayKey(key, keySet)
+    if (baseKey) bracketIndexedBases.add(baseKey)
+  }
+
   const rawByKey = {}
   for (const [key, value] of entries) {
     if (RESERVED_PARAMS.has(key) || navigationKeys.has(key)) continue
@@ -112,7 +139,8 @@ export function flatParamsToFilters(params, filterKeys = [], options = {}) {
   }
   const out = {}
   for (const [baseKey, values] of Object.entries(rawByKey)) {
-    const isMulti = MULTI_VALUE_FILTER_KEYS.has(baseKey) || values.length > 1
+    const isMulti =
+      MULTI_VALUE_FILTER_KEYS.has(baseKey) || values.length > 1 || bracketIndexedBases.has(baseKey)
     const normalized = isMulti ? [...new Set(values)] : values[values.length - 1]
     out[baseKey] = { operator: 'equals', value: normalized }
   }
@@ -190,14 +218,18 @@ export function removeOneMultiValueParam(searchString, key, valueToRemove) {
   const raw = searchString.startsWith('?') ? searchString.slice(1) : searchString
   const next = new URLSearchParams(raw)
   const want = String(valueToRemove)
-  const all = next.getAll(key)
-  if (all.length === 0) return next
-  deleteParamAndArrayVariants(next, key)
-  for (const v of all) {
-    if (String(v) !== want) {
-      next.append(key, v)
+  const values = []
+  for (const [k, v] of next.entries()) {
+    if (k === key || (k.startsWith(`${key}[`) && k.endsWith(']'))) {
+      values.push(String(v))
     }
   }
+  if (values.length === 0) return next
+  deleteParamAndArrayVariants(next, key)
+  const remaining = values.filter((v) => v !== want)
+  remaining.forEach((v, i) => {
+    next.append(`${key}[${i}]`, v)
+  })
   return next
 }
 

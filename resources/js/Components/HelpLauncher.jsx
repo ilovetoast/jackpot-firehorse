@@ -87,7 +87,7 @@ function HelpPanelSection({ title, description, children }) {
 
 function HelpTopicGrid({ items, onPick, highlighted = false }) {
     return (
-        <ul className="m-0 grid list-none grid-cols-1 gap-2.5 p-0 sm:grid-cols-2">
+        <ul className="m-0 grid list-none grid-cols-1 gap-2.5 p-0">
             {items.map((item) => (
                 <li key={item.key} className="min-w-0">
                     <HelpTopicCard item={item} highlighted={highlighted} onPick={() => onPick(item)} />
@@ -428,7 +428,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
             <Dialog open={open} onClose={handleDialogClose} className="relative z-[220]">
                 <div className="fixed inset-0 bg-gray-900/40" aria-hidden />
                 <div className="fixed inset-0 flex justify-end">
-                    <DialogPanel className="flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col border-l border-gray-200 bg-slate-50 shadow-xl outline-none">
+                    <DialogPanel className="flex h-[100dvh] max-h-[100dvh] w-full max-w-xl flex-col border-l border-gray-200 bg-slate-50 shadow-xl outline-none">
                         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
                             {selected ? (
                                 <>
@@ -573,7 +573,7 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                                         Loading topics
                                     </p>
-                                    <ul className="m-0 grid list-none grid-cols-1 gap-2.5 p-0 sm:grid-cols-2">
+                                    <ul className="m-0 grid list-none grid-cols-1 gap-2.5 p-0">
                                         {[0, 1, 2, 3].map((i) => (
                                             <li
                                                 key={i}
@@ -821,7 +821,7 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
                         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-violet-900/60">
                             Related topics
                         </p>
-                        <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
+                        <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0">
                             {a.related_actions.map((rel) => (
                                 <li key={rel.key}>
                                     <HelpTopicCard
@@ -865,7 +865,7 @@ function HelpAskResultBlock({ result, onPickTopic, resolveVisitHref }) {
                 <p className="mb-2">{result.message}</p>
                 {suggested.length > 0 && (
                     <HelpPanelSection title="Suggested topics">
-                        <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
+                        <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0">
                             {suggested.map((item) => (
                                 <li key={item.key}>
                                     <HelpTopicCard compact item={item} onPick={() => onPickTopic(item)} />
@@ -928,7 +928,7 @@ function HelpActionDetail({ action, onGo, onShowMe, onPickRelated, resolveVisitH
             </div>
             {Array.isArray(action.related) && action.related.length > 0 && (
                 <HelpPanelSection title="Related topics">
-                    <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
+                    <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0">
                         {action.related.map((rel) => (
                             <li key={rel.key}>
                                 <HelpTopicCard

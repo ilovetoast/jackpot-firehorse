@@ -123,8 +123,12 @@ export function HelpTopicCard({
     const pad = compact ? 'p-2.5' : 'p-3'
     const iconWell = compact ? 'h-8 w-8' : 'h-9 w-9'
     const iconCls = compact ? 'h-4 w-4' : 'h-5 w-5'
-    const titleCls = compact ? 'text-xs font-semibold text-gray-900' : 'text-sm font-semibold text-gray-900'
-    const descCls = compact ? 'text-[11px] leading-snug text-gray-500' : 'text-[11px] leading-snug text-gray-500'
+    const titleCls = compact
+        ? 'text-xs font-semibold text-gray-900'
+        : 'text-[13px] leading-snug font-semibold text-gray-900'
+    const descCls = compact
+        ? 'text-[11px] leading-snug text-gray-500'
+        : 'text-[11px] leading-relaxed text-gray-500'
 
     const surface = (() => {
         if (asStatic) {
@@ -161,10 +165,14 @@ export function HelpTopicCard({
                 <Icon className={iconClass} />
             </span>
             <div className="min-w-0 flex-1 pt-0.5">
-                <span className={`block line-clamp-2 ${titleCls}`}>{item?.title || ''}</span>
-                {short ? <p className={`mt-1 line-clamp-2 ${descCls}`}>{short}</p> : null}
+                <span className={`block ${compact ? 'line-clamp-2' : 'line-clamp-3'} ${titleCls}`}>
+                    {item?.title || ''}
+                </span>
+                {short ? (
+                    <p className={`mt-1 ${compact ? 'line-clamp-2' : 'line-clamp-3'} ${descCls}`}>{short}</p>
+                ) : null}
                 {categoryLabel ? (
-                    <span className="mt-2 inline-flex max-w-full rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 truncate">
+                    <span className="mt-2 block w-full rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-slate-600 leading-snug break-words">
                         {categoryLabel}
                     </span>
                 ) : null}

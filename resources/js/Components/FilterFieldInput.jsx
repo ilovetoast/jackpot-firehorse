@@ -104,7 +104,13 @@ export function FilterFieldInput({
           ? Array.isArray(value) ? value : value != null ? [value] : null
           : isToggleBoolean
             ? value
-            : value
+            : isMultiselectField
+              ? Array.isArray(value)
+                  ? value
+                  : value !== null && value !== undefined && value !== ''
+                    ? [String(value)]
+                    : []
+              : value
 
     const displayLabel = field?.display_label || field?.label || fieldKey
 
