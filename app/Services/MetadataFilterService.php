@@ -412,7 +412,9 @@ class MetadataFilterService
                 if ($vals === []) {
                     break;
                 }
-                $query->where(function ($q) use ($jsonPath, $vals) {
+                // Must use orWhere: parent group is (EXISTS on asset_metadata) OR (legacy JSON). A plain where() ANDs
+                // with whereExists and drops every row when metadata lives only in asset_metadata (JSON path null).
+                $query->orWhere(function ($q) use ($jsonPath, $vals) {
                     foreach ($vals as $val) {
                         $q->orWhereRaw("JSON_CONTAINS({$jsonPath}, ?)", [json_encode($val)]);
                     }
