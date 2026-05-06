@@ -342,6 +342,19 @@ class CompanyViewController extends Controller
             && $subscriptionStripeId
             && ($subscription->stripe_status ?? '') === 'active';
 
+        $adminStripeAddonCatalog = [
+            'storage_packages' => $this->filterAdminAddonPackagesForPlan(
+                config('storage_addons.packages', []),
+                $planName,
+                'storage'
+            ),
+            'ai_credits_packages' => $this->filterAdminAddonPackagesForPlan(
+                config('ai_credits.addons', []),
+                $planName,
+                'ai_credits'
+            ),
+        ];
+
         return Inertia::render('Admin/CompanyView', [
             'linked_agencies' => $linkedAgencies,
             'company' => [
@@ -382,6 +395,7 @@ class CompanyViewController extends Controller
                 'active_addon_line_items' => $activeAddonLineItems,
                 'stripe_default_subscription_id' => $subscriptionStripeId,
                 'can_use_stripe_customer_addons' => $canUseStripeCustomerAddons,
+                'admin_stripe_addon_catalog' => $adminStripeAddonCatalog,
                 'stripe_invoices_admin' => $stripeInvoicesAdmin,
                 'owner' => $owner ? [
                     'id' => $owner->id,
@@ -632,6 +646,44 @@ class CompanyViewController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
+    /**
+     * Packages eligible for the tenant’s current plan (for site-admin Add-on modules UI).
+     *
+     * @param  array<int, array<string, mixed>>  $packages
+     * @return array<int, array<string, mixed>>
+     */
+    protected function filterAdminAddonPackagesForPlan(array $packages, string $planKey, string $allowListKey): array
+    {
+        $plan = config("plans.{$planKey}", config('plans.free'));
+        $allowed = $plan['addons_available'][$allowListKey] ?? [];
+        if (! is_array($allowed) || $allowed === []) {
+            return [];
+        }
+
+        return collect($packages)
+            ->filter(fn ($pkg) => in_array($pkg['id'] ?? '', $allowed, true))
+            ->filter(fn ($pkg) => ! empty($pkg['stripe_price_id'] ?? null))
+            ->map(function ($pkg) {
+                $row = [
+                    'id' => $pkg['id'],
+                    'monthly_price' => $pkg['monthly_price'] ?? null,
+                ];
+                if (isset($pkg['label'])) {
+                    $row['label'] = $pkg['label'];
+                }
+                if (isset($pkg['credits'])) {
+                    $row['credits'] = $pkg['credits'];
+                }
+                if (isset($pkg['storage_mb'])) {
+                    $row['storage_mb'] = (int) $pkg['storage_mb'];
+                }
+
+                return $row;
+            })
+            ->values()
+            ->all();
+    }
+
     protected function buildAdminActiveAddonLineItems(Tenant $tenant, ?TenantModule $creatorModuleRow, FeatureGate $featureGate): array
     {
         $items = [];

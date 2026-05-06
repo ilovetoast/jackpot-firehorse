@@ -2,7 +2,7 @@ import { usePage } from '@inertiajs/react'
 import FilmGrainOverlay from '../../Components/FilmGrainOverlay'
 import LogoMark from '../../Components/Brand/LogoMark'
 
-export default function GatewayLayout({ children, onSwitchOpen }) {
+export default function GatewayLayout({ children, onSwitchOpen, showHeaderLogo = true }) {
     const { theme, context } = usePage().props
 
     const primary = theme?.colors?.primary || '#7c3aed'
@@ -36,8 +36,12 @@ export default function GatewayLayout({ children, onSwitchOpen }) {
             {/* Content layer */}
             <div className="relative z-10 min-h-screen flex flex-col">
                 {/* Header */}
-                <div className="absolute top-6 left-6 right-6 flex justify-between items-center z-20">
-                    <LogoMark size="sm" href={isDefault ? '/' : null} />
+                <div
+                    className={`absolute top-6 left-6 right-6 flex items-center z-20 ${
+                        showHeaderLogo ? 'justify-between' : 'justify-end'
+                    }`}
+                >
+                    {showHeaderLogo ? <LogoMark size="sm" href={isDefault ? '/' : null} /> : null}
 
                     {isAuthenticated && canSwitch && onSwitchOpen && (
                         <button

@@ -481,6 +481,10 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
     Route::post('/admin/users/{user}/unsuspend', [\App\Http\Controllers\SiteAdminController::class, 'unsuspendAccount'])->name('admin.users.unsuspend');
     Route::put('/admin/companies/{tenant}/plan', [\App\Http\Controllers\SiteAdminController::class, 'updatePlan'])->name('admin.companies.update-plan');
     Route::put('/admin/companies/{tenant}/creator-module', [\App\Http\Controllers\SiteAdminController::class, 'upsertCreatorModule'])->name('admin.companies.creator-module');
+    Route::post('/admin/companies/{tenant}/billing/storage-addon', [\App\Http\Controllers\SiteAdminController::class, 'addTenantStorageAddon'])->name('admin.companies.billing.storage-addon');
+    Route::delete('/admin/companies/{tenant}/billing/storage-addon', [\App\Http\Controllers\SiteAdminController::class, 'removeTenantStorageAddon'])->name('admin.companies.billing.storage-addon.remove');
+    Route::post('/admin/companies/{tenant}/billing/ai-credits-addon', [\App\Http\Controllers\SiteAdminController::class, 'addTenantAiCreditsAddon'])->name('admin.companies.billing.ai-credits-addon');
+    Route::delete('/admin/companies/{tenant}/billing/ai-credits-addon', [\App\Http\Controllers\SiteAdminController::class, 'removeTenantAiCreditsAddon'])->name('admin.companies.billing.ai-credits-addon.remove');
     Route::put('/admin/companies/{tenant}/infrastructure-tier', [\App\Http\Controllers\SiteAdminController::class, 'updateInfrastructureTier'])->name('admin.companies.update-infrastructure-tier');
     Route::post('/admin/api/companies/{tenant}/incubation/extend', [\App\Http\Controllers\Admin\AdminIncubationController::class, 'extendDeadline'])
         ->name('admin.api.companies.incubation.extend');

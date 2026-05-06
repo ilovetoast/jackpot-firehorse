@@ -64,14 +64,14 @@ export default function BrandSwitchModal({ onClose, context }) {
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/35 mb-4 px-1">
                             Other Workspaces
                         </p>
-                        <CompanySelector companies={otherCompanies} />
+                        <CompanySelector companies={otherCompanies} variant="embedded" />
                     </div>
                 </div>
             )
         }
 
         if (hasMultipleCompanies) {
-            return <CompanySelector companies={context.available_companies} />
+            return <CompanySelector companies={context.available_companies} variant="modal" />
         }
 
         if (hasMultipleBrands) {
@@ -80,6 +80,7 @@ export default function BrandSwitchModal({ onClose, context }) {
                     brands={context.available_brands}
                     tenant={context.tenant}
                     tenantMemberWithoutBrands={Boolean(context.tenant_member_without_brands)}
+                    variant="modal"
                 />
             )
         }

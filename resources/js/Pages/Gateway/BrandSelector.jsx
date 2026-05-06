@@ -27,9 +27,14 @@ function BrandLogo({ brand, disabled }) {
     )
 }
 
-export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrands = false }) {
+/**
+ * @param {'page' | 'modal'} [variant='page'] — `modal`: single-column list and compact headings for BrandSwitchModal.
+ */
+export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrands = false, variant = 'page' }) {
     const { theme } = usePage().props
     const [processing, setProcessing] = useState(false)
+
+    const isPage = variant === 'page'
 
     const list = Array.isArray(brands) ? brands : []
     const isEmpty = list.length === 0
@@ -49,12 +54,16 @@ export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrand
     }
 
     return (
-        <div className="w-full max-w-lg animate-fade-in" style={{ animationDuration: '500ms' }}>
-            <div className="text-center mb-12">
-                <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-3">
+        <div className={`w-full animate-fade-in ${isPage ? 'max-w-lg' : 'max-w-none'}`} style={{ animationDuration: '500ms' }}>
+            <div className={`text-center ${isPage ? 'mb-12' : 'mb-6'}`}>
+                <h1
+                    className={`font-display font-semibold tracking-tight leading-tight text-white/95 ${
+                        isPage ? 'text-4xl md:text-5xl mb-3' : 'text-2xl sm:text-3xl mb-2'
+                    }`}
+                >
                     {tenant?.name || theme?.name || 'Select Brand'}
                 </h1>
-                <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">
+                <p className={`text-sm text-white/60 mx-auto ${isPage ? 'mt-2 max-w-md' : 'max-w-md'}`}>
                     {isEmpty && tenantMemberWithoutBrands
                         ? 'You need access to at least one brand to open the workspace.'
                         : 'Choose a brand to enter'}
@@ -92,7 +101,7 @@ export default function BrandSelector({ brands, tenant, tenantMemberWithoutBrand
             )}
 
             {!isEmpty && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid gap-4 ${isPage ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                 {list.map((brand) => {
                     const color = brand.primary_color || theme?.colors?.primary || '#7c3aed'
                     const hasLogo = !!(brand.logo_path || brand.logo_dark_path)

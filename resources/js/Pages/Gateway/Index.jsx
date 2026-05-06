@@ -40,7 +40,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
         return (
             <>
                 <Head title={theme?.name || 'Jackpot'} />
-                <GatewayLayout onSwitchOpen={openSwitch}>
+                <GatewayLayout onSwitchOpen={openSwitch} showHeaderLogo={false}>
                     <EnterTransition suppressAutoRedirect={suppressAutoRedirect} />
                 </GatewayLayout>
 
@@ -116,7 +116,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
     return (
         <>
             <Head title={theme?.name || 'Jackpot'} />
-            <GatewayLayout onSwitchOpen={openSwitch}>
+            <GatewayLayout onSwitchOpen={openSwitch} showHeaderLogo={mode !== MODES.ENTER}>
                 {(flash?.error || flash_error) && (
                     <div className="mb-6 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-sm text-center max-w-md mx-auto">
                         {flash?.error || flash_error}

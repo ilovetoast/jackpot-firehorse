@@ -20,10 +20,22 @@ import {
     InformationCircleIcon,
     TrashIcon,
     RectangleStackIcon,
-    CubeIcon,
+    CircleStackIcon,
     XMarkIcon,
     ChartPieIcon,
 } from '@heroicons/react/24/outline'
+
+function formatAdminStoragePackageLabel(pkg) {
+    if (pkg.label) return pkg.label
+    const mb = pkg.storage_mb
+    if (mb == null) return pkg.id
+    if (mb >= 1048576) return `${Math.round(mb / 1048576)} TB`
+    if (mb >= 1024) {
+        const gb = mb / 1024
+        return Number.isInteger(gb) ? `${gb} GB` : `${gb.toFixed(1)} GB`
+    }
+    return `${mb} MB`
+}
 
 function defaultCreatorExpiresLocal() {
     const d = new Date()
@@ -83,13 +95,75 @@ export default function AdminCompanyView({
     const [creatorStatus, setCreatorStatus] = useState('active')
     const [creatorSeats, setCreatorSeats] = useState('')
     const [creatorBusy, setCreatorBusy] = useState(false)
-    /** Add-on modules: pick (Creator, Space, …) then module-specific step */
+    /** Add-on modules: pick (Creator, Storage, AI credits) then module-specific step */
     const [addonsModal, setAddonsModal] = useState({ open: false, step: 'pick' })
+    const [stripeAddonBusy, setStripeAddonBusy] = useState(false)
     const [billingReconcileBusy, setBillingReconcileBusy] = useState(false)
     const [billingSyncBusy, setBillingSyncBusy] = useState(false)
     const [invoiceVoidBusy, setInvoiceVoidBusy] = useState(null)
 
     const closeAddonsModal = () => setAddonsModal({ open: false, step: 'pick' })
+
+    const storageAddonCatalog = company.admin_stripe_addon_catalog?.storage_packages ?? []
+    const aiCreditsAddonCatalog = company.admin_stripe_addon_catalog?.ai_credits_packages ?? []
+
+    const submitAdminStorageAddon = (e) => {
+        e.preventDefault()
+        if (!company?.id) return
+        const fd = new FormData(e.target)
+        const package_id = fd.get('package_id')
+        if (!package_id || typeof package_id !== 'string') return
+        setStripeAddonBusy(true)
+        router.post(
+            route('admin.companies.billing.storage-addon', company.id),
+            { package_id },
+            {
+                preserveScroll: true,
+                onFinish: () => setStripeAddonBusy(false),
+                onSuccess: () => closeAddonsModal(),
+            },
+        )
+    }
+
+    const removeAdminStorageAddon = () => {
+        if (!company?.id) return
+        if (!window.confirm('Remove the storage add-on from this company’s Stripe subscription?')) return
+        setStripeAddonBusy(true)
+        router.delete(route('admin.companies.billing.storage-addon.remove', company.id), {
+            preserveScroll: true,
+            onFinish: () => setStripeAddonBusy(false),
+            onSuccess: () => closeAddonsModal(),
+        })
+    }
+
+    const submitAdminAiCreditsAddon = (e) => {
+        e.preventDefault()
+        if (!company?.id) return
+        const fd = new FormData(e.target)
+        const package_id = fd.get('package_id')
+        if (!package_id || typeof package_id !== 'string') return
+        setStripeAddonBusy(true)
+        router.post(
+            route('admin.companies.billing.ai-credits-addon', company.id),
+            { package_id },
+            {
+                preserveScroll: true,
+                onFinish: () => setStripeAddonBusy(false),
+                onSuccess: () => closeAddonsModal(),
+            },
+        )
+    }
+
+    const removeAdminAiCreditsAddon = () => {
+        if (!company?.id) return
+        if (!window.confirm('Remove the AI credits add-on from this company’s Stripe subscription?')) return
+        setStripeAddonBusy(true)
+        router.delete(route('admin.companies.billing.ai-credits-addon.remove', company.id), {
+            preserveScroll: true,
+            onFinish: () => setStripeAddonBusy(false),
+            onSuccess: () => closeAddonsModal(),
+        })
+    }
 
     const handleVoidStripeInvoice = (invoiceId) => {
         if (!window.confirm(`Void invoice ${invoiceId} in Stripe? This cannot be undone.`)) return
@@ -1061,6 +1135,7 @@ export default function AdminCompanyView({
                                                                 <thead className="bg-gray-50">
                                                                     <tr>
                                                                         <th className="px-2 py-2 text-left font-medium text-gray-600">Date</th>
+                                                                        <th className="px-2 py-2 text-left font-medium text-gray-600">Invoice id</th>
                                                                         <th className="px-2 py-2 text-left font-medium text-gray-600">#</th>
                                                                         <th className="px-2 py-2 text-left font-medium text-gray-600">Status</th>
                                                                         <th className="px-2 py-2 text-right font-medium text-gray-600">Paid</th>
@@ -1074,6 +1149,9 @@ export default function AdminCompanyView({
                                                                         <tr key={inv.id}>
                                                                             <td className="px-2 py-2 whitespace-nowrap text-gray-700">
                                                                                 {new Date(inv.created * 1000).toLocaleString()}
+                                                                            </td>
+                                                                            <td className="px-2 py-2 font-mono text-[10px] text-gray-600 break-all max-w-[8rem]">
+                                                                                {inv.id}
                                                                             </td>
                                                                             <td className="px-2 py-2 font-mono text-gray-800">{inv.number || inv.id}</td>
                                                                             <td className="px-2 py-2">
@@ -1123,8 +1201,8 @@ export default function AdminCompanyView({
                                                         </div>
                                                     )}
                                                     <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
-                                                        Rows are live from Stripe (not a local cache). Several &quot;paid&quot; lines on the same day are often normal (plan + add-on + proration). Only{' '}
-                                                        <strong>draft</strong> or <strong>open</strong> invoices can be voided from this page; paid or broken hosted links need the Stripe Dashboard.
+                                                        Rows are live from Stripe (not a local cache). To change what the <strong>customer</strong> sees or to reverse charges, use the Stripe Dashboard (refund, credit note, or void draft/open invoices). Several &quot;paid&quot; lines on the same day are often normal (plan + add-on + proration). Only{' '}
+                                                        <strong>draft</strong> or <strong>open</strong> invoices can be voided from this page.
                                                     </p>
                                                 </div>
 
@@ -2059,7 +2137,7 @@ export default function AdminCompanyView({
 
             <AppFooter />
 
-            {/* Add-on modules: pick module, then configure (Creator today; Space placeholder) */}
+            {/* Add-on modules: Creator (admin grant) + Stripe storage / AI credit add-ons */}
             {addonsModal.open && company.plan_management && (
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
@@ -2070,7 +2148,7 @@ export default function AdminCompanyView({
                         />
                         <div
                             className={`relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:p-6 ${
-                                addonsModal.step === 'creator' ? 'sm:max-w-xl' : 'sm:max-w-lg'
+                                addonsModal.step === 'pick' ? 'sm:max-w-lg' : 'sm:max-w-xl'
                             }`}
                             role="dialog"
                             aria-modal="true"
@@ -2124,22 +2202,44 @@ export default function AdminCompanyView({
                                             </button>
                                         </li>
                                         <li>
-                                            <div className="flex w-full items-start gap-4 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 p-4 text-left opacity-80">
-                                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-200">
-                                                    <CubeIcon className="h-5 w-5 text-gray-600" />
+                                            <button
+                                                type="button"
+                                                onClick={() => setAddonsModal({ open: true, step: 'storage' })}
+                                                className="flex w-full items-start gap-4 rounded-lg border border-gray-200 p-4 text-left transition hover:border-violet-300 hover:bg-violet-50/50"
+                                            >
+                                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-100">
+                                                    <CircleStackIcon className="h-5 w-5 text-sky-700" />
                                                 </span>
                                                 <span className="min-w-0 flex-1">
-                                                    <span className="block text-sm font-semibold text-gray-700">Space</span>
+                                                    <span className="block text-sm font-semibold text-gray-900">Storage add-on</span>
                                                     <span className="mt-0.5 block text-xs text-gray-500">
-                                                        Reserved for future bundled modules. Storage and AI add-ons are Stripe subscription items — see Plan Management → Active add-ons and Stripe invoices.
+                                                        Extra subscription storage (Stripe subscription item). Same flow as customer billing — requires an active subscription.
                                                     </span>
                                                 </span>
-                                                <span className="shrink-0 text-sm font-medium text-gray-400">Coming soon</span>
-                                            </div>
+                                                <span className="shrink-0 text-sm font-medium text-violet-700">Configure</span>
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAddonsModal({ open: true, step: 'ai_credits' })}
+                                                className="flex w-full items-start gap-4 rounded-lg border border-gray-200 p-4 text-left transition hover:border-violet-300 hover:bg-violet-50/50"
+                                            >
+                                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100">
+                                                    <CpuChipIcon className="h-5 w-5 text-emerald-800" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block text-sm font-semibold text-gray-900">AI credits add-on</span>
+                                                    <span className="mt-0.5 block text-xs text-gray-500">
+                                                        Recurring monthly AI credit packs on the subscription (Stripe). Replaces any existing credit add-on for this company.
+                                                    </span>
+                                                </span>
+                                                <span className="shrink-0 text-sm font-medium text-violet-700">Configure</span>
+                                            </button>
                                         </li>
                                     </ul>
                                 </>
-                            ) : (
+                            ) : addonsModal.step === 'creator' ? (
                                 <>
                                     <button
                                         type="button"
@@ -2224,6 +2324,178 @@ export default function AdminCompanyView({
                                             </button>
                                         </div>
                                     </form>
+                                </>
+                            ) : addonsModal.step === 'storage' ? (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAddonsModal({ open: true, step: 'pick' })}
+                                        className="mb-4 inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-900"
+                                    >
+                                        <ArrowLeftIcon className="mr-1.5 h-4 w-4" />
+                                        Back to modules
+                                    </button>
+                                    <h3 id="addons-modal-title" className="text-lg font-semibold text-gray-900 pr-8">
+                                        Storage add-on
+                                    </h3>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Adds or replaces the extra storage subscription item in Stripe for this company (same as self-serve billing). Choosing a package removes any previous storage add-on first.
+                                    </p>
+                                    {!company.can_use_stripe_customer_addons ? (
+                                        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                            Stripe must be linked with an <strong>active</strong> subscription before you can attach storage add-ons. Sync subscription from Plan Management if needed.
+                                        </p>
+                                    ) : null}
+                                    <p className="mt-3 text-sm text-gray-700">
+                                        <span className="font-medium text-gray-900">Current extra storage: </span>
+                                        {Number(company.billing_addons?.storage_addon_mb ?? 0).toLocaleString()} MB
+                                        {company.billing_addons?.storage_addon_stripe_subscription_item_id ? (
+                                            <span className="ml-2 font-mono text-[11px] text-gray-500">
+                                                {company.billing_addons.storage_addon_stripe_subscription_item_id}
+                                            </span>
+                                        ) : null}
+                                    </p>
+                                    {storageAddonCatalog.length === 0 ? (
+                                        <p className="mt-4 text-sm text-gray-600">
+                                            No storage add-on packages are available for this company’s plan, or Stripe prices are not configured.
+                                        </p>
+                                    ) : (
+                                        <form onSubmit={submitAdminStorageAddon} className="mt-4 space-y-4">
+                                            <div>
+                                                <label htmlFor="admin-storage-package" className="block text-sm font-medium text-gray-700">
+                                                    Package
+                                                </label>
+                                                <select
+                                                    id="admin-storage-package"
+                                                    name="package_id"
+                                                    required
+                                                    defaultValue=""
+                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                >
+                                                    <option value="" disabled>
+                                                        Select a package…
+                                                    </option>
+                                                    {storageAddonCatalog.map((pkg) => (
+                                                        <option key={pkg.id} value={pkg.id}>
+                                                            {formatAdminStoragePackageLabel(pkg)}
+                                                            {pkg.monthly_price != null ? ` — $${pkg.monthly_price}/mo` : ''}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {pageErrors?.storage_addon ? (
+                                                    <p className="mt-1 text-sm text-red-600">{pageErrors.storage_addon}</p>
+                                                ) : null}
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 pt-1">
+                                                <button
+                                                    type="submit"
+                                                    disabled={stripeAddonBusy || !company.can_use_stripe_customer_addons}
+                                                    className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                                >
+                                                    {stripeAddonBusy ? 'Applying…' : 'Apply storage add-on'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={
+                                                        stripeAddonBusy ||
+                                                        (!company.billing_addons?.storage_addon_stripe_subscription_item_id &&
+                                                            (company.billing_addons?.storage_addon_mb ?? 0) <= 0)
+                                                    }
+                                                    onClick={removeAdminStorageAddon}
+                                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                                >
+                                                    Remove add-on
+                                                </button>
+                                            </div>
+                                        </form>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAddonsModal({ open: true, step: 'pick' })}
+                                        className="mb-4 inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-900"
+                                    >
+                                        <ArrowLeftIcon className="mr-1.5 h-4 w-4" />
+                                        Back to modules
+                                    </button>
+                                    <h3 id="addons-modal-title" className="text-lg font-semibold text-gray-900 pr-8">
+                                        AI credits add-on
+                                    </h3>
+                                    <p className="mt-2 text-xs text-gray-500">
+                                        Adds or replaces the recurring AI credits pack on this company’s Stripe subscription. Only one credit add-on at a time.
+                                    </p>
+                                    {!company.can_use_stripe_customer_addons ? (
+                                        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                            Stripe must be linked with an <strong>active</strong> subscription before you can attach AI credit add-ons.
+                                        </p>
+                                    ) : null}
+                                    <p className="mt-3 text-sm text-gray-700">
+                                        <span className="font-medium text-gray-900">Current add-on credits (period): </span>
+                                        {Number(company.billing_addons?.ai_credits_addon ?? 0).toLocaleString()}
+                                        {company.billing_addons?.ai_credits_addon_stripe_subscription_item_id ? (
+                                            <span className="ml-2 font-mono text-[11px] text-gray-500">
+                                                {company.billing_addons.ai_credits_addon_stripe_subscription_item_id}
+                                            </span>
+                                        ) : null}
+                                    </p>
+                                    {aiCreditsAddonCatalog.length === 0 ? (
+                                        <p className="mt-4 text-sm text-gray-600">
+                                            No AI credit add-on packages are available for this company’s plan, or Stripe prices are not configured.
+                                        </p>
+                                    ) : (
+                                        <form onSubmit={submitAdminAiCreditsAddon} className="mt-4 space-y-4">
+                                            <div>
+                                                <label htmlFor="admin-ai-credits-package" className="block text-sm font-medium text-gray-700">
+                                                    Package
+                                                </label>
+                                                <select
+                                                    id="admin-ai-credits-package"
+                                                    name="package_id"
+                                                    required
+                                                    defaultValue=""
+                                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                                >
+                                                    <option value="" disabled>
+                                                        Select a package…
+                                                    </option>
+                                                    {aiCreditsAddonCatalog.map((pkg) => (
+                                                        <option key={pkg.id} value={pkg.id}>
+                                                            {pkg.credits != null
+                                                                ? `${Number(pkg.credits).toLocaleString()} credits/mo`
+                                                                : pkg.id}
+                                                            {pkg.monthly_price != null ? ` — $${pkg.monthly_price}/mo` : ''}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {pageErrors?.ai_credits_addon ? (
+                                                    <p className="mt-1 text-sm text-red-600">{pageErrors.ai_credits_addon}</p>
+                                                ) : null}
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 pt-1">
+                                                <button
+                                                    type="submit"
+                                                    disabled={stripeAddonBusy || !company.can_use_stripe_customer_addons}
+                                                    className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                                >
+                                                    {stripeAddonBusy ? 'Applying…' : 'Apply AI credits add-on'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={
+                                                        stripeAddonBusy ||
+                                                        (!company.billing_addons?.ai_credits_addon_stripe_subscription_item_id &&
+                                                            (company.billing_addons?.ai_credits_addon ?? 0) <= 0)
+                                                    }
+                                                    onClick={removeAdminAiCreditsAddon}
+                                                    className="inline-flex justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
+                                                >
+                                                    Remove add-on
+                                                </button>
+                                            </div>
+                                        </form>
+                                    )}
                                 </>
                             )}
                         </div>

@@ -93,54 +93,104 @@ export function getHelpCategoryIcon(category) {
 }
 
 /**
- * Compact help topic row: neutral icon, title, category/page line, optional short line.
- * @param {{ item: { key?: string, title?: string, category?: string, page_label?: string, short_answer?: string }, onPick?: () => void, showDescription?: boolean, asStatic?: boolean }} props
+ * Card-style help topic (Bulk Actions design language): icon well, title, optional description, category pill.
+ * Icons stay slate by default; purple on hover / focus-within. Use `highlighted` for contextual suggestions.
+ *
+ * @param {{ item: { key?: string, title?: string, category?: string, page_label?: string, short_answer?: string }, onPick?: () => void, showDescription?: boolean, asStatic?: boolean, highlighted?: boolean, compact?: boolean }} props
  */
-export function HelpTopicListRow({ item, onPick, showDescription = true, asStatic = false }) {
+export function HelpTopicCard({
+    item,
+    onPick,
+    showDescription = true,
+    asStatic = false,
+    highlighted = false,
+    compact = false,
+}) {
     const Icon = getHelpCategoryIcon(item?.category)
     const cat = String(item?.category || '').trim()
     const page = String(item?.page_label || '').trim()
-    const metaLine = (() => {
+    const categoryLabel = (() => {
         if (!cat && !page) {
             return ''
         }
-        if (cat && page && cat !== page) {
+        if (cat && page && cat.toLowerCase() !== page.toLowerCase()) {
             return `${cat} · ${page}`
         }
         return cat || page
     })()
     const short = showDescription && item?.short_answer ? String(item.short_answer).trim() : ''
 
-    const className =
-        'flex w-full min-h-[44px] gap-2.5 rounded-md px-2 py-2 text-left' +
-        (asStatic ? ' text-gray-800' : ' hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset')
+    const pad = compact ? 'p-2.5' : 'p-3'
+    const iconWell = compact ? 'h-8 w-8' : 'h-9 w-9'
+    const iconCls = compact ? 'h-4 w-4' : 'h-5 w-5'
+    const titleCls = compact ? 'text-xs font-semibold text-gray-900' : 'text-sm font-semibold text-gray-900'
+    const descCls = compact ? 'text-[11px] leading-snug text-gray-500' : 'text-[11px] leading-snug text-gray-500'
+
+    const surface = (() => {
+        if (asStatic) {
+            return highlighted
+                ? 'border-violet-200/90 bg-violet-50/50 ring-1 ring-violet-100/80'
+                : 'border-gray-100 bg-white'
+        }
+        return highlighted
+            ? 'border-violet-200 bg-violet-50/60 shadow-sm ring-1 ring-violet-100/90 hover:border-violet-300 hover:bg-violet-50/90'
+            : 'border-gray-100 bg-white hover:border-gray-200 hover:bg-gray-50/90'
+    })()
+
+    const motion = asStatic
+        ? ''
+        : 'transition-all duration-150 ease-out hover:-translate-y-px hover:shadow-md motion-reduce:transform-none motion-reduce:hover:shadow-sm'
+
+    const focusRing =
+        !asStatic &&
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 active:scale-[0.99] active:duration-75 motion-reduce:active:scale-100'
+
+    const cardClass = `group w-full rounded-xl border text-left shadow-sm ${pad} ${surface} ${motion} ${!asStatic ? focusRing : ''}`
+
+    const iconWellClass = asStatic
+        ? `flex ${iconWell} shrink-0 items-center justify-center rounded-lg bg-gray-100`
+        : `flex ${iconWell} shrink-0 items-center justify-center rounded-lg bg-gray-100 transition-colors duration-150 group-hover:bg-violet-50`
+
+    const iconClass = asStatic
+        ? `${iconCls} text-slate-500`
+        : `${iconCls} text-slate-500 transition-colors duration-150 group-hover:text-violet-600`
 
     const body = (
-        <>
-            <span className="mt-0.5 shrink-0" aria-hidden>
-                <Icon className="h-5 w-5 text-slate-500" />
+        <div className="flex gap-3">
+            <span className={iconWellClass} aria-hidden>
+                <Icon className={iconClass} />
             </span>
-            <span className="min-w-0 flex-1">
-                <span className="block font-medium text-gray-900">{item?.title || ''}</span>
-                {metaLine ? <span className="mt-0.5 block text-xs text-slate-600">{metaLine}</span> : null}
-                {short ? (
-                    <span className="mt-1 block line-clamp-2 text-xs text-slate-500">{short}</span>
+            <div className="min-w-0 flex-1 pt-0.5">
+                <span className={`block line-clamp-2 ${titleCls}`}>{item?.title || ''}</span>
+                {short ? <p className={`mt-1 line-clamp-2 ${descCls}`}>{short}</p> : null}
+                {categoryLabel ? (
+                    <span className="mt-2 inline-flex max-w-full rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600 truncate">
+                        {categoryLabel}
+                    </span>
                 ) : null}
-            </span>
-        </>
+            </div>
+        </div>
     )
 
     if (asStatic) {
         return (
-            <div className={className} role="note">
+            <div className={cardClass} role="note">
                 {body}
             </div>
         )
     }
 
     return (
-        <button type="button" onClick={onPick} className={className}>
+        <button type="button" onClick={onPick} className={cardClass}>
             {body}
         </button>
     )
+}
+
+/**
+ * Dense list row — implemented as a compact card for backwards compatibility.
+ * @param {{ item: object, onPick?: () => void, showDescription?: boolean, asStatic?: boolean, highlighted?: boolean }} props
+ */
+export function HelpTopicListRow(props) {
+    return <HelpTopicCard compact {...props} />
 }

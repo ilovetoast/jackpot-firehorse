@@ -24,6 +24,7 @@ use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use App\Services\BillingService;
 use App\Services\DocumentationService;
 use App\Services\GrantCreatorModuleToTenant;
+use App\Services\PlanService;
 use App\Services\TenantAgencyService;
 use App\Support\Roles\RoleRegistry;
 use Carbon\Carbon;
@@ -1700,6 +1701,108 @@ class SiteAdminController extends Controller
         $statusLabel = $validated['status'] === 'trial' ? 'trial' : 'active';
 
         return back()->with('success', "Creator (Prostaff) module set to {$statusLabel}; access ends {$expiresAt->toDayDateTimeString()} (UTC).");
+    }
+
+    /**
+     * Apply a Stripe subscription storage add-on for this company (same pipeline as tenant billing).
+     */
+    public function addTenantStorageAddon(Request $request, Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can manage billing add-ons.');
+
+        $validated = $request->validate([
+            'package_id' => ['required', 'string', 'max:80'],
+        ]);
+
+        $allowed = $this->allowedAddonPackageIdsForTenant($tenant, 'storage');
+        if (! in_array($validated['package_id'], $allowed, true)) {
+            return back()->withErrors([
+                'storage_addon' => 'That storage add-on is not available for this company’s current plan.',
+            ]);
+        }
+
+        try {
+            app(BillingService::class)->addStorageAddon($tenant, $validated['package_id']);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['storage_addon' => $e->getMessage()]);
+        } catch (\RuntimeException $e) {
+            return back()->withErrors(['storage_addon' => $e->getMessage()]);
+        }
+
+        return back()->with('success', 'Storage add-on applied on this company’s Stripe subscription.');
+    }
+
+    /**
+     * Remove the Stripe storage add-on for this company.
+     */
+    public function removeTenantStorageAddon(Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can manage billing add-ons.');
+
+        try {
+            app(BillingService::class)->removeStorageAddon($tenant);
+        } catch (\RuntimeException $e) {
+            return back()->withErrors(['storage_addon' => $e->getMessage()]);
+        }
+
+        return back()->with('success', 'Storage add-on removed from this company’s subscription.');
+    }
+
+    /**
+     * Apply a Stripe AI credits add-on for this company.
+     */
+    public function addTenantAiCreditsAddon(Request $request, Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can manage billing add-ons.');
+
+        $validated = $request->validate([
+            'package_id' => ['required', 'string', 'max:80'],
+        ]);
+
+        $allowed = $this->allowedAddonPackageIdsForTenant($tenant, 'ai_credits');
+        if (! in_array($validated['package_id'], $allowed, true)) {
+            return back()->withErrors([
+                'ai_credits_addon' => 'That AI credits add-on is not available for this company’s current plan.',
+            ]);
+        }
+
+        try {
+            app(BillingService::class)->addAiCreditsAddon($tenant, $validated['package_id']);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['ai_credits_addon' => $e->getMessage()]);
+        } catch (\RuntimeException $e) {
+            return back()->withErrors(['ai_credits_addon' => $e->getMessage()]);
+        }
+
+        return back()->with('success', 'AI credits add-on applied on this company’s Stripe subscription.');
+    }
+
+    /**
+     * Remove the Stripe AI credits add-on for this company.
+     */
+    public function removeTenantAiCreditsAddon(Tenant $tenant)
+    {
+        $this->authorizeSiteAdmin('Only site owners and site admins can manage billing add-ons.');
+
+        try {
+            app(BillingService::class)->removeAiCreditsAddon($tenant);
+        } catch (\RuntimeException $e) {
+            return back()->withErrors(['ai_credits_addon' => $e->getMessage()]);
+        }
+
+        return back()->with('success', 'AI credits add-on removed from this company’s subscription.');
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function allowedAddonPackageIdsForTenant(Tenant $tenant, string $allowListKey): array
+    {
+        $planKey = app(PlanService::class)->getCurrentPlan($tenant);
+        $plan = config("plans.{$planKey}", config('plans.free'));
+        $allowed = $plan['addons_available'][$allowListKey] ?? [];
+
+        return is_array($allowed) ? $allowed : [];
     }
 
     /**
