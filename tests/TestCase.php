@@ -4,8 +4,10 @@ namespace Tests;
 
 use App\Models\Tenant;
 use App\Models\TenantModule;
+use App\Support\Database\TestDatabaseSchema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
@@ -54,40 +56,61 @@ abstract class TestCase extends BaseTestCase
             );
         }
 
-        $driver = $config['driver'] ?? 'mysql';
-        $database = $config['database'] ?? '';
+        $driver = (string) ($config['driver'] ?? 'mysql');
+        $database = (string) ($config['database'] ?? '');
 
-        if ($driver === 'sqlite') {
-            if ($database === ':memory:' || $database === '') {
-                return;
-            }
-            $path = (string) $database;
-            if (str_contains($path, 'testing') || str_contains($path, 'test.sqlite')) {
-                return;
-            }
-
+        $envDb = $_SERVER['DB_DATABASE'] ?? $_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE');
+        if (is_string($envDb) && $envDb !== '' && $envDb !== $database) {
             throw new RuntimeException(
-                'Refusing to run tests: SQLite path does not look like a dedicated test database. '.
-                'Use :memory: or a path containing "testing". See docs/TESTING_DATABASE.md.'
+                "Refusing to run tests: process DB_DATABASE [{$envDb}] disagrees with Laravel config database [{$database}]. ".
+                'Fix .env / config cache (run `php artisan config:clear`) and ensure phpunit.xml + tests/bootstrap.php run. See docs/TESTING_DATABASE.md.'
             );
         }
 
-        $database = (string) $database;
-        $allowedExact = ['testing'];
-        if (in_array($database, $allowedExact, true)) {
-            return;
+        if (! TestDatabaseSchema::isPermittedForDestructiveRefresh($driver, $database)) {
+            throw new RuntimeException(
+                "Refusing to run tests: database [{$database}] (driver {$driver}) is not an isolated testing database. ".
+                'Use DB_DATABASE=testing, a *_testing / *_test schema name, SQLite :memory:, or a path containing "testing". '.
+                'Never point tests at your primary dev/prod schema. See docs/TESTING_DATABASE.md.'
+            );
         }
 
-        foreach (['_testing', '_test'] as $suffix) {
-            if ($database !== '' && str_ends_with($database, $suffix)) {
-                return;
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            try {
+                $row = DB::connection($connectionName)->selectOne('SELECT DATABASE() as db');
+                $live = $row && isset($row->db) ? (string) $row->db : '';
+            } catch (\Throwable $e) {
+                throw new RuntimeException(
+                    'Refusing to run tests: could not verify MySQL database context: '.$e->getMessage(),
+                    0,
+                    $e
+                );
+            }
+            if ($live !== $database) {
+                throw new RuntimeException(
+                    "Refusing to run tests: MySQL reports active schema [{$live}] but config expects [{$database}]. ".
+                    'You may be connected to the wrong database (e.g. user default schema). See docs/TESTING_DATABASE.md.'
+                );
             }
         }
 
-        throw new RuntimeException(
-            "Refusing to run tests: database [{$database}] is not an isolated testing database. ".
-            'Use DB_DATABASE=testing (see phpunit.xml and tests/bootstrap.php). See docs/TESTING_DATABASE.md.'
-        );
+        if ($driver === 'pgsql') {
+            try {
+                $row = DB::connection($connectionName)->selectOne('SELECT current_database() as db');
+                $live = $row && isset($row->db) ? (string) $row->db : '';
+            } catch (\Throwable $e) {
+                throw new RuntimeException(
+                    'Refusing to run tests: could not verify PostgreSQL database context: '.$e->getMessage(),
+                    0,
+                    $e
+                );
+            }
+            if ($live !== $database) {
+                throw new RuntimeException(
+                    'Refusing to run tests: PostgreSQL reports active database ['.$live.'] but config expects ['.$database.']. See docs/TESTING_DATABASE.md.'
+                );
+            }
+        }
     }
 
     /**

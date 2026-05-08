@@ -5,7 +5,10 @@
 import { usePage } from '@inertiajs/react'
 import { usePermission } from '../hooks/usePermission'
 import { DELIVERABLES_PAGE_LABEL_SINGULAR } from '../utils/uiLabels'
-import { getWorkspacePrimaryActionButtonColors, getContrastTextColor } from '../utils/colorUtils'
+import {
+    getWorkspacePrimaryActionButtonColors,
+    getSolidFillButtonForegroundHex,
+} from '../utils/colorUtils'
 
 /**
  * AddAssetButton - Button to trigger upload dialog (gated by permissions)
@@ -39,8 +42,10 @@ export default function AddAssetButton({
         : `Add ${DELIVERABLES_PAGE_LABEL_SINGULAR}`
 
     const { resting: btnColor, hover: hoverBg } = getWorkspacePrimaryActionButtonColors(auth.activeBrand)
-    const labelColor = getContrastTextColor(btnColor)
-    const hoverLabelColor = getContrastTextColor(hoverBg)
+    // Prefer light copy on brand-orange fills when WCAG AA for large text (3:1) passes — strict
+    // getContrastTextColor often picks black on saturated oranges by a small ratio margin.
+    const labelColor = getSolidFillButtonForegroundHex(btnColor)
+    const hoverLabelColor = getSolidFillButtonForegroundHex(hoverBg)
 
     return (
         <button

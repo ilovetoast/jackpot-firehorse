@@ -1158,7 +1158,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                                 
                                 {availableFields.length === 0 && (
                                     <p className="text-xs text-gray-500 italic">
-                                        No metadata fields available. Select a category to configure metadata.
+                                        No metadata fields available. Choose a folder to configure metadata.
                                     </p>
                                 )}
                             </div>
@@ -1167,7 +1167,7 @@ function UploadItemRow({ item, uploadManager, onRemove, onRetry, disabled = fals
                         {/* No metadata message */}
                         {Object.keys(effectiveMetadata).length === 0 && availableFields.length === 0 && (
                             <div className="text-sm text-gray-500 italic">
-                                No metadata assigned. Select a category to configure metadata.
+                                No metadata assigned. Choose a folder to configure metadata.
                             </div>
                         )}
                     </div>

@@ -1361,7 +1361,7 @@ export default function AssetGridSecondaryFilters({
                                 visiblePrimaryFilters.length === 0 &&
                                 !layoutBuckets.tagsField ? (
                                     <div className="rounded-lg border border-dashed border-gray-200/80 py-8 text-center text-sm text-gray-500">
-                                        No filters available for this category
+                                        No filters available for this folder
                                     </div>
                                 ) : null}
                             </>
@@ -1401,7 +1401,7 @@ export default function AssetGridSecondaryFilters({
                                 className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors"
                             >
                                 <PlusIcon className="h-4 w-4" />
-                                <span>Add field to this category</span>
+                                <span>Add field to this folder</span>
                             </Link>
                         </div>
                     )}

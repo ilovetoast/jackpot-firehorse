@@ -390,6 +390,17 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
     Route::get('/admin/api/overview', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'metrics'])->name('admin.api.overview');
     Route::get('/admin/organization', [\App\Http\Controllers\SiteAdminController::class, 'organization'])->name('admin.organization.index');
     Route::get('/admin/platform', [\App\Http\Controllers\Admin\AdminPlatformHubController::class, 'index'])->name('admin.platform.index');
+    Route::get('/admin/demo-workspaces', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'index'])->name('admin.demo-workspaces.index');
+    Route::get('/admin/demo-workspaces/instances/{tenant}', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'show'])->name('admin.demo-workspaces.show');
+    Route::post('/admin/demo-workspaces/instances/{tenant}/expire', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'expireDemo'])->name('admin.demo-workspaces.expire');
+    Route::post('/admin/demo-workspaces/instances/{tenant}/extend', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'extendDemo'])->name('admin.demo-workspaces.extend');
+    Route::post('/admin/demo-workspaces/instances/{tenant}/archive-failed', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'archiveFailedDemo'])->name('admin.demo-workspaces.archive-failed');
+    Route::post('/admin/demo-workspaces/instances/{tenant}/delete-now', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'destroyDemoNow'])->name('admin.demo-workspaces.delete-now');
+    Route::get('/admin/demo-workspaces/templates/{tenant}/audit', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'auditTemplate'])->name('admin.demo-workspaces.template-audit');
+    Route::get('/admin/demo-workspaces/templates/{tenant}/clone-plan', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'showClonePlan'])->name('admin.demo-workspaces.clone-plan');
+    Route::post('/admin/demo-workspaces/templates/{tenant}/clone-plan', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'previewClonePlan'])->name('admin.demo-workspaces.clone-plan.preview');
+    Route::post('/admin/demo-workspaces/templates/{sourceTemplate}/create-demo', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'enqueueDemoClone'])->name('admin.demo-workspaces.create-demo');
+    Route::post('/admin/demo-workspaces/quick-create', [\App\Http\Controllers\Admin\DemoWorkspacesController::class, 'quickCreateDemo'])->name('admin.demo-workspaces.quick-create');
     Route::get('/admin/support', [\App\Http\Controllers\Admin\AdminSupportHubController::class, 'index'])->name('admin.support.hub');
     Route::get('/admin/impersonation/enter', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'enter'])->name('admin.impersonation.enter');
     Route::get('/admin/impersonation/companies/{tenant}/open-tickets', [\App\Http\Controllers\Admin\ImpersonationAdminController::class, 'openTicketsForCompany'])->name('admin.impersonation.company-open-tickets');

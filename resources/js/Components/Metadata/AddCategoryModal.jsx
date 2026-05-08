@@ -93,19 +93,19 @@ export default function AddCategoryModal({
         if (!trimmed || trimmed.length <= 2 || !brandId) return
 
         if (isPrivate && !hasRestrictSelection) {
-            setError('Select at least one role or user for private categories.')
+            setError('Select at least one role or user for private folders.')
             return
         }
 
         const limits = categoryLimitsProp ?? fetchedCategoryLimits
         if (limits && limits.can_create === false) {
-            setError("You've reached your category limit for this plan.")
+            setError("You've reached your folder limit for this plan.")
             return
         }
         const vis = limits?.visible_by_asset_type?.[type]
         if (vis?.at_cap) {
             setError(
-                `You already have ${vis.max} visible categories for this library. Hide a category first, or contact support.`
+                `You already have ${vis.max} visible folders for this library. Hide a folder first, or contact support.`
             )
             return
         }
@@ -160,7 +160,7 @@ export default function AddCategoryModal({
                     onClose()
                 }
             } else {
-                setError(data.message || data.error || data.errors?.name?.[0] || 'Failed to create category.')
+                setError(data.message || data.error || data.errors?.name?.[0] || 'Failed to create folder.')
             }
         } catch (e) {
             setError('Network error. Please try again.')
@@ -189,7 +189,7 @@ export default function AddCategoryModal({
 
     const limitsLabel =
         limits && limits.max > 0
-            ? `${limits.current} of ${limits.max} custom categories used`
+            ? `${limits.current} of ${limits.max} custom folders used`
             : null
 
     // Success state: prompt to configure metadata fields
@@ -207,10 +207,10 @@ export default function AddCategoryModal({
                         <div className="px-6 py-8 text-center">
                             <CheckCircleIcon className="mx-auto h-12 w-12 text-green-500" aria-hidden />
                             <h3 id="add-category-success" className="mt-4 text-lg font-semibold text-gray-900">
-                                Category created
+                                Folder created
                             </h3>
                             <p className="mt-2 text-sm text-gray-500">
-                                Configure which metadata fields appear for &quot;{createdCategory.name}&quot;.
+                                Configure which fields appear for &quot;{createdCategory.name}&quot;.
                             </p>
                             <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
                                 <a
@@ -218,7 +218,7 @@ export default function AddCategoryModal({
                                     className="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                 >
                                     <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                                    Configure metadata fields
+                                    Configure folder fields
                                 </a>
                                 <button
                                     type="button"
@@ -251,7 +251,7 @@ export default function AddCategoryModal({
                     <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-5">
                         <div className="flex items-center gap-3 min-w-0">
                             <h3 id="add-category-title" className="text-base font-semibold text-gray-900 truncate">
-                                New Category
+                                New Folder
                             </h3>
                             {limitsLabel && (
                                 <span className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${
@@ -275,7 +275,7 @@ export default function AddCategoryModal({
                     <div className="px-4 py-4 sm:px-5 sm:py-5 max-h-[calc(100vh-12rem)] overflow-y-auto">
                         {atLimit && (
                             <p className="mb-4 text-sm text-amber-700 rounded-md bg-amber-50 px-3 py-2 border border-amber-100">
-                                You&apos;ve reached your category limit for this plan.
+                                You&apos;ve reached your folder limit for this plan.
                             </p>
                         )}
 
@@ -288,7 +288,7 @@ export default function AddCategoryModal({
                         <div className="space-y-4">
                             <div>
                                 <label htmlFor="add-category-name" className="block text-sm font-medium text-gray-700 mb-1">
-                                    Category Name
+                                    Folder name
                                 </label>
                                 <input
                                     ref={nameInputRef}
@@ -296,11 +296,11 @@ export default function AddCategoryModal({
                                     type="text"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
-                                    placeholder="Enter category name"
+                                    placeholder="Enter folder name"
                                     className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 />
                                 <p className="mt-1.5 text-xs text-gray-500">
-                                    Categories help organize your assets and define metadata behavior.
+                                    Folders organize your assets and control which fields appear for them.
                                 </p>
                             </div>
 
@@ -310,7 +310,7 @@ export default function AddCategoryModal({
                                 </span>
                                 <CategoryIconSelector value={icon} onChange={setIcon} disabled={loading || atLimit} />
                                 <p className="mt-1.5 text-xs text-gray-500">
-                                    Shown next to this folder in sidebars and category lists.
+                                    Shown next to this folder in sidebars and library navigation.
                                 </p>
                             </div>
 
@@ -349,7 +349,7 @@ export default function AddCategoryModal({
                                         }}
                                         className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     />
-                                    <span className="text-sm text-gray-700">Restrict access to this category</span>
+                                    <span className="text-sm text-gray-700">Restrict access to this folder</span>
                                 </label>
                                 {isPrivate && (
                                     <div className="mt-3 rounded-md border border-gray-100 bg-gray-50/50 p-4 space-y-3">
@@ -406,7 +406,7 @@ export default function AddCategoryModal({
                                         </div>
                                         {isPrivate && !hasRestrictSelection && (
                                             <p className="text-xs text-amber-600">
-                                                Select at least one role or user for private categories.
+                                                Select at least one role or user for private folders.
                                             </p>
                                         )}
                                     </div>
@@ -430,7 +430,7 @@ export default function AddCategoryModal({
                             disabled={!canSave}
                             className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {loading ? 'Creating…' : 'Create'}
+                            {loading ? 'Creating…' : 'Create folder'}
                         </button>
                     </div>
                 </div>

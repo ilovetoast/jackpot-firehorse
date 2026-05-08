@@ -5,13 +5,12 @@ namespace App\Services;
 use App\Enums\EventType;
 use App\Exceptions\BillingUserFacingException;
 use App\Models\Tenant;
-use App\Services\ActivityRecorder;
 use App\Services\Billing\StripeCustomerVerifier;
-use App\Services\PlanService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Cashier\Exceptions\IncompletePayment;
+use Laravel\Cashier\Subscription as CashierSubscription;
 use Stripe\Exception\ApiErrorException;
 use Stripe\Price;
 use Stripe\Stripe;
@@ -33,14 +32,14 @@ class BillingService
 
     /**
      * Create a Stripe checkout session for subscription.
-     * 
+     *
      * IMPORTANT: If tenant already has an active subscription, this will create a NEW subscription.
      * For upgrades/downgrades, use updateSubscription() instead, which handles proration automatically.
-     * 
-     * @param Tenant $tenant
-     * @param string $priceId Stripe price ID
-     * @param bool $allowMultipleSubscriptions If false, will throw exception if subscription exists
+     *
+     * @param  string  $priceId  Stripe price ID
+     * @param  bool  $allowMultipleSubscriptions  If false, will throw exception if subscription exists
      * @return string Checkout session URL
+     *
      * @throws \RuntimeException If subscription exists and allowMultipleSubscriptions is false
      */
     public function createCheckoutSession(
@@ -278,12 +277,109 @@ class BillingService
     }
 
     /**
+     * Cashier calls $subscription->owner for swap(), tax payload, and Stripe API access.
+     * The owner BelongsTo must match the billable model ({@see Tenant}) and tenant_id on subscriptions.
+     */
+    protected function assignCashierSubscriptionOwner(CashierSubscription $subscription, Tenant $tenant): void
+    {
+        if (method_exists($subscription, 'setOwner')) {
+            $subscription->setOwner($tenant);
+
+            return;
+        }
+        if (method_exists($subscription, 'setRelation')) {
+            $subscription->setRelation('owner', $tenant);
+        }
+    }
+
+    /**
+     * Stripe price IDs that represent a base plan line (not storage / AI / creator add-ons).
+     *
+     * @return list<string>
+     */
+    protected function basePlanStripePriceIds(): array
+    {
+        $ids = [];
+        foreach (config('plans', []) as $plan) {
+            $pid = $plan['stripe_price_id'] ?? null;
+            if (is_string($pid) && $pid !== '' && $pid !== 'price_free') {
+                $ids[] = $pid;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * All recurring line price IDs on this subscription (parent row + subscription_items).
+     *
+     * @return list<string>
+     */
+    protected function subscriptionLinePriceIdsForSwap(CashierSubscription $subscription): array
+    {
+        $ids = [];
+        if ($subscription->stripe_price) {
+            $ids[] = (string) $subscription->stripe_price;
+        }
+        foreach ($subscription->items as $item) {
+            if ($item->stripe_price) {
+                $ids[] = (string) $item->stripe_price;
+            }
+        }
+
+        return array_values(array_unique(array_filter($ids)));
+    }
+
+    /**
+     * Cashier {@see CashierSubscription::swap()} rebuilds the whole Stripe item set. Passing only the
+     * new plan price would mark add-on lines deleted. Keep non–base-plan prices and replace base plan
+     * lines with the new price.
+     *
+     * @param  list<string>  $currentPriceIds
+     * @return list<string>
+     */
+    protected function mergePlanChangePriceIds(array $currentPriceIds, string $newBasePlanPriceId): array
+    {
+        $base = $this->basePlanStripePriceIds();
+        $keptAddons = array_values(array_filter(
+            $currentPriceIds,
+            static fn (string $p): bool => ! in_array($p, $base, true)
+        ));
+
+        return array_values(array_unique(array_merge([$newBasePlanPriceId], $keptAddons)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function priceIdsForPlanChange(CashierSubscription $subscription, string $newBasePlanPriceId): array
+    {
+        $subscription->loadMissing('items');
+
+        return $this->mergePlanChangePriceIds(
+            $this->subscriptionLinePriceIdsForSwap($subscription),
+            $newBasePlanPriceId
+        );
+    }
+
+    /**
+     * Monthly amount in dollars for any configured or Stripe price ID (for upgrade vs downgrade).
+     */
+    protected function getMonthlyAmountForPriceSelection(string $priceId, ?string $planKey): float
+    {
+        if ($planKey && $planKey !== 'unknown' && config("plans.{$planKey}")) {
+            return $this->getPlanPrice($planKey);
+        }
+
+        return $this->getPlanPriceByStripePriceId($priceId);
+    }
+
+    /**
      * Update tenant subscription to a new plan.
-     * 
-     * @param Tenant $tenant
-     * @param string $priceId New Stripe price ID
-     * @param string|null $oldPlanId Old plan ID (for activity logging)
-     * @param string|null $newPlanId New plan ID (for activity logging)
+     *
+     * @param  string  $priceId  New Stripe price ID
+     * @param  string|null  $oldPlanId  Old plan ID (for activity logging)
+     * @param  string|null  $newPlanId  New plan ID (for activity logging)
      * @return array ['action' => 'upgrade'|'downgrade'|'created', 'old_plan' => string, 'new_plan' => string]
      */
     public function updateSubscription(Tenant $tenant, string $priceId, ?string $oldPlanId = null, ?string $newPlanId = null): array
@@ -297,33 +393,27 @@ class BillingService
 
             $oldSubscription = $tenant->subscription('default');
             $wasSubscribed = $oldSubscription !== null;
-            
+
+            if ($wasSubscribed) {
+                $this->assignCashierSubscriptionOwner($oldSubscription, $tenant);
+            }
+
             // Check if subscription has incomplete payment
             // Only check if subscription has a Stripe customer (stripe_id) - forced plans may not have one
             if ($wasSubscribed && $oldSubscription->stripe_id && $tenant->stripe_id && $oldSubscription->hasIncompletePayment()) {
-                // Set the owner on the subscription so Cashier methods work properly
-                // When we query subscriptions directly, the owner isn't automatically set
-                if (method_exists($oldSubscription, 'setOwner')) {
-                    $oldSubscription->setOwner($tenant);
-                } elseif (property_exists($oldSubscription, 'owner')) {
-                    $oldSubscription->owner = $tenant;
-                } elseif (method_exists($oldSubscription, 'setRelation')) {
-                    $oldSubscription->setRelation('owner', $tenant);
-                }
-                
                 // Get the latest payment for redirect URL
                 $latestPayment = $oldSubscription->latestPayment();
                 throw new \RuntimeException(
-                    'Your subscription has an incomplete payment. Please complete your payment before changing plans. ' .
-                    ($latestPayment ? 'Payment ID: ' . $latestPayment->id : '')
+                    'Your subscription has an incomplete payment. Please complete your payment before changing plans. '.
+                    ($latestPayment ? 'Payment ID: '.$latestPayment->id : '')
                 );
             }
-            
+
             // Get old plan info
-            $oldPlan = $oldPlanId ?? (new PlanService())->getCurrentPlan($tenant);
-            
+            $oldPlan = $oldPlanId ?? (new PlanService)->getCurrentPlan($tenant);
+
             // Get price info to determine new plan
-            if (!$newPlanId) {
+            if (! $newPlanId) {
                 $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret) {
                     Stripe::setApiKey($stripeSecret);
@@ -343,7 +433,7 @@ class BillingService
                     }
                 }
             }
-            
+
             if (! $wasSubscribed) {
                 // Create new subscription
                 $tenant->newSubscription('default', $priceId)->create();
@@ -355,15 +445,16 @@ class BillingService
                         'Your subscription has an incomplete payment. Please complete your payment before changing plans.'
                     );
                 }
-                
+
                 // Also check subscription status from Stripe before updating
                 $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret && $oldSubscription->stripe_id) {
                     Stripe::setApiKey($stripeSecret);
                     try {
                         $stripeSubscription = \Stripe\Subscription::retrieve($oldSubscription->stripe_id);
-                        // If status is incomplete, past_due, or unpaid, we can't update
-                        if (in_array($stripeSubscription->status, ['incomplete', 'incomplete_expired', 'past_due', 'unpaid'])) {
+                        // Block only states where Stripe will not complete a normal swap. past_due may still
+                        // be updated (e.g. upgrade + invoice) once the default payment method works.
+                        if (in_array($stripeSubscription->status, ['incomplete', 'incomplete_expired', 'unpaid'], true)) {
                             throw new \RuntimeException(
                                 'Your subscription payment is incomplete. Please update your payment method and complete the payment before changing plans.'
                             );
@@ -373,21 +464,32 @@ class BillingService
                         // The swap() call below will throw an error if payment is incomplete
                     }
                 }
-                
-                // Update existing subscription
-                // Laravel Cashier's swap() method automatically handles proration:
-                // - Upgrades: Customer is charged immediately for the prorated difference
-                // - Downgrades: Customer receives a credit that applies to their next invoice
-                // Stripe calculates proration based on:
-                //   - Time remaining in current billing period
-                //   - Price difference between old and new plans
-                //   - Proration is always enabled by default (can be disabled with noProrate())
-                $tenant->subscription('default')->swap($priceId);
-                
-                // Determine if upgrade or downgrade by comparing plan prices
+
+                // Update existing subscription: one Stripe subscription update with proration (best practice).
+                // Do not cancel + re-subscribe — that loses continuity and complicates tax/add-ons.
+                $oldSubscription->loadMissing('items');
+                $swapPriceIds = $this->priceIdsForPlanChange($oldSubscription, $priceId);
+
                 $oldPrice = $this->getPlanPrice($oldPlan);
-                $newPrice = $this->getPlanPrice($newPlanId ?? 'unknown');
-                
+                $newPrice = $this->getMonthlyAmountForPriceSelection($priceId, $newPlanId);
+                $isUpgrade = $newPrice > $oldPrice;
+
+                Log::info('billing.subscription_update.swap', [
+                    'tenant_id' => $tenant->id,
+                    'old_plan' => $oldPlan,
+                    'new_plan' => $newPlanId ?? 'unknown',
+                    'swap_price_ids' => $swapPriceIds,
+                    'is_upgrade' => $isUpgrade,
+                ]);
+
+                // Upgrades: finalize prorations into an invoice and attempt payment (strong default for SCA).
+                // Downgrades / lateral: proration credits apply per Stripe defaults; avoid forcing a payment attempt.
+                if ($isUpgrade) {
+                    $oldSubscription->swapAndInvoice($swapPriceIds);
+                } else {
+                    $oldSubscription->swap($swapPriceIds);
+                }
+
                 if ($newPrice > $oldPrice) {
                     $action = 'upgrade';
                 } elseif ($newPrice < $oldPrice) {
@@ -396,7 +498,9 @@ class BillingService
                     $action = 'updated';
                 }
             }
-            
+
+            app(PlanService::class)->forgetCurrentPlanCache($tenant);
+
             // Log activity
             ActivityRecorder::record(
                 tenant: $tenant,
@@ -418,7 +522,7 @@ class BillingService
                     $resolvedNew
                 );
             }
-            
+
             return [
                 'action' => $action,
                 'old_plan' => $oldPlan,
@@ -427,7 +531,7 @@ class BillingService
         } catch (BillingUserFacingException $e) {
             throw $e;
         } catch (IncompletePayment $e) {
-            throw new \RuntimeException('Payment incomplete: ' . $e->getMessage());
+            throw new \RuntimeException('Payment incomplete: '.$e->getMessage());
         } catch (ApiErrorException $e) {
             $ctx = [
                 'app_env' => config('app.env'),
@@ -439,34 +543,54 @@ class BillingService
             throw BillingUserFacingException::fromStripeApi($e, 'BILLING_SUBSCRIPTION_UPDATE_FAILED', $ctx);
         }
     }
-    
+
     /**
      * Get plan price for comparison.
      */
     private function getPlanPrice(string $planId): float
     {
         $plan = config("plans.{$planId}");
-        if (!$plan) {
+        if (! $plan) {
             return 0;
         }
-        
+
         $priceId = $plan['stripe_price_id'] ?? null;
-        if (!$priceId || $priceId === 'price_free') {
+        if (! $priceId || $priceId === 'price_free') {
             return 0;
         }
-        
+
         try {
             $stripeSecret = config('services.stripe.secret');
             if ($stripeSecret) {
                 Stripe::setApiKey($stripeSecret);
                 $price = Price::retrieve($priceId);
+
                 return ($price->unit_amount ?? 0) / 100; // Convert cents to dollars
             }
         } catch (\Exception $e) {
             // If we can't get price, return 0
         }
-        
+
         return 0;
+    }
+
+    /**
+     * Unit amount (dollars) for a Stripe price ID when plan key is unknown.
+     */
+    private function getPlanPriceByStripePriceId(string $priceId): float
+    {
+        try {
+            $stripeSecret = config('services.stripe.secret');
+            if (! $stripeSecret) {
+                return 0;
+            }
+            Stripe::setApiKey($stripeSecret);
+            $price = Price::retrieve($priceId);
+
+            return ($price->unit_amount ?? 0) / 100;
+        } catch (\Exception $e) {
+            return 0;
+        }
     }
 
     /**
@@ -569,9 +693,9 @@ class BillingService
         try {
             if ($tenant->subscribed()) {
                 $subscription = $tenant->subscription('default');
-                $planService = new PlanService();
+                $planService = new PlanService;
                 $currentPlan = $planService->getCurrentPlan($tenant);
-                
+
                 $subscription->cancel();
 
                 $subscription->refresh();
@@ -582,7 +706,7 @@ class BillingService
                     $currentPlan,
                     $endsAt
                 );
-                
+
                 // Log activity
                 ActivityRecorder::record(
                     tenant: $tenant,
@@ -595,7 +719,7 @@ class BillingService
                 );
             }
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to cancel subscription: ' . $e->getMessage());
+            throw new \RuntimeException('Failed to cancel subscription: '.$e->getMessage());
         }
     }
 
@@ -607,11 +731,11 @@ class BillingService
         try {
             $subscription = $tenant->subscription('default');
             if ($subscription && $subscription->canceled()) {
-                $planService = new PlanService();
+                $planService = new PlanService;
                 $currentPlan = $planService->getCurrentPlan($tenant);
-                
+
                 $subscription->resume();
-                
+
                 // Log activity
                 ActivityRecorder::record(
                     tenant: $tenant,
@@ -625,7 +749,7 @@ class BillingService
                 );
             }
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to resume subscription: ' . $e->getMessage());
+            throw new \RuntimeException('Failed to resume subscription: '.$e->getMessage());
         }
     }
 
@@ -703,7 +827,7 @@ class BillingService
      */
     public function getCurrentPlan(Tenant $tenant): ?string
     {
-        $planService = new PlanService();
+        $planService = new PlanService;
 
         return $planService->getCurrentPlan($tenant);
     }
@@ -751,11 +875,10 @@ class BillingService
 
     /**
      * Refund an invoice (full or partial).
-     * 
-     * @param Tenant $tenant
-     * @param string $invoiceId Stripe invoice ID
-     * @param int|null $amount Amount in cents (null for full refund)
-     * @param string|null $reason Reason for refund
+     *
+     * @param  string  $invoiceId  Stripe invoice ID
+     * @param  int|null  $amount  Amount in cents (null for full refund)
+     * @param  string|null  $reason  Reason for refund
      * @return array Refund details
      */
     public function refundInvoice(Tenant $tenant, string $invoiceId, ?int $amount = null, ?string $reason = null): array
@@ -766,7 +889,7 @@ class BillingService
             }
 
             $invoice = $tenant->findInvoice($invoiceId);
-            
+
             if (! $invoice || ! $invoice->charge) {
                 throw new \RuntimeException('Invoice not found or has no charge.');
             }
@@ -805,7 +928,7 @@ class BillingService
                 'reason' => $refund->reason,
             ];
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to process refund: ' . $e->getMessage());
+            throw new \RuntimeException('Failed to process refund: '.$e->getMessage());
         }
     }
 
@@ -813,9 +936,9 @@ class BillingService
      * Add a storage add-on to the tenant's subscription.
      * Only one storage add-on at a time; adding a new one replaces the previous.
      *
-     * @param Tenant $tenant
-     * @param string $packageId Package ID from config (e.g. storage_50gb)
+     * @param  string  $packageId  Package ID from config (e.g. storage_50gb)
      * @return array Updated storage info from PlanService
+     *
      * @throws \RuntimeException
      */
     public function addStorageAddon(Tenant $tenant, string $packageId): array
@@ -893,17 +1016,17 @@ class BillingService
                 ]);
             }
 
-            return (new PlanService())->getStorageInfo($tenant);
+            return (new PlanService)->getStorageInfo($tenant);
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to add storage add-on: ' . $e->getMessage());
+            throw new \RuntimeException('Failed to add storage add-on: '.$e->getMessage());
         }
     }
 
     /**
      * Remove the storage add-on from the tenant's subscription.
      *
-     * @param Tenant $tenant
      * @return array Updated storage info from PlanService
+     *
      * @throws \RuntimeException
      */
     public function removeStorageAddon(Tenant $tenant): array
@@ -912,7 +1035,7 @@ class BillingService
 
         if (empty($itemId)) {
             // No add-on to remove; return current storage info
-            return (new PlanService())->getStorageInfo($tenant);
+            return (new PlanService)->getStorageInfo($tenant);
         }
 
         $stripeSecret = config('services.stripe.secret');
@@ -930,9 +1053,9 @@ class BillingService
                 'storage_addon_stripe_subscription_item_id' => null,
             ]);
 
-            return (new PlanService())->getStorageInfo($tenant);
+            return (new PlanService)->getStorageInfo($tenant);
         } catch (ApiErrorException $e) {
-            throw new \RuntimeException('Failed to remove storage add-on: ' . $e->getMessage());
+            throw new \RuntimeException('Failed to remove storage add-on: '.$e->getMessage());
         }
     }
 
@@ -997,7 +1120,7 @@ class BillingService
             return [
                 'credits_added' => $package['credits'],
                 'package_id' => $packageId,
-                'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant),
+                'effective_credits' => (new PlanService)->getEffectiveAiCredits($tenant),
             ];
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to add AI credit add-on: '.$e->getMessage());
@@ -1012,7 +1135,7 @@ class BillingService
         $itemId = $tenant->ai_credits_addon_stripe_subscription_item_id;
 
         if (empty($itemId)) {
-            return ['credits_added' => 0, 'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant)];
+            return ['credits_added' => 0, 'effective_credits' => (new PlanService)->getEffectiveAiCredits($tenant)];
         }
 
         $stripeSecret = config('services.stripe.secret');
@@ -1030,7 +1153,7 @@ class BillingService
                 'ai_credits_addon_stripe_subscription_item_id' => null,
             ]);
 
-            return ['credits_added' => 0, 'effective_credits' => (new PlanService())->getEffectiveAiCredits($tenant)];
+            return ['credits_added' => 0, 'effective_credits' => (new PlanService)->getEffectiveAiCredits($tenant)];
         } catch (ApiErrorException $e) {
             throw new \RuntimeException('Failed to remove AI credit add-on: '.$e->getMessage());
         }
@@ -1162,7 +1285,7 @@ class BillingService
             ->first();
 
         if (! $module) {
-            $planService = new PlanService();
+            $planService = new PlanService;
             $planName = $planService->getCurrentPlan($tenant);
             $plan = config("plans.{$planName}", config('plans.free'));
             $planIncludes = (bool) ($plan['creator_module_included'] ?? false);

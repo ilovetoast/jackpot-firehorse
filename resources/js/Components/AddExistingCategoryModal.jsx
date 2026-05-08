@@ -66,7 +66,7 @@ export default function AddExistingCategoryModal({
                     window.toast(`Added "${template.name}"`, 'success')
                 }
             } else {
-                setError(data.message || data.error || 'Failed to add category.')
+                setError(data.message || data.error || 'Failed to add folder.')
             }
         } catch (e) {
             setError('Network error. Please try again.')
@@ -91,10 +91,10 @@ export default function AddExistingCategoryModal({
                 <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-gray-200">
                     <div className="min-w-0">
                         <h2 className="text-lg font-semibold text-gray-900 truncate">
-                            Add Existing Category
+                            Add from system library
                         </h2>
                         <p className="mt-0.5 text-sm text-gray-500">
-                            System categories are pre-configured with metadata fields. Changes to field options apply across all brands using this category.
+                            System folders are pre-configured with fields. Changes to field options apply across all brands using that folder template.
                         </p>
                     </div>
                     <button
@@ -117,8 +117,8 @@ export default function AddExistingCategoryModal({
                         <div className="py-12 text-center text-sm text-gray-500">Loading…</div>
                     ) : templates.length === 0 ? (
                         <div className="py-12 text-center">
-                            <p className="text-sm text-gray-500">No additional system categories available.</p>
-                            <p className="mt-1 text-xs text-gray-400">All system categories may already be added to this brand.</p>
+                            <p className="text-sm text-gray-500">No additional system folders available.</p>
+                            <p className="mt-1 text-xs text-gray-400">All system folders may already be added to this brand.</p>
                         </div>
                     ) : (
                         <div className="space-y-2">

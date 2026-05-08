@@ -2,14 +2,13 @@
 
 namespace App\Providers;
 
-use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
-use App\Http\Middleware\EnsureOnboardingComplete;
-use App\Support\SentryTracesSampler;
-use Illuminate\Routing\Router;
+use App\Console\Listeners\BlockUnsafeDestructiveDatabaseCommands;
 use App\Contracts\ImageEmbeddingServiceInterface;
 use App\Events\AssetPendingApproval;
 use App\Events\AssetUploaded;
 use App\Events\CompanyTransferCompleted;
+use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
+use App\Http\Middleware\EnsureOnboardingComplete;
 use App\Listeners\ActivateAgencyReferral;
 use App\Listeners\GrantAgencyPartnerReward;
 use App\Listeners\ProcessAssetOnUpload;
@@ -20,10 +19,13 @@ use App\Services\AI\Providers\AnthropicProvider;
 use App\Services\AI\Providers\GeminiProvider;
 use App\Services\AI\Providers\OpenAIProvider;
 use App\Services\ImageEmbeddingService;
+use App\Support\SentryTracesSampler;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Event;
@@ -32,6 +34,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Cashier\Cashier;
 use RuntimeException;
 use Sentry\ClientBuilder;
 use Sentry\Event as SentryEvent;
@@ -218,6 +221,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Subscriptions use tenant_id; Cashier defaults to User (user_id), which leaves Subscription::owner null
+        // and breaks swap(), invoices, etc. Billable is on {@see \App\Models\Tenant}.
+        Cashier::useCustomerModel(\App\Models\Tenant::class);
+
         // Router middleware aliases: registered here in addition to bootstrap/app.php so a stale
         // route:cache or release whose bootstrap/app.php is out of sync still resolves these names.
         // Complements the container aliases set in register() (those rescue the router's fallback
@@ -325,6 +332,9 @@ class AppServiceProvider extends ServiceProvider
                 throw new RuntimeException('Schema::hasColumn() is forbidden during HTTP lifecycle.');
             });
         }
+
+        // Prevent accidental wipe of primary dev DB via migrate:fresh / db:wipe when not in APP_ENV=testing.
+        Event::listen(CommandStarting::class, [BlockUnsafeDestructiveDatabaseCommands::class, 'handle']);
     }
 
     /**

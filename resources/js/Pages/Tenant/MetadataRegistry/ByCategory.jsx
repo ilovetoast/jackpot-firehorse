@@ -252,8 +252,8 @@ export default function ByCategoryView({
                     const n = Number(data.rows_updated)
                     const msg =
                         Number.isFinite(n) && n > 0
-                            ? `Enabled ${n} new platform field row${n === 1 ? '' : 's'} on your categories.`
-                            : 'Category fields updated.'
+                            ? `Enabled ${n} new platform field row${n === 1 ? '' : 's'} on your folders.`
+                            : 'Folder fields updated.'
                     window.toast(msg, 'success')
                 }
             } else if (typeof window !== 'undefined' && window.toast) {
@@ -298,7 +298,7 @@ export default function ByCategoryView({
                 setLocalCategories((prev) =>
                     prev.map((c) => (c.id === category.id ? { ...c, name: trimmed } : c))
                 )
-                setSuccessMessage('Category renamed.')
+                setSuccessMessage('Folder renamed.')
                 setTimeout(() => setSuccessMessage(null), 3000)
             }
         } catch (e) {
@@ -320,7 +320,7 @@ export default function ByCategoryView({
                 setCategoryToDelete(null)
             },
             onError: () => {
-                setSuccessMessage('Failed to delete category.')
+                setSuccessMessage('Failed to delete folder.')
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setConfirmDeleteOpen(false)
                 setCategoryToDelete(null)
@@ -359,7 +359,7 @@ export default function ByCategoryView({
         setLocalCategories((prev) =>
             prev.map((c) => (c.id === updatedCategory.id ? { ...c, ...updatedCategory } : c))
         )
-        setSuccessMessage('Category updated')
+        setSuccessMessage('Folder updated')
         setTimeout(() => setSuccessMessage(null), 3000)
     }, [])
 
@@ -399,7 +399,7 @@ export default function ByCategoryView({
                 setLocalCategories((prev) =>
                     prev.map((c) => (c.id === selectedCategory.id ? { ...c, ebi_enabled: newValue } : c))
                 )
-                setSuccessMessage(`Brand Intelligence ${newValue ? 'enabled' : 'disabled'} for this category`)
+                setSuccessMessage(`Brand Intelligence ${newValue ? 'enabled' : 'disabled'} for this folder`)
                 setTimeout(() => setSuccessMessage(null), 3000)
             } else {
                 const errorData = await response.json().catch(() => ({}))
@@ -445,8 +445,8 @@ export default function ByCategoryView({
                 )
                 setSuccessMessage(
                     newValue
-                        ? 'AI can use up to a few top-rated, frequently downloaded peers as hints for this category'
-                        : 'AI library reference hints off for this category'
+                        ? 'AI can use up to a few top-rated, frequently downloaded peers as hints for this folder'
+                        : 'AI library reference hints off for this folder'
                 )
                 setTimeout(() => setSuccessMessage(null), 3000)
             } else {
@@ -614,7 +614,7 @@ export default function ByCategoryView({
             })
             const data = await response.json().catch(() => ({}))
             if (response.ok) {
-                setSuccessMessage(data.message || 'Category reset to default.')
+                setSuccessMessage(data.message || 'Folder reset to default.')
                 setTimeout(() => setSuccessMessage(null), 4000)
                 setConfirmResetOpen(false)
                 refreshMetadataRegistry()
@@ -680,14 +680,14 @@ export default function ByCategoryView({
             const data = await response.json().catch(() => ({}))
             const targets = data.targets ?? []
             if (targets.length === 0) {
-                setSuccessMessage('No other brands have a category of this type.')
+                setSuccessMessage('No other brands have a folder of this type.')
                 setTimeout(() => setSuccessMessage(null), 4000)
                 return
             }
             setApplyOtherBrandsTargets(targets)
             setConfirmApplyOtherBrandsOpen(true)
         } catch (err) {
-            setSuccessMessage('Failed to load target categories.')
+            setSuccessMessage('Failed to load target folders.')
             setTimeout(() => setSuccessMessage(null), 5000)
         } finally {
             setApplyOtherBrandsLoading(false)
@@ -994,8 +994,8 @@ export default function ByCategoryView({
                         {/* Card */}
                         <div className="relative rounded-xl bg-white shadow-sm p-10 text-center max-w-[480px]">
                             <FolderIcon className="mx-auto h-12 w-12 text-purple-400/70 mb-5" aria-hidden />
-                            <h3 className="text-xl font-semibold text-gray-900">Select a category</h3>
-                            <p className="mt-2 text-sm text-gray-500">Configure how metadata fields behave for each content type.</p>
+                            <h3 className="text-xl font-semibold text-gray-900">Select a folder</h3>
+                            <p className="mt-2 text-sm text-gray-500">Configure how fields behave for each content type.</p>
                             {brandId && (
                                 <button
                                     type="button"
@@ -1003,7 +1003,7 @@ export default function ByCategoryView({
                                     className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:shadow-md hover:shadow-purple-500/25 transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                 >
                                     <PlusIcon className="h-4 w-4" />
-                                    Create Category
+                                    Create folder
                                 </button>
                             )}
                         </div>
@@ -1062,7 +1062,7 @@ export default function ByCategoryView({
                                                         className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
                                                     >
                                                         <PencilIcon className="h-4 w-4 text-gray-400" />
-                                                        Category Settings
+                                                        Folder settings
                                                     </button>
                                                 )}
                                             </div>
@@ -1152,8 +1152,8 @@ export default function ByCategoryView({
                                 <div className="text-center max-w-xl mx-auto py-4">
                                     <p className="text-sm text-gray-600">
                                         Field enablement, upload and filter visibility, AI options, and ordering are
-                                        managed in <strong className="text-gray-900">Manage → Categories</strong> with a
-                                        table layout for this brand&apos;s folders.
+                                        managed in <strong className="text-gray-900">Manage → Folders & fields</strong>{' '}
+                                        with a table layout for this brand&apos;s folders.
                                     </p>
                                     <Link
                                         href={
@@ -1171,7 +1171,7 @@ export default function ByCategoryView({
                                         }
                                         className="mt-6 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                     >
-                                        Open Categories workspace
+                                        Open folders & fields
                                     </Link>
                                 </div>
 
@@ -1284,7 +1284,7 @@ export default function ByCategoryView({
                 open={confirmDeleteOpen}
                 onClose={() => { setConfirmDeleteOpen(false); setCategoryToDelete(null) }}
                 onConfirm={handleDeleteCategory}
-                title="Delete category"
+                title="Delete folder"
                 message={categoryToDelete ? `Delete "${categoryToDelete.name}"? This cannot be undone.` : ''}
                 confirmText="Delete"
                 cancelText="Cancel"

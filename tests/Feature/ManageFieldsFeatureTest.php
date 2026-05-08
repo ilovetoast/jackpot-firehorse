@@ -10,10 +10,12 @@ use App\Models\User;
 use App\Services\MetadataAnalyticsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\CreatesActivatedTenantBrandAdmin;
 use Tests\TestCase;
 
 class ManageFieldsFeatureTest extends TestCase
 {
+    use CreatesActivatedTenantBrandAdmin;
     use RefreshDatabase;
 
     /**
@@ -21,20 +23,10 @@ class ManageFieldsFeatureTest extends TestCase
      */
     private function tenantBrandAdminCategory(): array
     {
-        $tenant = Tenant::create(['name' => 'Fields Co', 'slug' => 'fields-co']);
-        $brand = Brand::create([
-            'tenant_id' => $tenant->id,
-            'name' => 'Fields Brand',
-            'slug' => 'fields-brand',
-        ]);
-        $user = User::create([
-            'email' => 'fields-admin@example.com',
-            'password' => bcrypt('password'),
-            'first_name' => 'F',
-            'last_name' => 'A',
-        ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'admin']);
-        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+        [$tenant, $brand, $user] = $this->createActivatedTenantBrandAdmin(
+            ['name' => 'Fields Co', 'slug' => 'fields-co'],
+            ['email' => 'fields-admin@example.com', 'first_name' => 'F', 'last_name' => 'A']
+        );
 
         $category = Category::create([
             'tenant_id' => $tenant->id,
@@ -52,17 +44,11 @@ class ManageFieldsFeatureTest extends TestCase
         return [$tenant, $brand, $user, $category];
     }
 
-    private function actingTenantBrand(User $user, Tenant $tenant, Brand $brand): self
-    {
-        return $this->actingAs($user)
-            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id]);
-    }
-
     public function test_manage_fields_inertia_includes_registry_categories_and_slug_query(): void
     {
         [$tenant, $brand, $user, $category] = $this->tenantBrandAdminCategory();
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->get('/app/manage/categories?category='.urlencode($category->slug))
             ->assertStatus(200)
             ->assertInertia(fn ($page) => $page
@@ -96,7 +82,7 @@ class ManageFieldsFeatureTest extends TestCase
                 ]);
         });
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->get('/app/manage/categories?filter=low_coverage')
             ->assertStatus(200)
             ->assertInertia(fn ($page) => $page
@@ -109,7 +95,7 @@ class ManageFieldsFeatureTest extends TestCase
     {
         [$tenant, $brand, $user] = $this->tenantBrandAdminCategory();
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->get('/app/manage/categories')
             ->assertStatus(200)
             ->assertInertia(fn ($page) => $page
@@ -140,7 +126,7 @@ class ManageFieldsFeatureTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->patchJson("/app/api/tenant/metadata/fields/{$fieldId}/categories/{$category->id}/visibility", [
                 'is_hidden' => true,
             ])
@@ -183,7 +169,7 @@ class ManageFieldsFeatureTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->postJson("/app/api/tenant/metadata/fields/{$fieldId}/visibility", [
                 'show_on_upload' => false,
                 'category_id' => $category->id,

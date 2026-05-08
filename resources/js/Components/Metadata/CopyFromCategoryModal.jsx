@@ -50,7 +50,7 @@ export default function CopyFromCategoryModal({
                 />
                 <div className="relative bg-white rounded-lg shadow-xl w-full max-w-sm p-5">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-base font-semibold text-gray-900">Copy from another category</h3>
+                        <h3 className="text-base font-semibold text-gray-900">Copy from another folder</h3>
                         <button
                             type="button"
                             onClick={onClose}
@@ -62,12 +62,12 @@ export default function CopyFromCategoryModal({
                         </button>
                     </div>
                     <p className="text-sm text-gray-500 mb-4">
-                        Copy visibility settings from a category to this one. This will overwrite current settings.
+                        Copy visibility settings from another folder. This will overwrite current settings for this folder.
                     </p>
                     <div className="space-y-4">
                         <div>
                             <label htmlFor="copy-source-category" className="block text-sm font-medium text-gray-700 mb-1">
-                                Source category
+                                Source folder
                             </label>
                             <select
                                 id="copy-source-category"
@@ -76,7 +76,7 @@ export default function CopyFromCategoryModal({
                                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                                 disabled={loading}
                             >
-                                <option value="">Select category…</option>
+                                <option value="">Select folder…</option>
                                 {sourceOptions.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}

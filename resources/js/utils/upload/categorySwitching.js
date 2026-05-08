@@ -138,8 +138,8 @@ function generateCategoryChangeWarnings(oldCategoryId, newCategoryId, removedFie
         warnings.push({
             type: 'category_change',
             message: newCategoryId 
-                ? `Category changed. Metadata fields have been updated.`
-                : `Category cleared. Metadata fields have been reset.`,
+                ? `Folder changed. Metadata fields have been updated.`
+                : `Folder cleared. Metadata fields have been reset.`,
             severity: 'info'
         });
     }
@@ -160,7 +160,7 @@ function generateCategoryChangeWarnings(oldCategoryId, newCategoryId, removedFie
         if (itemsWithRemovedOverrides.length > 0) {
             warnings.push({
                 type: 'metadata_invalidation',
-                message: `${removedFields.length} metadata field(s) removed from category: ${removedFields.join(', ')}. ` +
+                message: `${removedFields.length} metadata field(s) removed for this folder: ${removedFields.join(', ')}. ` +
                          `Values for these fields have been cleared from ${itemsWithRemovedOverrides.length} file(s).`,
                 severity: 'warning',
                 affectedFields: removedFields,
@@ -169,7 +169,7 @@ function generateCategoryChangeWarnings(oldCategoryId, newCategoryId, removedFie
         } else {
             warnings.push({
                 type: 'metadata_invalidation',
-                message: `${removedFields.length} metadata field(s) removed from category: ${removedFields.join(', ')}.`,
+                message: `${removedFields.length} metadata field(s) removed for this folder: ${removedFields.join(', ')}.`,
                 severity: 'info',
                 affectedFields: removedFields
             });

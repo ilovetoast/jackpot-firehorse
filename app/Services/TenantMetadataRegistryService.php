@@ -61,7 +61,7 @@ class TenantMetadataRegistryService
         // Exclude dimensions - it's file info, not metadata, and shouldn't appear in metadata management UI
         // Exclude archived (system fields are never archived, but defensive)
         $selectColumns = [
-            'id', 'key', 'system_label', 'type', 'applies_to', 'population_mode',
+            'id', 'key', 'system_label', 'description', 'type', 'applies_to', 'population_mode',
             'show_on_upload', 'show_on_edit', 'show_in_filters', 'readonly', 'group_key',
             'is_filterable', 'is_user_editable', 'is_ai_trainable', 'is_internal_only', 'is_primary',
             'ai_eligible',
@@ -120,6 +120,7 @@ class TenantMetadataRegistryService
                 'key' => $field->key,
                 'label' => $field->system_label ?: $field->key, // Fallback to key if system_label is empty
                 'system_label' => $field->system_label, // Also include for reference
+                'description' => $field->description ?? null,
                 'field_type' => $field->type,
                 'applies_to' => $field->applies_to,
                 'population_mode' => $field->population_mode ?? 'manual',

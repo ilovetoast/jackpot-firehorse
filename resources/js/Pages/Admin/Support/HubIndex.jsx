@@ -4,7 +4,14 @@ import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
 import AdminShell from '../../../Components/Admin/AdminShell'
 import AdminSupportSectionSidebar from '../../../Components/Admin/AdminSupportSectionSidebar'
-import { ChartBarIcon, CogIcon, EyeIcon, UserCircleIcon } from '@heroicons/react/24/outline'
+import {
+    BeakerIcon,
+    ChartBarIcon,
+    CogIcon,
+    EyeIcon,
+    RectangleStackIcon,
+    UserCircleIcon,
+} from '@heroicons/react/24/outline'
 
 const card =
     'flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50/40'
@@ -21,7 +28,7 @@ export default function AdminSupportHubIndex() {
                     centerKey="support"
                     breadcrumbs={[{ label: 'Admin', href: '/app/admin' }, { label: 'Support' }]}
                     title="Support"
-                    description="Customer and internal tickets, engineering queue, and SLA follow-up."
+                    description="Customer and internal tickets, engineering queue, SLA follow-up, and disposable demo workspaces."
                     sidebar={<AdminSupportSectionSidebar />}
                 >
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 sm:gap-6">
@@ -55,6 +62,31 @@ export default function AdminSupportHubIndex() {
                             <div>
                                 <p className="text-lg font-semibold text-slate-900">Engineering queue</p>
                                 <p className="text-sm text-slate-600">Internal and engineering-classified work.</p>
+                            </div>
+                        </Link>
+                        <Link href={route('admin.demo-workspaces.index')} className={card}>
+                            <BeakerIcon className="h-8 w-8 shrink-0 text-fuchsia-600" />
+                            <div>
+                                <p className="text-lg font-semibold text-slate-900">Demo workspaces</p>
+                                <p className="text-sm text-slate-600">
+                                    Templates, clone new disposable demos, and manage instance lifecycle (extend, expire,
+                                    cleanup).
+                                </p>
+                            </div>
+                        </Link>
+                        <Link
+                            href={route('admin.demo-workspaces.index', {
+                                focus: 'instances',
+                                instance_scope: 'active',
+                            })}
+                            className={card}
+                        >
+                            <RectangleStackIcon className="h-8 w-8 shrink-0 text-sky-600" />
+                            <div>
+                                <p className="text-lg font-semibold text-slate-900">Active demo instances</p>
+                                <p className="text-sm text-slate-600">
+                                    Jump to live demos only—useful when a customer is on a timed workspace.
+                                </p>
                             </div>
                         </Link>
                     </div>

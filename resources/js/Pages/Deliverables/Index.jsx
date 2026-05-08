@@ -988,15 +988,15 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                                     {searchQuery?.trim()
                                         ? 'No results for this search'
                                         : selectedCategoryId
-                                            ? `No ${DELIVERABLES_ITEM_LABEL_PLURAL} in this category yet`
+                                            ? `No ${DELIVERABLES_ITEM_LABEL_PLURAL} in this folder yet`
                                             : `No ${DELIVERABLES_ITEM_LABEL_PLURAL} yet`}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
                                     {searchQuery?.trim()
                                         ? 'Try different keywords or clear the search to see all executions.'
                                         : selectedCategoryId
-                                            ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this category. Manage your brand assets with ease and keep everything organized.`
-                                            : `Get started by selecting a category or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
+                                            ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this folder. Manage your brand assets with ease and keep everything organized.`
+                                            : `Get started by choosing a folder or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
                                 </p>
                                 <div className="mt-8">
                                     <AddAssetButton 

@@ -48,7 +48,7 @@ return new class extends Migration
         'pr_type' => [
             ['press_releases', 'press_release'],
             ['media_kits', 'media_kit'],
-            ['backgrounders', 'backgrounder'],
+            ['backgrounders', 'internal'],
         ],
         'packaging_type' => [
             ['renders_3d', 'render'],

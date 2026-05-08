@@ -3,36 +3,24 @@
 namespace Tests\Feature;
 
 use App\Enums\AssetType;
-use App\Models\Brand;
 use App\Models\Category;
-use App\Models\Tenant;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\CreatesActivatedTenantBrandAdmin;
 use Tests\TestCase;
 
 class ManageWorkspaceTest extends TestCase
 {
+    use CreatesActivatedTenantBrandAdmin;
     use RefreshDatabase;
 
     private function actingWithTenantBrand(): self
     {
-        $tenant = Tenant::create(['name' => 'Manage Co', 'slug' => 'manage-co']);
-        $brand = Brand::create([
-            'tenant_id' => $tenant->id,
-            'name' => 'Manage Brand',
-            'slug' => 'manage-brand',
-        ]);
-        $user = User::create([
-            'email' => 'manage-user@example.com',
-            'password' => bcrypt('password'),
-            'first_name' => 'M',
-            'last_name' => 'U',
-        ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'admin']);
-        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+        [$tenant, $brand, $user] = $this->createActivatedTenantBrandAdmin(
+            ['name' => 'Manage Co', 'slug' => 'manage-co'],
+            ['email' => 'manage-user@example.com', 'first_name' => 'M', 'last_name' => 'U']
+        );
 
-        return $this->actingAs($user)
-            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id]);
+        return $this->actingAsTenantBrand($user, $tenant, $brand);
     }
 
     public function test_manage_categories_returns_200_with_unified_props(): void
@@ -68,20 +56,10 @@ class ManageWorkspaceTest extends TestCase
 
     public function test_legacy_metadata_registry_maps_category_id_to_slug_in_redirect(): void
     {
-        $tenant = Tenant::create(['name' => 'Cat Co', 'slug' => 'cat-co']);
-        $brand = Brand::create([
-            'tenant_id' => $tenant->id,
-            'name' => 'Cat Brand',
-            'slug' => 'cat-brand',
-        ]);
-        $user = User::create([
-            'email' => 'cat-user@example.com',
-            'password' => bcrypt('password'),
-            'first_name' => 'C',
-            'last_name' => 'U',
-        ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'admin']);
-        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+        [$tenant, $brand, $user] = $this->createActivatedTenantBrandAdmin(
+            ['name' => 'Cat Co', 'slug' => 'cat-co'],
+            ['email' => 'cat-user@example.com', 'first_name' => 'C', 'last_name' => 'U']
+        );
 
         $category = Category::create([
             'tenant_id' => $tenant->id,
@@ -96,8 +74,7 @@ class ManageWorkspaceTest extends TestCase
             'sort_order' => 1,
         ]);
 
-        $response = $this->actingAs($user)
-            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+        $response = $this->actingAsTenantBrand($user, $tenant, $brand)
             ->get('/app/tenant/metadata/registry?category_id='.$category->id);
 
         $response->assertRedirect();

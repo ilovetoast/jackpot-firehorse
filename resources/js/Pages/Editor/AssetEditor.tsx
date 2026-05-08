@@ -6291,7 +6291,7 @@ export default function AssetEditor() {
 
     const submitPublishModal = useCallback(() => {
         if (publishCategoryId === '') {
-            setPromoteError('Select a category.')
+            setPromoteError('Choose a folder.')
             return
         }
         const groups = publishMetadataSchema?.groups

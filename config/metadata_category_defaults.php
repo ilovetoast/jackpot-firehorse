@@ -136,6 +136,7 @@ return [
         'sales_collateral_type' => [
             'sales-collateral' => ['enabled' => true, 'is_primary' => true],
         ],
+        // pr_type select options (PR / Communications): see MetadataFieldsSeeder — press_release, media_kit, internal, fact_sheet, announcement
         'pr_type' => [
             'pr' => ['enabled' => true, 'is_primary' => true],
         ],
@@ -184,7 +185,10 @@ return [
         'web_type',
     ],
 
-    'starred_default_visibility' => [
+    /**
+     * Default visibility for the pinned asset field (DB key remains `starred`).
+     */
+    'pinned_default_visibility' => [
         'is_hidden' => false,
         'is_upload_hidden' => false,
         'is_filter_hidden' => true,

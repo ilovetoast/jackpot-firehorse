@@ -1479,7 +1479,7 @@ export default function AssetsIndex({
                                         : searchQuery?.trim()
                                             ? 'No results for this search'
                                             : selectedCategoryId
-                                                ? 'No assets in this category yet'
+                                                ? 'No assets in this folder yet'
                                                 : 'No assets yet'}
                                 </h2>
                                 <p className="mt-4 text-base leading-7 text-gray-600">
@@ -1488,8 +1488,8 @@ export default function AssetsIndex({
                                         : searchQuery?.trim()
                                             ? 'Try different keywords or clear the search to see all assets.'
                                             : selectedCategoryId
-                                                ? 'Get started by uploading your first asset to this category. Organize your brand assets and keep everything in one place.'
-                                                : 'Get started by selecting a category or uploading your first asset. Organize your brand assets and keep everything in sync.'}
+                                                ? 'Get started by uploading your first asset to this folder. Organize your brand assets and keep everything in one place.'
+                                                : 'Get started by choosing a folder or uploading your first asset. Organize your brand assets and keep everything in sync.'}
                                 </p>
                                 {!isPendingPublicationFilter && (
                                     <div className="mt-8">

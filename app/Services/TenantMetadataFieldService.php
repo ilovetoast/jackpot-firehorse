@@ -72,6 +72,22 @@ class TenantMetadataFieldService
     }
 
     /**
+     * Optional helper text shown under the field label in upload, drawer, and filters.
+     */
+    protected function normalizeDescription(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (! is_string($value)) {
+            return null;
+        }
+        $t = trim($value);
+
+        return $t === '' ? null : mb_substr($t, 0, 2000);
+    }
+
+    /**
      * Create a new tenant metadata field.
      *
      * @param Tenant $tenant
@@ -185,6 +201,7 @@ class TenantMetadataFieldService
         $fieldData = [
             'key' => $data['key'],
             'system_label' => $data['system_label'] ?? $data['key'],
+            'description' => $this->normalizeDescription($data['description'] ?? null),
             'type' => $data['type'],
             'applies_to' => $appliesTo,
             'scope' => 'tenant',
@@ -202,7 +219,10 @@ class TenantMetadataFieldService
             'population_mode' => 'manual', // Tenant fields are always manual
             'show_on_upload' => $data['show_on_upload'] ?? true,
             'show_on_edit' => $data['show_on_edit'] ?? true,
-            'show_in_filters' => $data['show_in_filters'] ?? true,
+            'show_in_filters' => \App\Support\MetadataFieldFilterEligibility::sanitizeGlobalShowInFilters(
+                $data['type'] ?? 'text',
+                $data['show_in_filters'] ?? true
+            ),
             'readonly' => false, // Tenant fields are never readonly
             'is_active' => true,
             'created_at' => now(),
@@ -365,13 +385,19 @@ class TenantMetadataFieldService
             $updateData['show_on_edit'] = $data['show_on_edit'];
         }
         if (isset($data['show_in_filters'])) {
-            $updateData['show_in_filters'] = $data['show_in_filters'];
+            $updateData['show_in_filters'] = \App\Support\MetadataFieldFilterEligibility::sanitizeGlobalShowInFilters(
+                $field->type ?? 'text',
+                $data['show_in_filters']
+            );
         }
         if (isset($data['group_key'])) {
             $updateData['group_key'] = $data['group_key'];
         }
         if (isset($data['ai_eligible'])) {
             $updateData['ai_eligible'] = $data['ai_eligible'];
+        }
+        if (array_key_exists('description', $data)) {
+            $updateData['description'] = $this->normalizeDescription($data['description']);
         }
 
         $updateData['updated_at'] = now();
@@ -456,13 +482,19 @@ class TenantMetadataFieldService
             $updateData['show_on_edit'] = $data['show_on_edit'];
         }
         if (isset($data['show_in_filters'])) {
-            $updateData['show_in_filters'] = $data['show_in_filters'];
+            $updateData['show_in_filters'] = \App\Support\MetadataFieldFilterEligibility::sanitizeGlobalShowInFilters(
+                $field->type ?? 'text',
+                $data['show_in_filters']
+            );
         }
         if (isset($data['group_key'])) {
             $updateData['group_key'] = $data['group_key'];
         }
         if (isset($data['ai_eligible'])) {
             $updateData['ai_eligible'] = $data['ai_eligible'];
+        }
+        if (array_key_exists('description', $data)) {
+            $updateData['description'] = $this->normalizeDescription($data['description']);
         }
 
         if (isset($data['options']) && is_array($data['options'])) {
@@ -562,6 +594,7 @@ class TenantMetadataFieldService
             'key' => $field->key,
             'label' => $field->system_label ?: $field->key, // Use system_label as label, fallback to key
             'system_label' => $field->system_label,
+            'description' => $field->description ?? null,
             'type' => $field->type,
             'applies_to' => $field->applies_to,
             'options' => $options,
@@ -787,6 +820,7 @@ class TenantMetadataFieldService
                 'id' => $field->id,
                 'key' => $field->key,
                 'system_label' => $field->system_label,
+                'description' => $field->description ?? null,
                 'type' => $field->type,
                 'applies_to' => $field->applies_to,
                 'is_filterable' => (bool) $field->is_filterable,
@@ -936,6 +970,7 @@ class TenantMetadataFieldService
                 'id' => $field->id,
                 'key' => $field->key,
                 'system_label' => $field->system_label,
+                'description' => $field->description ?? null,
                 'type' => $field->type,
                 'applies_to' => $field->applies_to,
                 'is_filterable' => (bool) $field->is_filterable,

@@ -41,7 +41,7 @@ function slugifyMetadataOptionValue(label) {
  * @param {'default' | 'modal'} [props.layout] - "modal" = stacked label, full width, tall list in quick edit modals
  * @param {'inline' | 'stacked'} [props.labelLayout] - stacked = label above control (upload batch grid cells)
  */
-const MetadataFieldInput = forwardRef(function MetadataFieldInput(
+const MetadataFieldInputInner = forwardRef(function MetadataFieldInputInner(
     {
         field,
         value,
@@ -870,6 +870,26 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(
             // Unknown type - fail safe (render nothing)
             return null
     }
+})
+
+const MetadataFieldInput = forwardRef(function MetadataFieldInput(props, ref) {
+    const desc =
+        typeof props.field?.description === 'string' ? props.field.description.trim() : ''
+    const inner = <MetadataFieldInputInner {...props} ref={ref} />
+    if (!desc) {
+        return inner
+    }
+    return (
+        <div className="min-w-0 w-full space-y-1">
+            <p
+                className="text-xs text-gray-500 leading-snug"
+                id={props.field?.key ? `${props.field.key}-field-description` : undefined}
+            >
+                {desc}
+            </p>
+            {inner}
+        </div>
+    )
 })
 
 export default MetadataFieldInput

@@ -2,7 +2,7 @@ import {
     normalizeHexColor,
     getLuminance,
     getWorkspacePrimaryActionButtonColors,
-    getContrastTextColor,
+    getSolidFillButtonForegroundHex,
     ensureAccentContrastOnWhite,
     darkenColor,
     hexToRgba,
@@ -38,7 +38,8 @@ export function buildBrandWorkbenchChromePackage(brand, company) {
         settings: { ...(brand?.settings && typeof brand.settings === 'object' ? brand.settings : {}), button_style: 'primary' },
     }
     const { resting: accentFill, hover: accentHover } = getWorkspacePrimaryActionButtonColors(synthetic)
-    const onAccent = getContrastTextColor(accentFill)
+    const onAccent = getSolidFillButtonForegroundHex(accentFill)
+    const onAccentHover = getSolidFillButtonForegroundHex(accentHover)
     const link = ensureAccentContrastOnWhite(base, 4.5)
     const linkHover = darkenColor(link, 14)
 
@@ -48,6 +49,7 @@ export function buildBrandWorkbenchChromePackage(brand, company) {
         '--wb-accent': accentFill,
         '--wb-accent-hover': accentHover,
         '--wb-on-accent': onAccent,
+        '--wb-on-accent-hover': onAccentHover,
         '--wb-link': link,
         '--wb-link-hover': linkHover,
         '--wb-ring': hexToRgba(accentFill, 0.45),
@@ -62,6 +64,7 @@ export function buildBrandWorkbenchChromePackage(brand, company) {
         accentFill,
         accentHover,
         onAccent,
+        onAccentHover,
         linkHex: link,
         linkHoverHex: linkHover,
         paletteBase: base,

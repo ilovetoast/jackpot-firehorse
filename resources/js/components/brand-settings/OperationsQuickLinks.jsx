@@ -158,7 +158,7 @@ export default function OperationsQuickLinks({ brandId }) {
         {
             href: r('manage.categories'),
             title: 'Manage library',
-            description: 'Categories, fields, tags, and values for this brand.',
+            description: 'Folders, fields, tags, and values for this brand.',
             icon: RectangleGroupIcon,
         },
         {

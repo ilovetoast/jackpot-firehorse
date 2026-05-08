@@ -57,6 +57,17 @@ class Tenant extends Model
         'ai_credits_addon',
         'ai_credits_addon_stripe_price_id',
         'ai_credits_addon_stripe_subscription_item_id',
+        'is_demo_template',
+        'is_demo',
+        'demo_template_id',
+        'demo_expires_at',
+        'demo_status',
+        'demo_created_by_user_id',
+        'demo_label',
+        'demo_plan_key',
+        'demo_notes',
+        'demo_clone_failure_message',
+        'demo_cleanup_failure_message',
     ];
 
     /**
@@ -77,6 +88,9 @@ class Tenant extends Model
             'incubation_expires_at' => 'datetime', // Phase AG-2: Incubation expiration timestamp
             'incubation_extension_requested_at' => 'datetime',
             'incubation_locked_at' => 'datetime',
+            'demo_expires_at' => 'datetime',
+            'is_demo_template' => 'boolean',
+            'is_demo' => 'boolean',
         ];
     }
 
@@ -88,30 +102,36 @@ class Tenant extends Model
         parent::boot();
 
         static::created(function ($tenant) {
-            // Automatically create a default brand when tenant is created
-            $defaultBrand = $tenant->brands()->create([
-                'name' => $tenant->name,
-                'slug' => $tenant->slug,
-                'is_default' => true,
-                'show_in_selector' => true, // Default to showing in selector
-                // Jackpot gateway / site violet (see BrandThemeBuilder DEFAULT_* + JACKPOT_VIOLET) until the user customizes.
-                'primary_color' => '#7c3aed',
-                'secondary_color' => '#8b5cf6',
-                'accent_color' => '#06b6d4',
-            ]);
+            $demoCloneFromTemplate = (bool) $tenant->is_demo && $tenant->demo_template_id;
 
-            // If tenant already has an owner (e.g., created via seeder or admin), connect them to default brand
-            $owner = $tenant->owner();
-            if ($owner && $defaultBrand) {
-                // Connect owner to default brand with admin role (owners can't have brand roles)
-                $defaultBrand->users()->syncWithoutDetaching([
-                    $owner->id => ['role' => 'admin'],
+            if (! $demoCloneFromTemplate) {
+                // Automatically create a default brand when tenant is created
+                $defaultBrand = $tenant->brands()->create([
+                    'name' => $tenant->name,
+                    'slug' => $tenant->slug,
+                    'is_default' => true,
+                    'show_in_selector' => true, // Default to showing in selector
+                    // Jackpot gateway / site violet (see BrandThemeBuilder DEFAULT_* + JACKPOT_VIOLET) until the user customizes.
+                    'primary_color' => '#7c3aed',
+                    'secondary_color' => '#8b5cf6',
+                    'accent_color' => '#06b6d4',
                 ]);
+
+                // If tenant already has an owner (e.g., created via seeder or admin), connect them to default brand
+                $owner = $tenant->owner();
+                if ($owner && $defaultBrand) {
+                    // Connect owner to default brand with admin role (owners can't have brand roles)
+                    $defaultBrand->users()->syncWithoutDetaching([
+                        $owner->id => ['role' => 'admin'],
+                    ]);
+                }
             }
 
             // Provision storage bucket (shared or dedicated) so uploads work immediately.
-            // Runs in queue worker; for shared strategy creates StorageBucket record only. 1
-            \App\Jobs\ProvisionCompanyStorageJob::dispatch($tenant->id);
+            // Demo instances cloned from a template: {@see CreateDemoWorkspaceCloneJob} provisions synchronously first.
+            if (! $demoCloneFromTemplate) {
+                \App\Jobs\ProvisionCompanyStorageJob::dispatch($tenant->id);
+            }
         });
     }
 
@@ -177,6 +197,16 @@ class Tenant extends Model
     public function categories(): HasMany
     {
         return $this->hasMany(Category::class);
+    }
+
+    public function demoTemplate(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class, 'demo_template_id');
+    }
+
+    public function demoCreatedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'demo_created_by_user_id');
     }
 
     /**

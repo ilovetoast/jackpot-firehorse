@@ -1,16 +1,26 @@
 import ManageLayout from '../../layouts/ManageLayout'
 import ManageCategoriesHub from '../../Components/Manage/ManageCategoriesHub'
 import { WorkbenchPageIntro } from '../../components/brand-workspace/workbenchPatterns'
+import { BRAND_WORKBENCH_PAD_X, BRAND_WORKBENCH_PAD_Y } from '../../components/brand-workspace/brandWorkspaceTokens'
+
+/** Wider than default `max-w-7xl` so the fields workspace has more room without going full-bleed. */
+const MANAGE_CATEGORIES_WORKBENCH =
+    `mx-auto w-full max-w-[min(100%,92rem)] ${BRAND_WORKBENCH_PAD_X} ${BRAND_WORKBENCH_PAD_Y}`
 
 export default function ManageCategories(props) {
     return (
-        <ManageLayout title="Categories — Manage" activeSection="categories">
+        <ManageLayout
+            title="Folders & fields — Manage"
+            activeSection="categories"
+            workbenchChromeClassName={MANAGE_CATEGORIES_WORKBENCH}
+        >
             <div>
                 <WorkbenchPageIntro
-                    title="Categories"
-                    description="Folders for this brand and which metadata fields apply in each. Select a folder on the left; configure fields on the right."
+                    title="Folders & fields"
+                    description="Choose a folder. Manage the fields used for assets in that folder."
                 />
-                <div className="mt-5 sm:mt-6">
+
+                <div className="mt-4 sm:mt-5">
                     <ManageCategoriesHub {...props} />
                 </div>
             </div>

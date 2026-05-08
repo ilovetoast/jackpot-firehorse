@@ -165,10 +165,10 @@ export default function AssetDetailDrawer({ asset, onClose }) {
         }
     }
 
-    // Get category name from category object or metadata
+    // Folder label (backend: Category / category_id on asset).
     const categoryName = asset.category?.name 
-        || (asset.metadata?.category_id && !asset.category ? `Category ID: ${asset.metadata.category_id}` : null)
-        || 'Uncategorized'
+        || (asset.metadata?.category_id && !asset.category ? `Folder ID: ${asset.metadata.category_id}` : null)
+        || 'No folder'
 
     return (
         <>
@@ -285,7 +285,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                                 </div>
                             )}
                             <div className="flex justify-between">
-                                <dt className="text-sm text-gray-500">Category</dt>
+                                <dt className="text-sm text-gray-500">Folder</dt>
                                 <dd className="text-sm font-medium text-gray-900">
                                     {categoryName}
                                 </dd>

@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Enums\AssetType;
 use App\Models\Brand;
+use App\Models\BrandOnboardingProgress;
 use App\Models\Category;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\CreatesActivatedTenantBrandAdmin;
 use Tests\TestCase;
 
 /**
@@ -22,6 +24,7 @@ use Tests\TestCase;
  */
 class CategoryScopedVisibilityTest extends TestCase
 {
+    use CreatesActivatedTenantBrandAdmin;
     use RefreshDatabase;
 
     protected Tenant $tenant;
@@ -39,6 +42,7 @@ class CategoryScopedVisibilityTest extends TestCase
         $this->tenant = Tenant::create([
             'name' => 'Test Tenant',
             'slug' => 'test-tenant',
+            'manual_plan_override' => 'starter',
         ]);
         $this->brand = Brand::create([
             'tenant_id' => $this->tenant->id,
@@ -46,7 +50,13 @@ class CategoryScopedVisibilityTest extends TestCase
             'slug' => 'test-brand',
         ]);
         $this->user = User::factory()->create();
-        $this->user->brands()->attach($this->brand->id, ['role' => 'admin']);
+        $this->user->tenants()->attach($this->tenant->id, ['role' => 'admin']);
+        $this->user->brands()->attach($this->brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        BrandOnboardingProgress::query()->updateOrCreate(
+            ['brand_id' => $this->brand->id],
+            ['tenant_id' => $this->tenant->id, 'activated_at' => now()]
+        );
 
         // Create categories
         $this->categoryPhotography = Category::create([
@@ -68,6 +78,10 @@ class CategoryScopedVisibilityTest extends TestCase
         ]);
 
         // Create a test metadata field
+        // Upload metadata schema lives under `/app/uploads/*`, which runs EnsureGatewayEntry; exempt API
+        // visibility calls under `/app/api/*` do not. Tests hit both — skip gateway for stable JSON assertions.
+        $this->withoutMiddleware(\App\Http\Middleware\EnsureGatewayEntry::class);
+
         $this->testFieldId = DB::table('metadata_fields')->insertGetId([
             'key' => 'test_field',
             'system_label' => 'Test Field',
@@ -93,7 +107,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_upload_visibility_scoped_to_category(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Set upload hidden for Photography only
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -123,7 +137,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_edit_visibility_scoped_to_category(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Set edit hidden (Quick View unchecked) for Photography only
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -155,7 +169,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_filter_visibility_scoped_to_category(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Set filter hidden for Photography only
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -178,7 +192,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_edit_hidden_separate_from_category_suppression(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Set edit hidden (Quick View unchecked) for Photography
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -209,7 +223,10 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_multiple_visibility_settings_independent(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
+
+        // Filter/primary eligibility requires select (or multiselect/boolean/date); not plain text.
+        \DB::table('metadata_fields')->where('id', $this->testFieldId)->update(['type' => 'select']);
 
         // Set upload hidden but edit and filter visible
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -243,7 +260,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_photography_settings_do_not_affect_graphics(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Set all visibility settings to false for Photography
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -275,7 +292,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_updating_visibility_updates_existing_record(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Create initial visibility record
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -311,7 +328,9 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_is_primary_scoped_to_category(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
+
+        \DB::table('metadata_fields')->where('id', $this->testFieldId)->update(['type' => 'select']);
 
         // Set is_primary for Photography
         $this->postJson("/app/api/tenant/metadata/fields/{$this->testFieldId}/visibility", [
@@ -342,7 +361,7 @@ class CategoryScopedVisibilityTest extends TestCase
      */
     public function test_api_handles_missing_is_edit_hidden_column(): void
     {
-        $this->actingAs($this->user);
+        $this->actingAsTenantBrand($this->user, $this->tenant, $this->brand);
 
         // Temporarily drop the column if it exists (simulating pre-migration state)
         // Note: In a real scenario, we'd check if column exists before dropping

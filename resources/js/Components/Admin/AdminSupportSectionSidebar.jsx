@@ -16,6 +16,7 @@ export default function AdminSupportSectionSidebar() {
             params.get('type') === 'engineering' || params.get('engineering_only') === '1'
 
         const hubActive = path === '/app/admin/support'
+        const demoWorkspacesActive = path.startsWith('/app/admin/demo-workspaces')
         const impersonationActive = path.startsWith('/app/admin/impersonation')
         const ticketsBase = '/app/admin/support/tickets'
         const isTicketDetail = /^\/app\/admin\/support\/tickets\/\d+$/.test(path)
@@ -51,6 +52,12 @@ export default function AdminSupportSectionSidebar() {
                         label: 'Start session',
                         match: 'prefix',
                         active: path.startsWith('/app/admin/impersonation/enter'),
+                    },
+                    {
+                        href: route('admin.demo-workspaces.index'),
+                        label: 'Demo workspaces',
+                        match: 'prefix',
+                        active: demoWorkspacesActive,
                     },
                 ],
             },

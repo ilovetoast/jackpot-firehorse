@@ -23,6 +23,7 @@ use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
 use App\Support\MetadataCache;
+use App\Support\MetadataFieldFilterEligibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -467,8 +468,25 @@ class TenantMetadataRegistryController extends Controller
             // Use is_edit_hidden for Quick View checkbox (show_on_edit)
             $isUploadHidden = isset($validated['show_on_upload']) ? ! filter_var($validated['show_on_upload'], FILTER_VALIDATE_BOOLEAN) : null;
             $isEditHidden = isset($validated['show_on_edit']) ? ! filter_var($validated['show_on_edit'], FILTER_VALIDATE_BOOLEAN) : null;
-            $isFilterHidden = isset($validated['show_in_filters']) ? ! filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
-            $isPrimary = isset($validated['is_primary']) ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
+
+            $reqShowInFilters = array_key_exists('show_in_filters', $validated)
+                ? filter_var($validated['show_in_filters'], FILTER_VALIDATE_BOOLEAN) : null;
+            $reqIsPrimary = array_key_exists('is_primary', $validated)
+                ? filter_var($validated['is_primary'], FILTER_VALIDATE_BOOLEAN) : null;
+            [$normShowInFilters, $normIsPrimary] = MetadataFieldFilterEligibility::normalizeFilterAndPrimaryForSave(
+                (string) ($fieldRecord->type ?? 'text'),
+                $reqShowInFilters,
+                $reqIsPrimary
+            );
+            $isFilterHidden = null;
+            $isPrimary = null;
+            if ($normShowInFilters !== null) {
+                $isFilterHidden = ! $normShowInFilters;
+            }
+            if ($normIsPrimary !== null) {
+                $isPrimary = $normIsPrimary;
+            }
+
             $isRequired = isset($validated['is_required']) ? filter_var($validated['is_required'], FILTER_VALIDATE_BOOLEAN) : null;
 
             // always_hidden_fields: never in filters (dimensions, dominant_colors)

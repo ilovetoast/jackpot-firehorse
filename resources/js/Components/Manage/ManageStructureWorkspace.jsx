@@ -4,7 +4,8 @@ import CategoryList from '../Metadata/CategoryList'
 import AddCategoryModal from '../Metadata/AddCategoryModal'
 import CategorySettingsModal from '../Metadata/CategorySettingsModal'
 import ConfirmDialog from '../ConfirmDialog'
-import { BRAND_ACCENT_FALLBACK } from '../../components/brand-workspace/brandWorkspaceTokens'
+import { PlusIcon } from '@heroicons/react/24/outline'
+import { productButtonPrimary } from '../../components/brand-workspace/brandWorkspaceTokens'
 
 const MANAGE_STRUCTURE_URL =
     typeof route === 'function' ? route('manage.structure') : '/app/manage/structure'
@@ -280,16 +281,36 @@ export default function ManageStructureWorkspace({
 
     return (
         <div className="space-y-6">
-            <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
-                <h2 className="text-base font-semibold text-slate-900">
-                    {hubLayout ? 'Folders' : 'Brand structure'}
-                </h2>
-                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                    {hubLayout
-                        ? 'Select a folder to configure its fields. Drag to reorder.'
-                        : 'Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden folders are below.'}
-                </p>
-                {brand?.name ? (
+            <div
+                className={
+                    hubLayout
+                        ? 'p-4 sm:p-5'
+                        : 'rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm'
+                }
+            >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-slate-900">
+                            {hubLayout ? 'Folders' : 'Brand structure'}
+                        </h2>
+                        <p className="mt-1 text-sm leading-snug text-slate-600">
+                            {hubLayout
+                                ? 'Choose a folder. Drag to reorder.'
+                                : 'Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden folders are below.'}
+                        </p>
+                    </div>
+                    {hubLayout && brandId && canManageBrandCategories ? (
+                        <button
+                            type="button"
+                            onClick={() => setAddCategoryOpen(true)}
+                            className={`inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold ${productButtonPrimary}`}
+                        >
+                            <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
+                            Add folder
+                        </button>
+                    ) : null}
+                </div>
+                {!hubLayout && brand?.name ? (
                     <div
                         className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/90 bg-slate-50/90 py-1 pl-2 pr-3 text-xs text-slate-600"
                         title={brand.name}
@@ -297,7 +318,7 @@ export default function ManageStructureWorkspace({
                         <span
                             className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-slate-200/80"
                             style={{
-                                backgroundColor: brand.primary_color || BRAND_ACCENT_FALLBACK,
+                                backgroundColor: brand.primary_color || '#64748b',
                             }}
                             aria-hidden
                         />
@@ -305,7 +326,7 @@ export default function ManageStructureWorkspace({
                         <span className="min-w-0 truncate font-medium text-slate-800">{brand.name}</span>
                     </div>
                 ) : null}
-                <div className="mt-5">
+                <div className={hubLayout ? 'mt-4' : 'mt-5'}>
                     <CategoryList
                         groupedCategories={groupedCategories}
                         selectedCategoryId={selectedCategoryId}
@@ -315,6 +336,7 @@ export default function ManageStructureWorkspace({
                         brandId={brandId}
                         onCategoriesChange={onCategoriesChange}
                         onSaveNotice={onSaveNotice}
+                        hubCategoryNav={hubLayout}
                         onAfterAddSystemCategory={handleAfterAddSystemCategory}
                         onRename={(cat) => {
                             setEditingCategoryId(cat.id)
@@ -331,7 +353,11 @@ export default function ManageStructureWorkspace({
                             setEditingCategoryId(null)
                             setEditingCategoryName('')
                         }}
-                        onAddCategory={brandId && canManageBrandCategories ? () => setAddCategoryOpen(true) : undefined}
+                        onAddCategory={
+                            !hubLayout && brandId && canManageBrandCategories
+                                ? () => setAddCategoryOpen(true)
+                                : undefined
+                        }
                         editingCategoryId={editingCategoryId}
                         editingCategoryName={editingCategoryName}
                         onEditingCategoryNameChange={setEditingCategoryName}
@@ -340,8 +366,11 @@ export default function ManageStructureWorkspace({
                 {!hubLayout && (
                     <p className="mt-6 text-sm text-gray-600">
                         To configure metadata fields, filters, and visibility per folder, open{' '}
-                        <Link href={MANAGE_CATEGORIES_URL} className="font-medium text-violet-600 hover:text-violet-500">
-                            Manage → Categories
+                        <Link
+                            href={MANAGE_CATEGORIES_URL}
+                            className="font-medium text-[var(--wb-link)] hover:opacity-90"
+                        >
+                            Manage → Folders & fields
                         </Link>
                         .
                     </p>
@@ -355,7 +384,7 @@ export default function ManageStructureWorkspace({
                     setCategoryToDelete(null)
                 }}
                 onConfirm={handleDeleteCategory}
-                title="Delete category"
+                title="Delete folder"
                 message={categoryToDelete ? `Delete "${categoryToDelete.name}"? This cannot be undone.` : ''}
                 confirmText="Delete"
                 cancelText="Cancel"
@@ -372,7 +401,7 @@ export default function ManageStructureWorkspace({
                 title="Revert to System"
                 message={
                     categoryToRevert
-                        ? `Revert "${categoryToRevert.name}" to system default? This removes category-level visibility overrides.`
+                        ? `Revert "${categoryToRevert.name}" to system default? This removes folder-level visibility overrides.`
                         : ''
                 }
                 confirmText="Revert"

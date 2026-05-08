@@ -3289,7 +3289,7 @@ export default function UploadAssetDialog({
                 selectedCategoryId === null &&
                 ['ready', 'partial_success', 'complete', 'processing_followup'].includes(batchStatus)
             ) {
-                return 'Select category to finalize'
+                return 'Choose folder to finalize'
             }
             if (batchStatus === 'processing_followup') {
                 return 'Preparing…'
@@ -3963,7 +3963,7 @@ export default function UploadAssetDialog({
 
         // Check if category is selected
         if (!phase3Manager.context.categoryId) {
-            setFinalizeError('Please select a category before finalizing')
+            setFinalizeError('Please choose a folder before finalizing')
             return
         }
 
@@ -4204,7 +4204,7 @@ export default function UploadAssetDialog({
         
         // Category not selected
         if (!phase3Manager.context.categoryId) {
-            errors.push('Category is required before finalizing assets.')
+            errors.push('A folder is required before finalizing assets.')
         }
         
         // Required metadata fields missing
@@ -4260,7 +4260,7 @@ export default function UploadAssetDialog({
             const userFriendlyError = finalizeError.includes('Upload session ID missing') 
                 ? 'One or more uploads are missing required information.'
                 : finalizeError.includes('category')
-                ? 'Please select a category before finalizing.'
+                ? 'Please choose a folder before finalizing.'
                 : finalizeError.includes('No completed uploads')
                 ? 'At least one upload must complete before finalizing.'
                 : finalizeError
@@ -4888,7 +4888,7 @@ export default function UploadAssetDialog({
             // All bytes on S3 — still need category + Finalize unless already succeeded.
             readiness =
                 selectedCategoryId === null
-                    ? 'Select category to finalize'
+                    ? 'Choose folder to finalize'
                     : canFinalizeV2
                       ? 'Ready to finalize'
                       : 'Almost ready…'
@@ -5727,7 +5727,7 @@ export default function UploadAssetDialog({
                                     </div>
                                 )}
 
-                                {/* Category — required for finalize (collections live in General metadata below) */}
+                                {/* Folder — required for finalize (collections live in General metadata below; backend: category_id) */}
                                 <div className="flex flex-col gap-2 border-t border-gray-200 pt-3 mt-3">
                                     <GlobalMetadataPanel
                                         uploadManager={v2UploadManager}
@@ -5747,7 +5747,7 @@ export default function UploadAssetDialog({
                                         >
                                             <p className="flex items-start gap-2">
                                                 <ExclamationTriangleIcon className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
-                                                <span>Select a category to finalize.</span>
+                                                <span>Choose a folder to finalize.</span>
                                             </p>
                                         </div>
                                     ) : null}
@@ -5769,7 +5769,7 @@ export default function UploadAssetDialog({
                                             {isLoadingMetadataSchema ? (
                                                 <div className="text-center py-4">
                                                     <ArrowPathIcon className="h-5 w-5 text-gray-400 animate-spin mx-auto" />
-                                                    <p className="text-xs text-gray-500 mt-2">Loading metadata fields...</p>
+                                                    <p className="text-xs text-gray-500 mt-2">Loading fields…</p>
                                                 </div>
                                             ) : uploadMetadataSchema ? (
                                                 <MetadataGroups
@@ -6220,7 +6220,7 @@ export default function UploadAssetDialog({
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
                                         style={canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess ? { backgroundColor: brandPrimary } : undefined}
-                                        title={!selectedCategoryId ? 'Select a category to finalize uploads' : undefined}
+                                        title={!selectedCategoryId ? 'Choose a folder to finalize uploads' : undefined}
                                         aria-describedby={showCategoryRequiredHint ? 'jp-upload-category-required-hint' : undefined}
                                     >
                                         {batchStatus === 'finalizing' && (

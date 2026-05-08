@@ -95,6 +95,7 @@ class TenantMetadataFieldController extends Controller
         $validated = $request->validate([
             'key' => 'required|string|max:255',
             'system_label' => 'required|string|max:255',
+            'description' => 'nullable|string|max:2000',
             'type' => 'required|string|in:text,textarea,select,multiselect,number,boolean,date',
             'selectedCategories' => 'required|array|min:1',
             'selectedCategories.*' => 'required|integer|exists:categories,id',
@@ -186,6 +187,7 @@ class TenantMetadataFieldController extends Controller
         // Validate request
         $validated = $request->validate([
             'system_label' => 'sometimes|string|max:255',
+            'description' => 'sometimes|nullable|string|max:2000',
             'applies_to' => 'sometimes|string|in:image,video,document,all',
             'options' => 'nullable|array',
             'options.*.value' => 'required|string',
@@ -292,6 +294,7 @@ class TenantMetadataFieldController extends Controller
                     'key' => $fieldRecord->key,
                     'system_label' => $fieldRecord->system_label,
                     'label' => $fieldRecord->system_label,
+                    'description' => $fieldRecord->description ?? null,
                     'type' => $fieldRecord->type,
                     'field_type' => $fieldRecord->type,
                     'scope' => 'system',

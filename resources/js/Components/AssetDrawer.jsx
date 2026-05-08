@@ -1451,6 +1451,24 @@ export default function AssetDrawer({
 
     const seekVideoFromInsightsMoment = useCallback(
         (m) => {
+            if (!displayAsset?.id || !assetSupportsLightboxCarousel(displayAsset)) {
+                return
+            }
+            const mime = (displayAsset.mime_type || '').toLowerCase()
+            const ext =
+                String(displayAsset.original_filename || '')
+                    .split('.')
+                    .pop()
+                    ?.toLowerCase() || ''
+            const isVid = mime.startsWith('video/') || ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(ext)
+            if (
+                isVid &&
+                !displayAsset.video_poster_url &&
+                !displayAsset.thumbnail_url &&
+                !displayAsset.final_thumbnail_url
+            ) {
+                return
+            }
             const interval =
                 typeof displayAsset?.metadata?.ai_video_frame_interval_seconds === 'number'
                     ? displayAsset.metadata.ai_video_frame_interval_seconds
@@ -1462,16 +1480,32 @@ export default function AssetDrawer({
                       ? Math.max(0, (m.frame_index - 1) * interval)
                       : 0
             setShowVideoInsightsModal(false)
+            const idx = imageAssets.findIndex((a) => a?.id === displayAsset.id)
+            if (idx >= 0) {
+                setCarouselIndex(idx)
+            }
             setPendingLightboxSeekSeconds(sec)
             setShowZoomModal(true)
         },
-        [displayAsset?.metadata?.ai_video_frame_interval_seconds],
+        [displayAsset, imageAssets],
     )
 
-    // Use displayAsset for carousel (with live updates)
-    const currentCarouselAsset = imageAssets[carouselIndex] || displayAsset
-    const canNavigateLeft = carouselIndex > 0
-    const canNavigateRight = carouselIndex < imageAssets.length - 1
+    // Carousel: when the drawer asset is not lightbox-eligible (e.g. OBJ), `imageAssets[carouselIndex]` can be a
+    // stale row — never use it as the active slide for this asset.
+    const drawerAssetLightboxIndex = useMemo(
+        () => imageAssets.findIndex((a) => a?.id === displayAsset?.id),
+        [imageAssets, displayAsset?.id],
+    )
+
+    const currentCarouselAsset = useMemo(() => {
+        if (drawerAssetLightboxIndex >= 0) {
+            return imageAssets[carouselIndex] ?? displayAsset
+        }
+        return displayAsset
+    }, [drawerAssetLightboxIndex, imageAssets, carouselIndex, displayAsset])
+
+    const canNavigateLeft = drawerAssetLightboxIndex >= 0 && carouselIndex > 0
+    const canNavigateRight = drawerAssetLightboxIndex >= 0 && carouselIndex < imageAssets.length - 1
 
     /** Prefer drawer-polled asset when it matches the carousel slide (full `thumbnail_mode_urls`). */
     const lightboxRasterSourceAsset = useMemo(() => {
@@ -2495,6 +2529,69 @@ export default function AssetDrawer({
         return true
     }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile])
 
+    /** Fullscreen / lightbox: only when this asset has something to show (avoids opening on OBJ / failed thumbs / stale carousel index). */
+    const canOpenDrawerLightbox = useMemo(() => {
+        if (!displayAsset?.id) {
+            return false
+        }
+        if (!assetSupportsLightboxCarousel(displayAsset)) {
+            return false
+        }
+        if (displayAsset.is_virtual_google_font) {
+            return true
+        }
+        if (isUploadedFontFileAsset(displayAsset)) {
+            return true
+        }
+        if (isPdf) {
+            return Boolean(pdfPageCache[pdfCurrentPage] || pdfPageCache[1])
+        }
+        if (isVideo) {
+            return !!(
+                displayAsset.video_poster_url ||
+                displayAsset.thumbnail_url ||
+                displayAsset.final_thumbnail_url
+            )
+        }
+        if (drawerEphemeralLocalPreviewUrl) {
+            return true
+        }
+        const raster = String(resolveLightboxRasterPreviewUrl(displayAsset, 'original') || '').trim()
+        if (raster) {
+            return true
+        }
+        const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
+        return state === 'AVAILABLE'
+    }, [
+        displayAsset,
+        drawerEphemeralLocalPreviewUrl,
+        isPdf,
+        isVideo,
+        pdfCurrentPage,
+        pdfPageCache,
+        thumbnailRetryCount,
+    ])
+
+    const openDrawerLightbox = useCallback(() => {
+        if (!canOpenDrawerLightbox) {
+            return
+        }
+        const idx = imageAssets.findIndex((a) => a?.id === displayAsset?.id)
+        if (idx >= 0) {
+            setCarouselIndex(idx)
+        }
+        setShowZoomModal(true)
+    }, [canOpenDrawerLightbox, imageAssets, displayAsset?.id])
+
+    useEffect(() => {
+        if (!showZoomModal) {
+            return
+        }
+        if (!assetSupportsLightboxCarousel(currentCarouselAsset)) {
+            setShowZoomModal(false)
+        }
+    }, [showZoomModal, currentCarouselAsset])
+
     /**
      * Same raster the grid uses (baked orientation). The signed ORIGINAL URL is often decoded
      * differently in the browser (EXIF) than our thumbnail pipeline + Imagick save path,
@@ -2699,6 +2796,11 @@ export default function AssetDrawer({
             onInitialZoomConsumed?.()
             return
         }
+        if (!canOpenDrawerLightbox) {
+            initialZoomAppliedRef.current = true
+            onInitialZoomConsumed?.()
+            return
+        }
         initialZoomAppliedRef.current = true
         const idx = imageAssets.findIndex((a) => a?.id === displayAsset.id)
         if (idx >= 0) {
@@ -2723,6 +2825,7 @@ export default function AssetDrawer({
         imageAssets,
         onInitialZoomConsumed,
         initialVideoSeekSeconds,
+        canOpenDrawerLightbox,
     ])
 
     // Phase 3.1: Derive stable thumbnail version signal
@@ -2876,9 +2979,9 @@ export default function AssetDrawer({
         }
     }
 
-    // Get category name
-    // Use displayAsset (with live updates) instead of prop asset
-    const categoryName = displayAsset.category?.name || 'Uncategorized'
+    // Folder label for the asset (backend model is still Category).
+    // Use displayAsset (with live updates) instead of prop asset.
+    const categoryName = displayAsset.category?.name || 'No folder'
 
     const canBypassTooSmallEnhanced = useMemo(() => {
         const tr = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
@@ -3449,31 +3552,28 @@ export default function AssetDrawer({
         thumbnailsFailed,
     ])
 
-    /** In-preview strip when the library cannot show a raster (mirrors lightbox guidance). */
-    const drawerPreviewUnavailableBanner = useMemo(() => {
-        if (!displayAsset?.id || isVirtualGoogleFont || isVideo) return null
-        if (!hasThumbnailSupport) return null
+    /** Short note under the drawer preview when no raster is available (OBJ, failed/skipped pipeline, unsupported). */
+    const drawerPreviewTerminalNote = useMemo(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont || isVideo) {
+            return null
+        }
+        if (drawerEphemeralLocalPreviewUrl) {
+            return null
+        }
         const st = getThumbnailState(displayAsset, thumbnailRetryCount)
-        if (st.state === 'PENDING' || st.state === 'AVAILABLE') return null
-        if (st.state === 'NOT_SUPPORTED') {
-            return "Preview isn't available for this file in the browser. You can still use the details below or download the original."
+        if (st.state === 'AVAILABLE' || st.state === 'PENDING') {
+            return null
         }
-        if (st.state === 'FAILED') {
-            return previewMissingDetailText
-                ? String(previewMissingDetailText)
-                : "We couldn't generate a preview for this file. Try Processing & automation to retry thumbnails, or download the original."
-        }
-        if (st.state === 'SKIPPED') {
-            return 'Thumbnail generation was skipped for this asset. Download the original to view the file.'
+        if (st.state === 'NOT_SUPPORTED' || st.state === 'SKIPPED' || st.state === 'FAILED') {
+            return 'Preview was unable to generate.'
         }
         return null
     }, [
         displayAsset,
-        thumbnailRetryCount,
-        hasThumbnailSupport,
+        drawerEphemeralLocalPreviewUrl,
         isVideo,
         isVirtualGoogleFont,
-        previewMissingDetailText,
+        thumbnailRetryCount,
     ])
 
     // Preview & Styles and Processing & Automation stay collapsed by default (status remains visible in section headers).
@@ -4408,10 +4508,9 @@ export default function AssetDrawer({
                                 // Phase V-1: Video thumbnail with hover preview (same as other assets)
                                 // Show thumbnail (icon > medium thumbnail) with hover video auto-play
                                 <div
-                                    className="w-full h-full cursor-pointer group relative"
+                                    className={`w-full h-full group relative ${canOpenDrawerLightbox ? 'cursor-pointer' : 'cursor-default'}`}
                                     onClick={() => {
-                                        // Open gallery view (zoom modal) for videos
-                                        setShowZoomModal(true)
+                                        openDrawerLightbox()
                                     }}
                                     onMouseEnter={() => !isMobile && setIsHoveringVideo(true)}
                                     onMouseLeave={() => {
@@ -4467,10 +4566,12 @@ export default function AssetDrawer({
                                         ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
                                     />
                                     
-                                    {/* Zoom overlay (only shown when hovering) */}
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none z-20">
-                                        <span className="text-white text-sm font-medium">Click to play</span>
-                                    </div>
+                                    {/* Zoom overlay (only when fullscreen is available) */}
+                                    {canOpenDrawerLightbox ? (
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none z-20">
+                                            <span className="text-white text-sm font-medium">Click to play</span>
+                                        </div>
+                                    ) : null}
                                 </div>
                             ) : isPdf && displayAsset.id ? (
                                 <div className="flex h-full min-h-0 w-full flex-col bg-white">
@@ -4480,7 +4581,7 @@ export default function AssetDrawer({
                                         }`}
                                         onClick={() => {
                                             if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
-                                                setShowZoomModal(true)
+                                                openDrawerLightbox()
                                             }
                                         }}
                                         role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
@@ -4491,7 +4592,7 @@ export default function AssetDrawer({
                                                 (e.key === 'Enter' || e.key === ' ')
                                             ) {
                                                 e.preventDefault()
-                                                setShowZoomModal(true)
+                                                openDrawerLightbox()
                                             }
                                         }}
                                     >
@@ -4576,11 +4677,11 @@ export default function AssetDrawer({
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
                                 <div
-                                    className="relative h-full w-full cursor-pointer group"
+                                    className={`relative h-full w-full group ${canOpenDrawerLightbox ? 'cursor-pointer' : 'cursor-default'}`}
                                     onClick={() => {
                                         const { state } = getThumbnailState(displayAsset, thumbnailRetryCount)
                                         if (state === 'AVAILABLE' || drawerEphemeralLocalPreviewUrl) {
-                                            setShowZoomModal(true)
+                                            openDrawerLightbox()
                                         }
                                     }}
                                 >
@@ -4668,11 +4769,12 @@ export default function AssetDrawer({
                                             </div>
                                         )
                                     })()}
-                                    {/* Zoom overlay (only shown when thumbnail is available) */}
-                                    {(displayAsset.thumbnail_url ||
-                                        displayAsset.final_thumbnail_url ||
-                                        displayAsset.preview_thumbnail_url ||
-                                        drawerEphemeralLocalPreviewUrl) && (
+                                    {/* Zoom overlay when fullscreen is available */}
+                                    {canOpenDrawerLightbox &&
+                                        (displayAsset.thumbnail_url ||
+                                            displayAsset.final_thumbnail_url ||
+                                            displayAsset.preview_thumbnail_url ||
+                                            drawerEphemeralLocalPreviewUrl) && (
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                             <span className="text-white text-sm font-medium">Click to zoom</span>
                                         </div>
@@ -4700,12 +4802,13 @@ export default function AssetDrawer({
                                 />
                             )}
                         </div>
-                        {drawerPreviewUnavailableBanner ? (
-                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[25] border-t border-gray-200/90 bg-white/95 px-3 py-2 backdrop-blur-[2px]">
-                                <p className="text-[11px] leading-snug text-gray-600">{drawerPreviewUnavailableBanner}</p>
-                            </div>
-                        ) : null}
                     </div>
+
+                    {drawerPreviewTerminalNote ? (
+                        <p className="text-center text-xs text-gray-500 px-2" role="status">
+                            {drawerPreviewTerminalNote}
+                        </p>
+                    ) : null}
 
                     {displayAsset?.id &&
                         !isVirtualGoogleFont &&
@@ -4970,10 +5073,14 @@ export default function AssetDrawer({
                                     <div className="flex flex-col gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => {
-                                                setShowZoomModal(true)
-                                            }}
-                                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                                            onClick={() => openDrawerLightbox()}
+                                            disabled={!canOpenDrawerLightbox}
+                                            title={
+                                                canOpenDrawerLightbox
+                                                    ? undefined
+                                                    : 'Preview is not available for fullscreen'
+                                            }
+                                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                             style={{ backgroundColor: brandPrimary, outlineColor: brandPrimary }}
                                         >
                                                 <EyeIcon className="h-4 w-4 shrink-0" aria-hidden />
@@ -5058,7 +5165,7 @@ export default function AssetDrawer({
                                     className="w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                                 >
                                     <CloudArrowUpIcon className="h-5 w-5 mr-2" />
-                                    Publish & categorize
+                                    Publish & choose folder
                                 </button>
                             )}
                             
@@ -5208,7 +5315,7 @@ export default function AssetDrawer({
                                     className="w-full inline-flex items-center justify-center rounded-md border border-indigo-500/70 bg-white px-3 py-2 text-sm font-semibold text-indigo-800 shadow-sm hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:border-indigo-400/50 dark:bg-gray-900 dark:text-indigo-100 dark:hover:bg-indigo-950/40"
                                 >
                                     <TagIcon className="h-4 w-4 mr-2 shrink-0" aria-hidden />
-                                    Assign category…
+                                    Assign folder…
                                 </button>
                             )}
                             
@@ -5259,10 +5366,14 @@ export default function AssetDrawer({
                                         <div className={`grid gap-2 ${showAddToDownload ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    setShowZoomModal(true)
-                                                }}
-                                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                                                onClick={() => openDrawerLightbox()}
+                                                disabled={!canOpenDrawerLightbox}
+                                                title={
+                                                    canOpenDrawerLightbox
+                                                        ? undefined
+                                                        : 'Preview is not available for fullscreen'
+                                                }
+                                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border border-transparent px-4 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                                 style={{ backgroundColor: brandPrimary, outlineColor: brandPrimary }}
                                             >
                                                 <EyeIcon className="h-4 w-4 shrink-0" aria-hidden />
@@ -5483,7 +5594,7 @@ export default function AssetDrawer({
                                             <p className="text-xs text-gray-600 mt-1 leading-snug">
                                                 We surface this for assets that look like strong references: starred, rated above 3★,
                                                 or with meaningful views or downloads. Promoting one helps Brand Intelligence learn
-                                                what on-brand looks like—especially next to others in this category.
+                                                what on-brand looks like—especially next to others in this folder.
                                             </p>
                                             {displayAsset.reference_promotion ? (
                                                 <div className="flex flex-wrap items-center gap-2 mt-2.5">
@@ -5831,12 +5942,12 @@ export default function AssetDrawer({
                                 </div>
                             )}
                             
-                            {/* Category as first line */}
-                            {categoryName && categoryName !== 'Uncategorized' && (
+                            {/* Folder as first line */}
+                            {categoryName && categoryName !== 'No folder' && (
                                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
                                     <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
                                         <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                            Category
+                                            Folder
                                         </span>
                                     </dt>
                                     <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
@@ -5875,7 +5986,7 @@ export default function AssetDrawer({
                                         window.toast
                                     ) {
                                         window.toast(
-                                            detail.value ? 'Starred' : 'Unstarred',
+                                            detail.value ? 'Pinned' : 'Unpinned',
                                             'success',
                                         )
                                     }
@@ -6875,7 +6986,7 @@ export default function AssetDrawer({
                             </div>
                         )}
                         <div className="flex items-start gap-4">
-                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Category</dt>
+                            <dt className="text-sm text-gray-500 w-32 flex-shrink-0">Folder</dt>
                             <dd className="text-sm font-semibold text-gray-900 flex-1 min-w-0 break-words text-left">
                                 {categoryName}
                             </dd>
@@ -7588,29 +7699,29 @@ export default function AssetDrawer({
                 </div>
             )}
 
-            {/* Publish & categorize / assign category modal */}
+            {/* Publish & choose folder / assign folder modal (backend: assign-category) */}
             {showFinalizeFromBuilderModal && displayAsset?.id && (
                 <div className="fixed inset-0 z-[10060] bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center mb-4">
                             <CloudArrowUpIcon className="h-6 w-6 text-indigo-600 mr-3" />
                             <h3 className="text-lg font-semibold text-gray-900">
-                                {finalizeModalMode === 'assign_only' ? 'Assign category' : 'Publish & categorize'}
+                                {finalizeModalMode === 'assign_only' ? 'Assign folder' : 'Publish & choose folder'}
                             </h3>
                         </div>
                         <p className="text-sm text-gray-600 mb-4">
                             {finalizeModalMode === 'assign_only'
-                                ? 'Choose a category for this staged asset. After saving, use Edit asset in the drawer if you need to complete required fields for that category.'
-                                : 'Choose a category. The asset will be published and appear in the main asset grid.'}
+                                ? 'Choose a folder for this staged asset. After saving, use Edit asset in the drawer if you need to complete required fields for that folder.'
+                                : 'Choose a folder. The asset will be published and appear in the main asset grid.'}
                         </p>
                         <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Folder</label>
                             <select
                                 value={finalizeCategoryId ?? ''}
                                 onChange={(e) => setFinalizeCategoryId(e.target.value ? parseInt(e.target.value, 10) : null)}
                                 className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                             >
-                                <option value="">Select a category...</option>
+                                <option value="">Choose a folder…</option>
                                 {(filterActiveCategories(categories)).map((cat) => (
                                     <option key={cat.id} value={cat.id}>{cat.name}</option>
                                 ))}
@@ -7675,7 +7786,7 @@ export default function AssetDrawer({
                                                 run_ai_pipeline: assignCategoryRunAi,
                                             })
                                             if (response.data?.message) {
-                                                setToastMessage('Asset published and categorized')
+                                                setToastMessage('Asset published and placed in folder')
                                                 setToastType('success')
                                                 setTimeout(() => setToastMessage(null), 5000)
                                                 setShowFinalizeFromBuilderModal(false)
@@ -7692,7 +7803,12 @@ export default function AssetDrawer({
                                             }
                                         }
                                     } catch (err) {
-                                        setToastMessage(err.response?.data?.message || (finalizeModalMode === 'assign_only' ? 'Failed to assign category' : 'Failed to publish asset'))
+                                        setToastMessage(
+                                            err.response?.data?.message ||
+                                                (finalizeModalMode === 'assign_only'
+                                                    ? 'Failed to assign folder'
+                                                    : 'Failed to publish asset'),
+                                        )
                                         setToastType('error')
                                         setTimeout(() => setToastMessage(null), 5000)
                                     } finally {
@@ -7710,7 +7826,7 @@ export default function AssetDrawer({
                                 ) : (
                                     <>
                                         <CheckIcon className="h-4 w-4 mr-2" />
-                                        {finalizeModalMode === 'assign_only' ? 'Save category' : 'Publish & categorize'}
+                                        {finalizeModalMode === 'assign_only' ? 'Save folder' : 'Publish & choose folder'}
                                     </>
                                 )}
                             </button>
@@ -8180,7 +8296,7 @@ export default function AssetDrawer({
                                                     String(vi.suggested_category).trim() !== '' && (
                                                         <section>
                                                             <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                                                                Suggested category
+                                                                Suggested folder
                                                             </h4>
                                                             <p className="mt-1.5 text-sm text-gray-800">
                                                                 {String(vi.suggested_category)}

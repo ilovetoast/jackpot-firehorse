@@ -68,7 +68,11 @@ function isActiveCenter(activeKey, path, key) {
         )
     }
     if (key === 'support') {
-        return path.startsWith('/app/admin/support') || path.startsWith('/app/admin/impersonation')
+        return (
+            path.startsWith('/app/admin/support') ||
+            path.startsWith('/app/admin/impersonation') ||
+            path.startsWith('/app/admin/demo-workspaces')
+        )
     }
     return false
 }

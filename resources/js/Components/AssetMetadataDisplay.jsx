@@ -473,10 +473,15 @@ export default function AssetMetadataDisplay({
                                 >
                                     <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
                                         {/* Mobile: label above, Desktop: fixed-width label column */}
-                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
+                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex flex-col md:items-start">
                                             <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
                                                 {field.display_label}
                                             </span>
+                                            {field.description?.trim() ? (
+                                                <span className="mt-0.5 block text-xs font-normal leading-snug text-gray-400">
+                                                    {field.description.trim()}
+                                                </span>
+                                            ) : null}
                                         </dt>
                                         {/* Show the value if there is one; system fields show label even when empty; workspace editable rows show a hint when empty */}
                                         {(displayValue ||

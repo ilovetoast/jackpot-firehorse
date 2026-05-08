@@ -46,7 +46,7 @@ function CategoryVisibilityRow({ categories, visibleCategoryIds }) {
             <p className="mt-1 text-xs text-slate-500">
                 {visibleCount} of {categories.length} folder{categories.length === 1 ? '' : 's'} (read-only here). Change on{' '}
                 <Link href={MANAGE_CATEGORIES_HREF} className="font-medium text-violet-600 hover:text-violet-500">
-                    Categories
+                    Folders & fields
                 </Link>
                 .
             </p>

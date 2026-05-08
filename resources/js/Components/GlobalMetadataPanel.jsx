@@ -103,14 +103,14 @@ export default function GlobalMetadataPanel({
                 {/* Match Upload/MetadataFieldInput label rail (w-56) so controls align with Graphic Type, Tags, etc. */}
                 <div className="flex min-w-0 items-start gap-2">
                     <label
-                        htmlFor="category-select"
+                        htmlFor="jp-upload-folder-select"
                         className="w-56 flex-shrink-0 pt-0.5 text-sm font-medium text-gray-700"
                     >
-                        Category: <span className="text-red-500">*</span>
+                        Folder: <span className="text-red-500">*</span>
                     </label>
                     <div className={inputClassName || 'min-w-0 flex-1'}>
                         <select
-                            id="category-select"
+                            id="jp-upload-folder-select"
                             value={context.categoryId || ''}
                             onChange={(e) => handleCategoryChange(e.target.value)}
                             disabled={disabled}
@@ -118,7 +118,7 @@ export default function GlobalMetadataPanel({
                                 disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
                             }`}
                         >
-                        <option value="">Select</option>
+                        <option value="">Choose folder</option>
                         {filteredCategories.map((category) => (
                             <option key={category.id} value={category.id}>
                                 {category.name}
@@ -160,11 +160,11 @@ export default function GlobalMetadataPanel({
             <div className="px-4 py-4 space-y-6">
                 {/* Category Selector */}
                 <div>
-                    <label htmlFor="category-select" className="block text-sm font-medium text-gray-700 mb-1">
-                        Category <span className="text-red-500">*</span>
+                    <label htmlFor="category-select-global" className="block text-sm font-medium text-gray-700 mb-1">
+                        Folder <span className="text-red-500">*</span>
                     </label>
                     <select
-                        id="category-select"
+                        id="category-select-global"
                         value={context.categoryId || ''}
                         onChange={(e) => handleCategoryChange(e.target.value)}
                         disabled={disabled}
@@ -172,7 +172,7 @@ export default function GlobalMetadataPanel({
                             disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed opacity-60' : ''
                         }`}
                     >
-                        <option value="">Select a category</option>
+                        <option value="">Choose a folder</option>
                         {filteredCategories.map((category) => (
                             <option key={category.id} value={category.id}>
                                 {category.name}
@@ -181,7 +181,7 @@ export default function GlobalMetadataPanel({
                     </select>
                     {!context.categoryId && (
                         <p className="mt-1 text-xs text-gray-500">
-                            Category is required to assign metadata fields
+                            Choose a folder to load the right fields for this batch
                         </p>
                     )}
                 </div>
@@ -193,7 +193,7 @@ export default function GlobalMetadataPanel({
                             <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600 flex-shrink-0" />
                             <div className="ml-3 flex-1">
                                 <h4 className="text-sm font-medium text-yellow-800">
-                                    Category Change Notice
+                                    Folder change notice
                                 </h4>
                                 <div className="mt-2 text-sm text-yellow-700 space-y-1">
                                     {categoryWarnings.map((warning, index) => (

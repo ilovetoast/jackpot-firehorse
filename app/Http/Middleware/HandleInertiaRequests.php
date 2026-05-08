@@ -9,10 +9,10 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
 use App\Services\AuthPermissionService;
-use App\Services\ImpersonationService;
 use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
 use App\Services\FileTypeService;
+use App\Services\ImpersonationService;
 use App\Services\PlanService;
 use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
@@ -426,6 +426,7 @@ class HandleInertiaRequests extends Middleware
                 'name' => $tenant->name,
                 'type' => $tenant->is_agency ? 'agency_workspace' : 'company',
             ] : null,
+            'demo_workspace' => $this->buildDemoWorkspaceSharedProp($tenant),
             'creator_module_status' => app(CreatorModuleStatusService::class)->sharedPayload($tenant),
             'ai_credit_warning_level' => $tenant ? app(\App\Services\AiUsageService::class)->getCreditWarningLevel($tenant) : null,
             'can_upload_assets' => $tenant ? app(\App\Services\FeatureGate::class)->canUploadAssets($tenant) : true,
@@ -912,5 +913,39 @@ class HandleInertiaRequests extends Middleware
     private function resolveBrandForCollectionOnlyInertia(Request $request, Tenant $tenant): ?Brand
     {
         return $this->resolveCollectionForCollectionGuestInertia($request, $tenant)?->brand;
+    }
+
+    /**
+     * Disposable demo instances (not master templates) — banner + countdown in app shell.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function buildDemoWorkspaceSharedProp(?Tenant $tenant): ?array
+    {
+        if ($tenant === null || ! $tenant->is_demo || $tenant->is_demo_template) {
+            return null;
+        }
+
+        $expiresAt = $tenant->demo_expires_at;
+        $daysRemaining = null;
+        $expired = false;
+        if ($expiresAt !== null) {
+            $end = $expiresAt->copy()->startOfDay();
+            $start = now()->startOfDay();
+            $daysRemaining = (int) $start->diffInDays($end, false);
+            if ($daysRemaining < 0) {
+                $expired = true;
+                $daysRemaining = 0;
+            }
+        }
+
+        return [
+            'is_demo' => true,
+            'is_demo_template' => false,
+            'label' => $tenant->demo_label,
+            'expires_at' => $expiresAt?->toIso8601String(),
+            'days_remaining' => $daysRemaining,
+            'expired' => $expired,
+        ];
     }
 }

@@ -38,30 +38,23 @@ export default function ManageCategoriesHub({
     }, [])
 
     useEffect(() => {
-        if (!categories.length) return
-        if (typeof window !== 'undefined') {
-            const urlSlug = new URLSearchParams(window.location.search).get('category')
-            if (urlSlug) {
-                const match = categories.find(
-                    (c) => (c.slug || '').toLowerCase() === urlSlug.toLowerCase()
-                )
-                if (match) {
-                    setSelectedCategoryId(match.id)
-                    return
-                }
-            }
-        }
-        if (initial_category_slug) {
-            const match = categories.find(
-                (c) => (c.slug || '').toLowerCase() === String(initial_category_slug).toLowerCase()
-            )
-            setSelectedCategoryId(match ? match.id : categories[0]?.id ?? null)
+        if (!categories.length) {
+            setSelectedCategoryId(null)
             return
         }
-        setSelectedCategoryId((prev) => {
-            if (prev != null && categories.some((c) => c.id === prev)) return prev
-            return categories[0]?.id ?? null
-        })
+        const slugFromUrl =
+            typeof window !== 'undefined'
+                ? new URLSearchParams(window.location.search).get('category')
+                : null
+        const slug = slugFromUrl ?? initial_category_slug ?? null
+        if (!slug) {
+            setSelectedCategoryId(null)
+            return
+        }
+        const match = categories.find(
+            (c) => (c.slug || '').toLowerCase() === String(slug).toLowerCase()
+        )
+        setSelectedCategoryId(match ? match.id : null)
     }, [initial_category_slug, categories])
 
     useEffect(() => {
@@ -77,14 +70,7 @@ export default function ManageCategoriesHub({
                     return
                 }
             }
-            if (initial_category_slug) {
-                const m = categories.find(
-                    (c) => (c.slug || '').toLowerCase() === String(initial_category_slug).toLowerCase()
-                )
-                setSelectedCategoryId(m ? m.id : categories[0]?.id ?? null)
-                return
-            }
-            setSelectedCategoryId(categories[0]?.id ?? null)
+            setSelectedCategoryId(null)
         }
         window.addEventListener('popstate', onPopState)
         return () => window.removeEventListener('popstate', onPopState)
@@ -107,7 +93,7 @@ export default function ManageCategoriesHub({
     )
 
     return (
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <div className="mx-auto flex w-full max-w-none flex-col gap-5">
             {pageNotice ? (
                 <div
                     role="status"
@@ -127,8 +113,8 @@ export default function ManageCategoriesHub({
                 </div>
             ) : null}
 
-            <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10 xl:gap-12">
-                <div className="min-h-0 w-full shrink-0 lg:sticky lg:top-4 lg:w-[min(100%,25rem)] lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto xl:w-[25rem]">
+            <div className="flex min-h-[min(70vh,720px)] flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm lg:min-h-0 lg:flex-row lg:items-stretch lg:overflow-visible">
+                <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200/90 bg-slate-50/90 lg:max-h-[min(calc(100vh-10rem),1200px)] lg:w-[300px] lg:min-w-[280px] lg:max-w-[320px] lg:border-b-0 lg:border-r lg:border-slate-200/90 lg:overflow-y-auto">
                     <ManageStructureWorkspace
                         brand={brand}
                         categories={categories}
@@ -142,22 +128,25 @@ export default function ManageCategoriesHub({
                         hubLayout
                         onSaveNotice={showPageNotice}
                     />
-                </div>
-                <div className="min-w-0 w-full flex-1 lg:min-w-0 lg:max-w-[42rem] xl:max-w-[44rem]">
-                    <ManageFieldsWorkspace
-                        brand={brand}
-                        categories={categories}
-                        registry={registry}
-                        field_filter={field_filter}
-                        low_coverage_field_keys={low_coverage_field_keys}
-                        canManageVisibility={canManageVisibility}
-                        canManageBrandCategories={canManageBrandCategories}
-                        canManageFields={canManageFields}
-                        customFieldsLimit={customFieldsLimit}
-                        metadataFieldFamilies={metadataFieldFamiliesProp}
-                        selectedCategoryId={selectedCategoryId}
-                        onSaveNotice={showPageNotice}
-                    />
+                </aside>
+                <div className="flex min-w-0 flex-1 flex-col bg-white lg:min-h-0">
+                    <div className="min-w-0 flex-1">
+                        <ManageFieldsWorkspace
+                            brand={brand}
+                            categories={categories}
+                            registry={registry}
+                            field_filter={field_filter}
+                            low_coverage_field_keys={low_coverage_field_keys}
+                            canManageVisibility={canManageVisibility}
+                            canManageBrandCategories={canManageBrandCategories}
+                            canManageFields={canManageFields}
+                            customFieldsLimit={customFieldsLimit}
+                            metadataFieldFamilies={metadataFieldFamiliesProp}
+                            selectedCategoryId={selectedCategoryId}
+                            onSaveNotice={showPageNotice}
+                            hubEmbedded
+                        />
+                    </div>
                 </div>
             </div>
         </div>

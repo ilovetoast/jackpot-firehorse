@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\MetadataFieldFilterEligibility;
 use App\Models\Category;
 use App\Models\SystemCategory;
 use App\Models\Tenant;
@@ -190,6 +191,14 @@ class TenantMetadataVisibilityService
         // Convert show_* flags to is_*_hidden flags
         // C9.2: is_hidden is ONLY for category suppression, NOT for edit visibility
         // Use is_edit_hidden for edit visibility (Quick View checkbox)
+        if (array_key_exists('show_in_filters', $visibility)) {
+            $fieldType = (string) (DB::table('metadata_fields')->where('id', $fieldId)->value('type') ?? 'text');
+            $visibility['show_in_filters'] = MetadataFieldFilterEligibility::sanitizeGlobalShowInFilters(
+                $fieldType,
+                $visibility['show_in_filters']
+            );
+        }
+
         $isUploadHidden = isset($visibility['show_on_upload']) && ! $visibility['show_on_upload'];
         $isEditHidden = isset($visibility['show_on_edit']) && ! $visibility['show_on_edit'];
         $isFilterHidden = isset($visibility['show_in_filters']) && ! $visibility['show_in_filters'];
@@ -1167,9 +1176,9 @@ class TenantMetadataVisibilityService
             ];
         }
 
-        // Starred: not in primary / More filters by default; still enabled and visible in drawer
+        // Pinned (DB key `starred`): not in primary / More filters by default; still enabled and visible in drawer
         if ($fieldKey === 'starred') {
-            $v = config('metadata_category_defaults.starred_default_visibility', []);
+            $v = config('metadata_category_defaults.pinned_default_visibility', []);
             if (! empty($v)) {
                 return [
                     'is_hidden' => $v['is_hidden'] ?? false,

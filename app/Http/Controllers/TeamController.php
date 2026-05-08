@@ -12,6 +12,7 @@ use App\Models\TenantAgency;
 use App\Models\TenantInvitation;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Services\Demo\DemoTenantService;
 use App\Services\PlanService;
 use App\Support\Roles\RoleRegistry;
 use Illuminate\Http\Request;
@@ -490,6 +491,14 @@ class TeamController extends Controller
         // Check if user has permission to manage team
         if (! $authUser->canForContext('team.manage', $tenant, null)) {
             abort(403, 'Only administrators and owners can invite team members.');
+        }
+
+        $demoInviteMessage = app(DemoTenantService::class)->demoRestrictionMessage(
+            DemoTenantService::ACTION_INVITE_USERS,
+            $tenant
+        );
+        if ($demoInviteMessage !== null) {
+            return back()->withErrors(['email' => $demoInviteMessage]);
         }
 
         $validated = $request->validate([

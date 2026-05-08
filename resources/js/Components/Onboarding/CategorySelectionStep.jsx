@@ -21,6 +21,7 @@ function CategoryToggle({ category, isVisible, onToggle, brandColor }) {
     return (
         <motion.button
             type="button"
+            aria-label={`${isVisible ? 'Hide' : 'Show'} folder ${category.name} in the library sidebar`}
             onClick={() => onToggle(category.id)}
             initial={{ opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -122,10 +123,11 @@ export default function CategorySelectionStep({
             className="w-full max-w-3xl mx-auto"
         >
             <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white/95">
-                Choose your categories
+                Choose your folders
             </h2>
             <p className="mt-2 text-sm text-white/40 leading-relaxed max-w-xl">
-                Pick which asset and execution categories are relevant to your work. Hidden categories can always be turned on later from the management page.
+                Pick which asset and execution folders are relevant. Folders organize your library; you can turn hidden
+                folders back on anytime from Manage → Folders &amp; fields.
             </p>
 
             <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
@@ -172,7 +174,7 @@ export default function CategorySelectionStep({
             <div className="mt-8">
                 <SectionHeader
                     title="Need something else?"
-                    subtitle="Suggest a category for your industry — you can always create custom categories later."
+                    subtitle="Suggest a folder for your industry — you can always create custom folders later."
                 />
                 <div className="space-y-2 max-w-md">
                     {customSuggestions.map((val, idx) => (
@@ -181,7 +183,7 @@ export default function CategorySelectionStep({
                             type="text"
                             value={val}
                             onChange={e => handleSuggestionChange(idx, e.target.value)}
-                            placeholder={idx === 0 ? 'e.g. Merchandise, Signage, UGC…' : 'Another category…'}
+                            placeholder={idx === 0 ? 'e.g. Merchandise, Signage, UGC…' : 'Another folder…'}
                             className="w-full rounded-xl bg-white/[0.04] border border-white/[0.08] px-4 py-2.5 text-sm text-white/80 placeholder-white/20 focus:outline-none focus:border-white/20 transition-colors"
                         />
                     ))}
@@ -197,7 +199,7 @@ export default function CategorySelectionStep({
                     )}
                 </div>
                 <p className="mt-3 text-xs text-white/20">
-                    You can create, rename, and manage all categories and their metadata fields from Manage → Categories.
+                    You can create, rename, and manage folders and their fields from Manage → Folders & fields.
                 </p>
             </div>
 

@@ -52,10 +52,10 @@ export default function AddCategoryChoiceModal({
                 <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-gray-200">
                     <div className="min-w-0">
                         <h2 className="text-lg font-semibold text-gray-900 truncate">
-                            Add Category
+                            Add folder
                         </h2>
                         <p className="mt-0.5 text-sm text-gray-500">
-                            Create a new category or add one from the system library.
+                            Create a new folder or add one from the system library.
                         </p>
                     </div>
                     <button
@@ -76,7 +76,7 @@ export default function AddCategoryChoiceModal({
                                     Create
                                 </h3>
                                 <p className="text-xs text-gray-500 leading-tight">
-                                    Define a custom category with your own name and settings.
+                                    Define a custom folder with your own name and settings.
                                 </p>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -90,10 +90,10 @@ export default function AddCategoryChoiceModal({
                                     </span>
                                     <div className="min-w-0">
                                         <span className="block text-sm font-medium text-gray-900">
-                                            Add New Category
+                                            New custom folder
                                         </span>
                                         <span className="block text-xs text-gray-500 leading-snug mt-0.5">
-                                            Create a custom category with your own name and access rules.
+                                            Create a custom folder with your own name and access rules.
                                         </span>
                                     </div>
                                 </button>
@@ -108,10 +108,10 @@ export default function AddCategoryChoiceModal({
                                     </span>
                                     <div className="min-w-0">
                                         <span className="block text-sm font-medium text-gray-900">
-                                            Add Existing Category
+                                            From system library
                                         </span>
                                         <span className="block text-xs text-gray-500 leading-snug mt-0.5">
-                                            Add a pre-built category from the system library (e.g. Digital, Print).
+                                            Add a pre-built folder from the system library (e.g. Digital, Print).
                                         </span>
                                     </div>
                                 </button>

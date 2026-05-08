@@ -223,12 +223,12 @@ const BULK_ACTION_GROUPS = [
     {
         label: 'Classification',
         sectionDescription:
-            'Sets the primary category for each asset — it drives folder placement, visibility, and how items sort on the grid. Choose Library or Execution type when applicable.',
+            'Sets the primary folder for each asset — it drives library placement, visibility, and how items sort on the grid. Choose Library or Execution type when applicable.',
         actions: [
             {
                 id: 'ASSIGN_CATEGORY',
-                label: 'Assign Category',
-                helper: 'Set the top-level category, asset type, and main-grid placement as a group',
+                label: 'Assign folder',
+                helper: 'Set the top-level folder, asset type, and main-grid placement as a group',
                 icon: DocumentCheckIcon,
             },
         ],
@@ -649,7 +649,7 @@ export default function BulkActionsModal({
             return
         }
         if (selectedAction === ASSIGN_CATEGORY_ACTION && !assignCategoryId) {
-            setError('Please select a category.')
+            setError('Please select a folder.')
             return
         }
         if (selectedAction === RENAME_ASSETS_ACTION) {
@@ -807,8 +807,8 @@ export default function BulkActionsModal({
 
                                 {classificationGroup ? (
                                     <BulkModalSuperSection
-                                        title="Category"
-                                        description="This is the primary classification for the grid and library routing. Get it right before fine-tuning metadata or tags below."
+                                        title="Folder"
+                                        description="This is the primary classification for the grid and library routing. Get it right before fine-tuning fields or tags below."
                                     >
                                         <BulkActionGroupBlock
                                             group={classificationGroup}
@@ -822,7 +822,7 @@ export default function BulkActionsModal({
                                 {assetDataGroup ? (
                                     <BulkModalSuperSection
                                         title="Asset data"
-                                        description="Bulk edits to custom fields and tags. Category above stays separate so placement stays intentional."
+                                        description="Bulk edits to custom fields and tags. Folder above stays separate so placement stays intentional."
                                     >
                                         <BulkActionGroupBlock
                                             group={assetDataGroup}
@@ -1025,20 +1025,23 @@ export default function BulkActionsModal({
                                         </>
                                     )}
                                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Category
+                                        Folder
                                     </label>
                                     <select
                                         value={assignCategoryId}
                                         onChange={(e) => setAssignCategoryId(e.target.value)}
                                         className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
                                     >
-                                        <option value="">Select a category...</option>
+                                        <option value="">Choose a folder…</option>
                                         {assignCategoryOptions.map((cat) => (
                                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                                         ))}
                                     </select>
                                     {assignCategoryOptions.length === 0 && (
-                                        <p className="mt-2 text-xs text-amber-600">No categories for this asset type. Create a category first.</p>
+                                        <p className="mt-2 text-xs text-amber-600">
+                                            No folders for this asset type. Add a folder under Manage → Folders &amp;
+                                            fields first.
+                                        </p>
                                     )}
                                 </>
                             )}
@@ -1220,7 +1223,7 @@ export default function BulkActionsModal({
                                         : isReject
                                         ? 'Reject'
                                         : isAssignCategory
-                                        ? 'Assign Category'
+                                        ? 'Assign folder'
                                         : isRename
                                         ? 'Rename'
                                         : 'Apply'}

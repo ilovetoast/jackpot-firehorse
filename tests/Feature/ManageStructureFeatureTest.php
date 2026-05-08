@@ -8,10 +8,12 @@ use App\Models\Category;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Concerns\CreatesActivatedTenantBrandAdmin;
 use Tests\TestCase;
 
 class ManageStructureFeatureTest extends TestCase
 {
+    use CreatesActivatedTenantBrandAdmin;
     use RefreshDatabase;
 
     /**
@@ -19,35 +21,17 @@ class ManageStructureFeatureTest extends TestCase
      */
     private function tenantBrandAdminUser(): array
     {
-        $tenant = Tenant::create(['name' => 'Struct Co', 'slug' => 'struct-co']);
-        $brand = Brand::create([
-            'tenant_id' => $tenant->id,
-            'name' => 'Struct Brand',
-            'slug' => 'struct-brand',
-        ]);
-        $user = User::create([
-            'email' => 'struct-admin@example.com',
-            'password' => bcrypt('password'),
-            'first_name' => 'S',
-            'last_name' => 'A',
-        ]);
-        $user->tenants()->attach($tenant->id, ['role' => 'admin']);
-        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
-
-        return [$tenant, $brand, $user];
-    }
-
-    private function actingTenantBrand(User $user, Tenant $tenant, Brand $brand): self
-    {
-        return $this->actingAs($user)
-            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id]);
+        return $this->createActivatedTenantBrandAdmin(
+            ['name' => 'Struct Co', 'slug' => 'struct-co'],
+            ['email' => 'struct-admin@example.com', 'first_name' => 'S', 'last_name' => 'A']
+        );
     }
 
     public function test_manage_structure_inertia_includes_categories_and_permissions(): void
     {
         [$tenant, $brand, $user] = $this->tenantBrandAdminUser();
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->get('/app/manage/categories')
             ->assertStatus(200)
             ->assertInertia(fn ($page) => $page
@@ -87,7 +71,7 @@ class ManageStructureFeatureTest extends TestCase
             'sort_order' => 2,
         ]);
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->putJson("/app/api/brands/{$brand->id}/categories/reorder", [
                 'asset_type' => 'asset',
                 'categories' => [
@@ -119,7 +103,7 @@ class ManageStructureFeatureTest extends TestCase
             'sort_order' => 1,
         ]);
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->patchJson("/app/api/brands/{$brand->id}/categories/{$cat->id}/visibility", [
                 'is_hidden' => true,
             ])
@@ -132,7 +116,7 @@ class ManageStructureFeatureTest extends TestCase
     {
         [$tenant, $brand, $user] = $this->tenantBrandAdminUser();
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->postJson("/app/brands/{$brand->id}/categories", [
                 'name' => 'Custom From Test',
                 'asset_type' => 'asset',
@@ -144,7 +128,7 @@ class ManageStructureFeatureTest extends TestCase
         $cat = Category::where('brand_id', $brand->id)->where('slug', 'custom-from-test')->first();
         $this->assertNotNull($cat);
 
-        $this->actingTenantBrand($user, $tenant, $brand)
+        $this->actingAsTenantBrand($user, $tenant, $brand)
             ->delete(route('brands.categories.destroy', ['brand' => $brand->id, 'category' => $cat->id]))
             ->assertRedirect();
 

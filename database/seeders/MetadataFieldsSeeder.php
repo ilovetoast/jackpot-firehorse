@@ -6,6 +6,7 @@ use App\Models\Tenant;
 use App\Support\MetadataCache;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Comprehensive Metadata Fields Seeder
@@ -51,6 +52,9 @@ class MetadataFieldsSeeder extends Seeder
 
         // Configure category-specific settings
         $this->configureCategorySettings();
+
+        // User-facing labels (e.g. Pinned) and optional field helper text
+        $this->syncPinnedLabelAndFieldDescriptions();
 
         // Guarantee default system fields exist and are enabled (staging consistency)
         $this->ensureDefaultSystemFields();
@@ -607,11 +611,11 @@ class MetadataFieldsSeeder extends Seeder
                 'updated_at' => now(),
             ]);
 
-        // Starred Asset (boolean, user-editable, applied to all categories)
+        // Pinned asset (boolean, DB key `starred`). User-facing label: Pinned.
         // is_filterable => true so the field appears in grid filters when "Filter" is enabled per category
         $this->getOrCreateField([
             'key' => 'starred',
-            'system_label' => 'Starred',
+            'system_label' => 'Pinned',
             'type' => 'boolean',
             'applies_to' => 'all',
             'scope' => 'system',
@@ -627,6 +631,7 @@ class MetadataFieldsSeeder extends Seeder
         DB::table('metadata_fields')
             ->where('key', 'starred')
             ->update([
+                'system_label' => 'Pinned',
                 'type' => 'boolean',
                 'is_filterable' => true,
                 'is_user_editable' => true,
@@ -903,7 +908,7 @@ class MetadataFieldsSeeder extends Seeder
         $this->syncOptions($prTypeId, [
             ['value' => 'press_release', 'system_label' => 'Press Release'],
             ['value' => 'media_kit', 'system_label' => 'Media Kit'],
-            ['value' => 'backgrounder', 'system_label' => 'Backgrounder'],
+            ['value' => 'internal', 'system_label' => 'Internal'],
             ['value' => 'fact_sheet', 'system_label' => 'Fact Sheet'],
             ['value' => 'announcement', 'system_label' => 'Announcement'],
         ]);
@@ -1193,6 +1198,139 @@ class MetadataFieldsSeeder extends Seeder
      *
      * @return int Field ID
      */
+    /**
+     * Sync user-facing label for pinned assets (DB key `starred`) and short helper text for system fields.
+     * Safe to run on every seed: updates labels/descriptions only.
+     */
+    protected function syncPinnedLabelAndFieldDescriptions(): void
+    {
+        if (! Schema::hasColumn('metadata_fields', 'description')) {
+            return;
+        }
+
+        $byKey = [
+            'dimensions' => [
+                'description' => 'Width and height detected from the file.',
+            ],
+            'photo_type' => [
+                'description' => 'How the photo is shot or staged.',
+            ],
+            'logo_type' => [
+                'description' => 'What kind of logo file this is.',
+            ],
+            'font_role' => [
+                'description' => 'How this font is used in your typography system.',
+            ],
+            'graphic_type' => [
+                'description' => 'Kind of graphic or illustration.',
+            ],
+            'video_type' => [
+                'description' => 'Kind of video asset in the library.',
+            ],
+            'template_type' => [
+                'description' => 'What this template is meant to produce.',
+            ],
+            'audio_type' => [
+                'description' => 'Kind of audio asset.',
+            ],
+            'model_3d_type' => [
+                'description' => 'Kind of 3D model or scene.',
+            ],
+            'orientation' => [
+                'description' => 'Landscape, portrait, or square (from the file).',
+            ],
+            'color_space' => [
+                'description' => 'Color profile detected from the file.',
+            ],
+            'resolution_class' => [
+                'description' => 'Rough resolution tier from pixel size.',
+            ],
+            'usage_rights' => [
+                'description' => 'Where and how this asset may be used.',
+            ],
+            'expiration_date' => [
+                'description' => 'When usage rights end, if applicable.',
+            ],
+            'tags' => [
+                'description' => 'Labels for search, filters, and organization.',
+            ],
+            'collection' => [
+                'description' => 'Curated groups this asset belongs to.',
+            ],
+            'quality_rating' => [
+                'description' => 'Team quality score from 1–5 stars.',
+            ],
+            'starred' => [
+                'system_label' => 'Pinned',
+                'description' => 'Pin this asset to feature it at the top of the list.',
+            ],
+            'environment_type' => [
+                'description' => 'Where the scene takes place.',
+            ],
+            'subject_type' => [
+                'description' => 'What the main subject is.',
+            ],
+            'dominant_colors' => [
+                'description' => 'Main colors extracted from the image.',
+            ],
+            'dominant_hue_group' => [
+                'description' => 'Broad color family for quick filtering.',
+            ],
+            'print_type' => [
+                'description' => 'Format of this print execution.',
+            ],
+            'digital_type' => [
+                'description' => 'Format of this digital ad or unit.',
+            ],
+            'ooh_type' => [
+                'description' => 'Out-of-home placement type.',
+            ],
+            'event_type' => [
+                'description' => 'Event or experiential format.',
+            ],
+            'execution_video_type' => [
+                'description' => 'Video execution format.',
+            ],
+            'sales_collateral_type' => [
+                'description' => 'Sales or enablement format.',
+            ],
+            'pr_type' => [
+                'description' => 'PR or communications format.',
+            ],
+            'packaging_type' => [
+                'description' => 'Packaging structure or artifact type.',
+            ],
+            'product_render_type' => [
+                'description' => 'Kind of product render.',
+            ],
+            'radio_type' => [
+                'description' => 'Radio spot format.',
+            ],
+            'social_format' => [
+                'description' => 'Social asset shape or placement.',
+            ],
+            'social_platform' => [
+                'description' => 'Primary social network for this execution.',
+            ],
+            'email_type' => [
+                'description' => 'Email campaign or send type.',
+            ],
+            'web_type' => [
+                'description' => 'Web or landing experience type.',
+            ],
+            'channel_platform' => [
+                'description' => 'Channel or platform where this runs.',
+            ],
+        ];
+
+        foreach ($byKey as $key => $payload) {
+            DB::table('metadata_fields')
+                ->where('key', $key)
+                ->where('scope', 'system')
+                ->update(array_merge($payload, ['updated_at' => now()]));
+        }
+    }
+
     protected function getOrCreateField(array $fieldData): int
     {
         $existingField = DB::table('metadata_fields')

@@ -7,6 +7,7 @@ namespace App\Services\Demo;
 use App\Models\Tenant;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Central guardrails for disposable demo workspaces (Phase 1: data model + selective HTTP blocks).
@@ -75,6 +76,21 @@ class DemoTenantService
         }
 
         return self::DISABLED_MESSAGE;
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    public function assertDemoCanPerform(string $action, ?Tenant $tenant): void
+    {
+        $message = $this->demoRestrictionMessage($action, $tenant);
+        if ($message === null) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'demo' => $message,
+        ]);
     }
 
     /**

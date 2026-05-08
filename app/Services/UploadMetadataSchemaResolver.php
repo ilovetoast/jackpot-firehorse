@@ -441,6 +441,7 @@ class UploadMetadataSchemaResolver
                 'field_id' => $field['field_id'],
                 'key' => $field['key'],
                 'display_label' => $field['display_label'],
+                'description' => $field['description'] ?? null,
                 'type' => $field['type'],
                 'is_required' => $isRequired,
                 'required' => $isRequired, // Alias for upload validation (validateRequiredMetadataFields uses f.required)

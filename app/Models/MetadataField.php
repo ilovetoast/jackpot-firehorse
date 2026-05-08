@@ -16,6 +16,7 @@ class MetadataField extends Model
     protected $fillable = [
         'key',
         'system_label',
+        'description',
         'type',
         'applies_to',
         'scope',

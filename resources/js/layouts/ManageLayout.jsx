@@ -16,13 +16,19 @@ const MANAGE_FIELDS_HREF =
     typeof route === 'function' ? route('manage.fields') : '/app/manage/fields'
 
 const SIDEBAR_ITEMS = [
-    { id: 'categories', label: 'Categories', href: MANAGE_CATEGORIES_HREF, icon: Squares2X2Icon },
+    { id: 'categories', label: 'Folders & fields', href: MANAGE_CATEGORIES_HREF, icon: Squares2X2Icon },
     { id: 'fields', label: 'Fields', href: MANAGE_FIELDS_HREF, icon: RectangleStackIcon },
     { id: 'tags', label: 'Tags', href: '/app/manage/tags', icon: TagIcon },
     { id: 'values', label: 'Values', href: '/app/manage/values', icon: ListBulletIcon },
 ]
 
-export default function ManageLayout({ children, title = 'Manage', activeSection = 'categories' }) {
+export default function ManageLayout({
+    children,
+    title = 'Manage',
+    activeSection = 'categories',
+    /** Override default `BRAND_WORKBENCH_CONTENT` when a page needs more horizontal room (e.g. Folders & fields). */
+    workbenchChromeClassName = BRAND_WORKBENCH_CONTENT,
+}) {
     const { auth, tenant } = usePage().props
     const brand = auth?.activeBrand
     const company = auth?.activeCompany
@@ -36,14 +42,14 @@ export default function ManageLayout({ children, title = 'Manage', activeSection
             <AppNav brand={auth?.activeBrand} tenant={tenant} />
 
             <div className="flex-1">
-                <BrandWorkbenchChrome brand={auth?.activeBrand} company={company} className={BRAND_WORKBENCH_CONTENT}>
+                <BrandWorkbenchChrome brand={auth?.activeBrand} company={company} className={workbenchChromeClassName}>
                     <BrandWorkbenchMasthead
                         companyName={company?.name}
                         brandName={brand?.name}
                         canLinkCompany={canLinkCompany}
                         companyHref={typeof route === 'function' ? route('companies.settings') : '/app/companies/settings'}
                         title="Manage"
-                        description="Configure the library structure, categories, fields, tags, and controlled values for this brand."
+                        description="Configure folders, fields, tags, and controlled values for this brand’s library."
                         brandColor={brandColor}
                     />
 

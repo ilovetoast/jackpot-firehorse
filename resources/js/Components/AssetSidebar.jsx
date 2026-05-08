@@ -111,7 +111,7 @@ export default function AssetSidebar({
     showStaged = true,
     showResearch = true,
     baseUrl = '/app/assets',
-    emptyMessage = 'No categories yet',
+    emptyMessage = 'No folders yet',
     onResearchClick,
     onStagedClick,
     onTrashClick,
@@ -207,8 +207,8 @@ export default function AssetSidebar({
                                                         : '/app/manage/categories'
                                                 }
                                                 className="rounded p-1 opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/30"
-                                                title="Manage categories and fields"
-                                                aria-label="Manage categories and fields"
+                                                title="Manage folders and fields"
+                                                aria-label="Manage folders and fields"
                                             >
                                                 <Cog6ToothIcon className="h-3.5 w-3.5" />
                                             </Link>
@@ -217,8 +217,8 @@ export default function AssetSidebar({
                                             type="button"
                                             onClick={onAddCategoryClick ?? (() => {})}
                                             className="rounded p-1 opacity-70 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/30"
-                                            title="Add category"
-                                            aria-label="Add category"
+                                            title="Add folder"
+                                            aria-label="Add folder"
                                         >
                                             <PlusIcon className="h-3.5 w-3.5" />
                                         </button>
@@ -296,7 +296,7 @@ export default function AssetSidebar({
                                                             style={{ width: '250px' }}
                                                         >
                                                             <div className="p-3">
-                                                                <div className="font-semibold mb-2.5 text-white">Restricted Category</div>
+                                                                <div className="font-semibold mb-2.5 text-white">Restricted folder</div>
                                                                 <div className="space-y-2">
                                                                     <div className="text-gray-200">Accessible by:</div>
                                                                     <ul className="list-disc list-outside ml-4 space-y-1 text-gray-200">
@@ -350,7 +350,7 @@ export default function AssetSidebar({
                                                 onClick={onStagedClick ?? (() => router.get(`${baseUrl}/staged`))}
                                                 icon={FolderIcon}
                                                 label="Staged"
-                                                title="Uncategorized assets awaiting classification. Assign a category to move them into the main library."
+                                                title="Assets awaiting classification. Assign a folder to move them into the main library."
                                                 count={stagedCount}
                                                 activeBgColor={activeBgColor}
                                                 activeTextColor={activeTextColor}

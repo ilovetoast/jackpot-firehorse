@@ -286,6 +286,22 @@ export function getContrastTextColor(backgroundColor) {
 }
 
 /**
+ * Label color for solid brand-filled primary buttons (workbench `--wb-accent` fills).
+ * Strict binary {@link getContrastTextColor} often picks black on saturated oranges/reds because it
+ * marginally wins WCAG math, but product CTAs expect light copy. Prefer white when it meets WCAG AA
+ * for **large** text (3:1); otherwise fall back to strict contrast.
+ *
+ * @param {string|null|undefined} backgroundHex — resting or hover fill, #RRGGBB
+ * @returns {'#ffffff'|'#000000'}
+ */
+export function getSolidFillButtonForegroundHex(backgroundHex) {
+    if (!backgroundHex) return '#ffffff'
+    const bg = normalizeHexColor(backgroundHex)
+    if (getContrastRatio('#ffffff', bg) >= 3) return '#ffffff'
+    return getContrastTextColor(bg)
+}
+
+/**
  * Foreground for **solid** workspace sidebars (Assets / Collections / Deliverables nav rail).
  *
  * `getContrastTextColor` alone picks black on many pastel / mid‑tint brand primaries because the ratio

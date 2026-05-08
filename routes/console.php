@@ -161,4 +161,17 @@ if ($schedulerEnabled) {
         ->withoutOverlapping(120)
         ->description('Queue metadata insights sync jobs for tenants with ai_insights_enabled');
 
+    // Disposable demo workspace cleanup (Phase 4): only registers when enabled; respects demo.cleanup_dry_run.
+    if (config('demo.cleanup_enabled')) {
+        $demoCleanupCmd = (bool) config('demo.cleanup_dry_run', false)
+            ? 'demo:cleanup-expired --dry-run --force'
+            : 'demo:cleanup-expired --force';
+
+        Schedule::command($demoCleanupCmd)
+            ->dailyAt('04:45')
+            ->withoutOverlapping(120)
+            ->name('demo:cleanup-expired')
+            ->description('Delete expired/archived disposable demo tenants and tenants/{uuid}/ storage');
+    }
+
 } // end if ($schedulerEnabled)

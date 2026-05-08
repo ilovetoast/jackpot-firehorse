@@ -71,7 +71,7 @@ export default function CategorySettingsModal({
     const handleSave = () => {
         const trimmed = name?.trim()
         if (!trimmed || trimmed.length <= 2) {
-            setError('Category name must be at least 3 characters.')
+            setError('Folder name must be at least 3 characters.')
             return
         }
         if (isPrivate && !hasRestrictSelection) {
@@ -108,7 +108,7 @@ export default function CategorySettingsModal({
                 onClose()
             },
             onError: (errors) => {
-                setError(errors?.error || errors?.name?.[0] || 'Failed to update category.')
+                setError(errors?.error || errors?.name?.[0] || 'Failed to update folder.')
             },
             onFinish: () => setLoading(false),
         })
@@ -138,7 +138,7 @@ export default function CategorySettingsModal({
                     {/* Header */}
                     <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 sm:px-5">
                         <h3 id="category-settings-title" className="text-base font-semibold text-gray-900">
-                            Category Settings
+                            Folder settings
                         </h3>
                         <button
                             type="button"
@@ -164,7 +164,7 @@ export default function CategorySettingsModal({
                             <div className="space-y-4">
                                 <div>
                                     <label htmlFor="category-name" className="block text-sm font-medium text-gray-700 mb-1">
-                                        Category Name
+                                        Folder name
                                     </label>
                                     <input
                                         ref={nameInputRef}
@@ -177,7 +177,7 @@ export default function CategorySettingsModal({
                                 </div>
                                 <div>
                                     <label htmlFor="category-type" className="block text-sm font-medium text-gray-700 mb-1">
-                                        Category Type
+                                        Library type
                                     </label>
                                     <select
                                         id="category-type"
@@ -207,16 +207,16 @@ export default function CategorySettingsModal({
                         {canViewMetadataRegistry && (
                             <>
                                 <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Metadata Fields</h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Fields</h3>
                                     <p className="text-sm text-gray-500 mb-3">
-                                        Configure which metadata fields appear for assets in this category.
+                                        Configure which fields appear for assets in this folder.
                                     </p>
                                     <a
                                         href={manageCategoriesUrl}
                                         className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                     >
                                         <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                                        Configure metadata fields
+                                        Configure folder fields
                                     </a>
                                 </section>
                                 <hr className="border-gray-200" />
@@ -305,7 +305,7 @@ export default function CategorySettingsModal({
                                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100 transition-colors"
                             >
                                 <TrashIcon className="h-4 w-4" />
-                                Delete Category
+                                Delete folder
                             </button>
                         </section>
                     </div>

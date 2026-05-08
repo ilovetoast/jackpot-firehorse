@@ -12,11 +12,16 @@
 
 ## Protections in this repo
 
-1. **`tests/bootstrap.php`** — Sets `DB_DATABASE=testing` before `vendor/autoload.php`, and **removes `bootstrap/cache/config.php`** if present so a stale config cache cannot point tests at your dev DB.
+1. **`tests/bootstrap.php`** — Sets `APP_ENV=testing`, `APP_RUNNING_UNIT_TESTS=1`, and `DB_DATABASE=testing` **before** `vendor/autoload.php`. Removes **`bootstrap/cache/config.php`** and **`bootstrap/cache/routes*.php`** so stale caches cannot freeze a primary `DB_DATABASE` or route config during PHPUnit.
 2. **`phpunit.xml`** — Uses `tests/bootstrap.php` and sets `APP_ENV=testing` and `DB_DATABASE=testing`.
 3. **`.env.testing`** — Documents `DB_DATABASE=testing` for `php artisan` with `--env=testing`.
-4. **`Tests\TestCase`** — Before `RefreshDatabase` runs, throws if the resolved database name is not an allowed test database.
-5. **`composer test`** — Runs `php artisan config:clear` before `php artisan test` (extra safety when not using PHPUnit bootstrap alone).
+4. **`Tests\TestCase`** — Before `RefreshDatabase` runs: requires `APP_ENV=testing`; checks the resolved connection against **`App\Support\Database\TestDatabaseSchema`**; verifies `$_SERVER['DB_DATABASE']` matches Laravel’s resolved database name; for MySQL/MariaDB/PostgreSQL runs a **live** `SELECT DATABASE()` / `current_database()` and refuses if it disagrees with config (catches wrong default schema on the server).
+5. **`App\Console\Listeners\BlockUnsafeDestructiveDatabaseCommands`** — When **not** `APP_ENV=testing`, blocks **`migrate:fresh`**, **`migrate:refresh`**, and **`db:wipe`** unless the target connection’s database name is a permitted sandbox **or** `ALLOW_DATABASE_DESTRUCTION=true` **or** the name is listed in **`DESTRUCTIVE_ALLOWED_DATABASES`** (comma-separated). This stops accidental `php artisan migrate:fresh` against a primary dev DB.
+6. **`composer test`** — Runs `php artisan config:clear` before `php artisan test` (extra safety when not using PHPUnit bootstrap alone).
+
+### Naming rule
+
+If your **real** application data lives in a MySQL database named **`testing`**, PHPUnit’s default allowlist would treat it as safe. **Use a different name for production/dev primary data** (e.g. `jackpot`, `laravel`, `app_prod`) and keep **`testing`** (or `*_testing`) for disposable test schemas only.
 
 ## Safe commands
 
@@ -24,7 +29,7 @@
 |------|---------|
 | Refresh **only** the test DB | `./scripts/test-db-fresh.sh` |
 | Run tests (Sail) | `./vendor/bin/sail test` or `./vendor/bin/sail exec laravel.test php artisan test` |
-| Wipe **dev** DB and seed (explicit) | `./vendor/bin/sail artisan migrate:fresh --seed` — **only when you intend to destroy dev data** |
+| Wipe **dev** DB and seed (explicit) | Set `ALLOW_DATABASE_DESTRUCTION=true` then `./vendor/bin/sail artisan migrate:fresh --seed` — **only when you intend to destroy dev data** (destructive commands are blocked for non-sandbox DB names by default) |
 
 ## For agents / CI
 

@@ -6,8 +6,8 @@ require_once __DIR__.'/../app/helpers.php';
 
 use App\Exceptions\AIProviderException;
 use App\Exceptions\AIQuotaExceededException;
-use App\Services\AI\AIQuotaExceededNotifier;
 use App\Models\Asset;
+use App\Services\AI\AIQuotaExceededNotifier;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -154,6 +154,17 @@ return Application::configure(basePath: dirname(__DIR__))
                 'admin.impersonation.index',
                 'admin.impersonation.show',
                 'admin.impersonation.end',
+                'admin.demo-workspaces.index',
+                'admin.demo-workspaces.show',
+                'admin.demo-workspaces.expire',
+                'admin.demo-workspaces.extend',
+                'admin.demo-workspaces.archive-failed',
+                'admin.demo-workspaces.delete-now',
+                'admin.demo-workspaces.template-audit',
+                'admin.demo-workspaces.clone-plan',
+                'admin.demo-workspaces.clone-plan.preview',
+                'admin.demo-workspaces.create-demo',
+                'admin.demo-workspaces.quick-create',
             ])) {
                 return null;
             }

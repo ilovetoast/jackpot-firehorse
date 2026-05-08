@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\AiUsageService;
 use App\Services\Billing\StripeSubscriptionSyncService;
 use App\Services\BillingService;
+use App\Services\Demo\DemoTenantService;
 use App\Services\FeatureGate;
 use App\Services\PlanService;
 use App\Services\TenantPermissionResolver;
@@ -30,8 +31,7 @@ class BillingController extends Controller
         protected BillingService $billingService,
         protected AiUsageService $aiUsageService,
         protected TenantPermissionResolver $tenantPermissionResolver,
-    ) {
-    }
+    ) {}
 
     /**
      * Show the billing/plans page.
@@ -41,7 +41,7 @@ class BillingController extends Controller
         // Billing is company-level, get tenant from user's companies
         $user = $request->user();
         $tenantId = session('tenant_id');
-        
+
         if (! $tenantId) {
             // No active tenant, get first tenant from user
             $tenant = $user->tenants->first();
@@ -68,12 +68,12 @@ class BillingController extends Controller
             ->orderBy('created_at', 'desc')
             ->first();
         $paymentMethod = $this->safeDefaultPaymentMethod($tenant);
-        $planService = new PlanService();
+        $planService = new PlanService;
 
         // Get current usage counts
         $startOfMonth = now()->startOfMonth();
         $endOfMonth = now()->endOfMonth();
-        
+
         // Get AI usage for current month (unified credit system)
         $aiUsageStatus = $this->aiUsageService->getUsageStatus($tenant);
         $storageInfo = $planService->getStorageInfo($tenant);
@@ -99,52 +99,52 @@ class BillingController extends Controller
 
         // Fetch Stripe price data for each plan
         $plans = collect(config('plans'))
-            ->map(function ($plan, $key) use ($currentPlan, $currentUsage) {
-            $priceData = null;
-            $monthlyPrice = null;
+            ->map(function ($plan, $key) use ($currentPlan) {
+                $priceData = null;
+                $monthlyPrice = null;
 
-            // Skip Stripe fetch for plans without a price (e.g. enterprise sales-only)
-            if ($key !== 'free' && ! empty($plan['stripe_price_id']) && $plan['stripe_price_id'] !== 'price_free') {
-                try {
-                    $stripeSecret = config('services.stripe.secret');
-                    if ($stripeSecret) {
-                        Stripe::setApiKey($stripeSecret);
-                        $price = Price::retrieve($plan['stripe_price_id']);
-                        $monthlyPrice = $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null;
-                        $priceData = [
-                            'amount' => $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null,
-                            'currency' => strtoupper($price->currency ?? 'usd'),
-                            'interval' => $price->recurring->interval ?? 'month',
-                        ];
+                // Skip Stripe fetch for plans without a price (e.g. enterprise sales-only)
+                if ($key !== 'free' && ! empty($plan['stripe_price_id']) && $plan['stripe_price_id'] !== 'price_free') {
+                    try {
+                        $stripeSecret = config('services.stripe.secret');
+                        if ($stripeSecret) {
+                            Stripe::setApiKey($stripeSecret);
+                            $price = Price::retrieve($plan['stripe_price_id']);
+                            $monthlyPrice = $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null;
+                            $priceData = [
+                                'amount' => $price->unit_amount ? number_format($price->unit_amount / 100, 2) : null,
+                                'currency' => strtoupper($price->currency ?? 'usd'),
+                                'interval' => $price->recurring->interval ?? 'month',
+                            ];
+                        }
+                    } catch (\Exception $e) {
+                        // Price not found or error fetching - use fallback if available
+                        $priceData = null;
+                        $monthlyPrice = null;
                     }
-                } catch (\Exception $e) {
-                    // Price not found or error fetching - use fallback if available
-                    $priceData = null;
-                    $monthlyPrice = null;
+
+                    // Use fallback price if Stripe price not available
+                    if (! $monthlyPrice && isset($plan['fallback_monthly_price'])) {
+                        $monthlyPrice = number_format($plan['fallback_monthly_price'], 2);
+                    }
                 }
 
-                // Use fallback price if Stripe price not available
-                if (! $monthlyPrice && isset($plan['fallback_monthly_price'])) {
-                    $monthlyPrice = number_format($plan['fallback_monthly_price'], 2);
-                }
-            }
-
-            return [
-                'id' => $key,
-                'name' => $plan['name'],
-                'stripe_price_id' => $plan['stripe_price_id'],
-                'selectable' => $plan['selectable'] ?? true,
-                'requires_contact' => $plan['requires_contact'] ?? false,
-                'limits' => $plan['limits'],
-                'max_versions_per_asset' => $plan['max_versions_per_asset'] ?? null,
-                'features' => $plan['features'],
-                'download_features' => $plan['download_features'] ?? null,
-                'download_management' => $plan['download_management'] ?? null,
-                'is_current' => $key === $currentPlan,
-                'price' => $priceData,
-                'monthly_price' => $monthlyPrice,
-            ];
-        });
+                return [
+                    'id' => $key,
+                    'name' => $plan['name'],
+                    'stripe_price_id' => $plan['stripe_price_id'],
+                    'selectable' => $plan['selectable'] ?? true,
+                    'requires_contact' => $plan['requires_contact'] ?? false,
+                    'limits' => $plan['limits'],
+                    'max_versions_per_asset' => $plan['max_versions_per_asset'] ?? null,
+                    'features' => $plan['features'],
+                    'download_features' => $plan['download_features'] ?? null,
+                    'download_management' => $plan['download_management'] ?? null,
+                    'is_current' => $key === $currentPlan,
+                    'price' => $priceData,
+                    'monthly_price' => $monthlyPrice,
+                ];
+            });
 
         $currentPlanLimits = $planService->getPlanLimits($tenant);
 
@@ -177,7 +177,7 @@ class BillingController extends Controller
                 } elseif (method_exists($subscription, 'setRelation')) {
                     $subscription->setRelation('owner', $tenant);
                 }
-                
+
                 $hasIncomplete = $subscription->hasIncompletePayment();
                 if ($hasIncomplete && method_exists($subscription, 'latestPayment')) {
                     try {
@@ -187,7 +187,7 @@ class BillingController extends Controller
                                 $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
-                                $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                                $paymentUrl = url('/subscription/payment/'.$latestPayment->id);
                             }
                             $hasIncompletePayment = true;
                         }
@@ -252,7 +252,7 @@ class BillingController extends Controller
 
     /**
      * Handle subscription creation.
-     * 
+     *
      * BEST PRACTICE: If user already has a subscription, redirect to updateSubscription instead.
      * This ensures proper proration and prevents duplicate subscriptions.
      */
@@ -273,22 +273,23 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
 
         $this->authorizeBillingManage($user, $tenant);
-        
+
         // Check if tenant already has an active subscription
         $existingSubscription = $tenant->subscription('default');
-        
-        if ($existingSubscription && $existingSubscription->stripe_status === 'active') {
-            // If they have an active subscription, use updateSubscription instead
-            // This ensures proper proration and prevents duplicate subscriptions
-            $planService = new PlanService();
+
+        $subscriptionStatusesForPlanChange = ['active', 'trialing', 'past_due'];
+
+        if ($existingSubscription && in_array($existingSubscription->stripe_status, $subscriptionStatusesForPlanChange, true)) {
+            // Existing paid subscription: update in place with proration (do not open a second Checkout).
+            $planService = new PlanService;
             $oldPlan = $planService->getCurrentPlan($tenant);
-            
+
             // Determine new plan ID from price ID
             $newPlanId = null;
             $plans = config('plans');
@@ -298,7 +299,7 @@ class BillingController extends Controller
                     break;
                 }
             }
-            
+
             try {
                 $result = $this->billingService->updateSubscription(
                     $tenant,
@@ -312,8 +313,8 @@ class BillingController extends Controller
                 $newPlanName = config("plans.{$result['new_plan']}.name", ucfirst($result['new_plan']));
 
                 $message = match ($result['action']) {
-                    'upgrade' => "Successfully upgraded from {$oldPlanName} to {$newPlanName}. Stripe has automatically prorated the charges - you'll see the adjustment on your next invoice.",
-                    'downgrade' => "Successfully downgraded from {$oldPlanName} to {$newPlanName}. Changes will take effect at the end of your billing period, and you'll receive a prorated credit.",
+                    'upgrade' => "Successfully upgraded from {$oldPlanName} to {$newPlanName}. Stripe applied a prorated charge for the remainder of this billing period (you may see a payment or invoice immediately).",
+                    'downgrade' => "Successfully changed from {$oldPlanName} to {$newPlanName}. Stripe applied a prorated credit toward your next invoice for unused time on the previous plan.",
                     default => "Successfully updated subscription to {$newPlanName}.",
                 };
 
@@ -385,7 +386,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
@@ -393,23 +394,23 @@ class BillingController extends Controller
         $this->authorizeBillingManage($user, $tenant);
 
         try {
-            $planService = new PlanService();
+            $planService = new PlanService;
             $oldPlan = $planService->getCurrentPlan($tenant);
-            
+
             $result = $this->billingService->updateSubscription(
-                $tenant, 
+                $tenant,
                 $request->price_id,
                 $oldPlan,
                 $request->plan_id
             );
-            
+
             // Format success message based on action
             $oldPlanName = config("plans.{$result['old_plan']}.name", ucfirst($result['old_plan']));
             $newPlanName = config("plans.{$result['new_plan']}.name", ucfirst($result['new_plan']));
-            
-            $message = match($result['action']) {
-                'upgrade' => "Successfully upgraded from {$oldPlanName} to {$newPlanName}. Stripe has automatically prorated the charges - you'll see the adjustment on your next invoice.",
-                'downgrade' => "Successfully downgraded from {$oldPlanName} to {$newPlanName}. Changes will take effect at the end of your billing period, and you'll receive a prorated credit.",
+
+            $message = match ($result['action']) {
+                'upgrade' => "Successfully upgraded from {$oldPlanName} to {$newPlanName}. Stripe applied a prorated charge for the remainder of this billing period (you may see a payment or invoice immediately).",
+                'downgrade' => "Successfully changed from {$oldPlanName} to {$newPlanName}. Stripe applied a prorated credit toward your next invoice for unused time on the previous plan.",
                 'created' => "Successfully subscribed to {$newPlanName}. Welcome!",
                 default => "Successfully updated subscription to {$newPlanName}.",
             };
@@ -436,7 +437,7 @@ class BillingController extends Controller
                         } elseif (method_exists($subscription, 'setRelation')) {
                             $subscription->setRelation('owner', $tenant);
                         }
-                        
+
                         $latestPayment = $subscription->latestPayment();
                         if ($latestPayment && $latestPayment->id) {
                             // Return error with payment URL - Cashier provides this route
@@ -445,9 +446,9 @@ class BillingController extends Controller
                                 $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
-                                $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                                $paymentUrl = url('/subscription/payment/'.$latestPayment->id);
                             }
-                            
+
                             return back()->withErrors([
                                 'subscription' => 'Your subscription has an incomplete payment. Please complete your payment before changing plans.',
                                 'payment_url' => $paymentUrl,
@@ -487,7 +488,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
@@ -524,7 +525,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('companies.index')->withErrors(['billing' => 'Invalid company.']);
         }
@@ -538,12 +539,12 @@ class BillingController extends Controller
             ->orderBy('created_at', 'desc')
             ->first();
         $paymentMethod = $this->safeDefaultPaymentMethod($tenant);
-        $planService = new PlanService();
-        
+        $planService = new PlanService;
+
         // Get plan details
-        $planConfig = config('plans.' . $currentPlan, []);
+        $planConfig = config('plans.'.$currentPlan, []);
         $currentPlanName = $planConfig['name'] ?? ucfirst($currentPlan);
-        
+
         // Get recent invoices (last 10)
         $allInvoices = $this->billingService->getInvoices($tenant);
         $recentInvoices = $allInvoices->take(10)->map(function ($invoice) {
@@ -565,13 +566,13 @@ class BillingController extends Controller
         $onDemandUsage = 0.00;
         $monthlyAverage = 0.00;
         $currency = 'USD';
-        
+
         if ($tenant->stripe_id && $subscription) {
             try {
                 $stripeSecret = config('services.stripe.secret');
                 if ($stripeSecret) {
                     \Stripe\Stripe::setApiKey($stripeSecret);
-                    
+
                     // Get current subscription price
                     $subscriptionPrice = 0;
                     if ($subscription->stripe_id) {
@@ -587,7 +588,7 @@ class BillingController extends Controller
                             // If we can't get subscription price, continue with 0
                         }
                     }
-                    
+
                     // Get invoices from the last 12 months
                     $twelveMonthsAgo = time() - (12 * 30 * 24 * 60 * 60);
                     $invoices = \Stripe\Invoice::all([
@@ -595,30 +596,30 @@ class BillingController extends Controller
                         'limit' => 100,
                         'created' => ['gte' => $twelveMonthsAgo],
                     ]);
-                    
+
                     $totalAmount = 0;
                     $invoiceCount = 0;
                     $onDemandTotal = 0;
-                    
+
                     foreach ($invoices->data as $invoice) {
                         if ($invoice->status === 'paid' && $invoice->amount_paid > 0) {
                             $invoiceAmount = $invoice->amount_paid / 100;
                             $totalAmount += $invoiceAmount;
                             $invoiceCount++;
-                            
+
                             // Calculate on-demand: invoice amount minus subscription price
                             // This is a simplified calculation - in reality, you'd need to parse line items
                             $onDemandTotal += max(0, $invoiceAmount - $subscriptionPrice);
                         }
                     }
-                    
+
                     // Calculate monthly average (total / number of months with invoices)
                     if ($invoiceCount > 0) {
                         // Estimate months based on invoice count (assuming monthly billing)
                         $months = min($invoiceCount, 12);
                         $monthlyAverage = $totalAmount / $months;
                     }
-                    
+
                     // On-demand usage for current period (simplified - would need to check current period invoices)
                     $onDemandUsage = $onDemandTotal;
                 }
@@ -648,7 +649,7 @@ class BillingController extends Controller
                         $periodEnd = $stripeSubscription->current_period_end ? date('M d, Y', $stripeSubscription->current_period_end) : null;
                         // Get the actual current status from Stripe (this is the source of truth)
                         $stripeStatus = $stripeSubscription->status;
-                        
+
                         // Sync the status back to database for future queries (keeps DB in sync)
                         if ($subscription->stripe_status !== $stripeStatus) {
                             $subscription->stripe_status = $stripeStatus;
@@ -691,7 +692,7 @@ class BillingController extends Controller
                 } elseif (method_exists($subscription, 'setRelation')) {
                     $subscription->setRelation('owner', $tenant);
                 }
-                
+
                 $hasIncomplete = $subscription->hasIncompletePayment();
                 if ($hasIncomplete && method_exists($subscription, 'latestPayment')) {
                     try {
@@ -701,7 +702,7 @@ class BillingController extends Controller
                                 $paymentUrl = route('subscription.payment', $latestPayment->id);
                             } catch (\Exception $routeError) {
                                 // If route doesn't exist, construct URL manually
-                                $paymentUrl = url('/subscription/payment/' . $latestPayment->id);
+                                $paymentUrl = url('/subscription/payment/'.$latestPayment->id);
                             }
                             $hasIncompletePayment = true;
                         }
@@ -792,7 +793,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('companies.index')->withErrors(['billing' => 'Invalid company.']);
         }
@@ -813,7 +814,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
@@ -827,7 +828,7 @@ class BillingController extends Controller
             ]);
         } catch (\Exception $e) {
             return back()->withErrors([
-                'invoice' => 'Failed to download invoice: ' . $e->getMessage(),
+                'invoice' => 'Failed to download invoice: '.$e->getMessage(),
             ]);
         }
     }
@@ -840,7 +841,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
@@ -856,7 +857,7 @@ class BillingController extends Controller
             );
         } catch (\Exception $e) {
             return back()->withErrors([
-                'subscription' => 'Failed to cancel subscription: ' . $e->getMessage(),
+                'subscription' => 'Failed to cancel subscription: '.$e->getMessage(),
             ]);
         }
     }
@@ -869,7 +870,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
@@ -882,7 +883,7 @@ class BillingController extends Controller
             return redirect()->route('billing')->with('success', 'Subscription resumed successfully.');
         } catch (\Exception $e) {
             return back()->withErrors([
-                'subscription' => 'Failed to resume subscription: ' . $e->getMessage(),
+                'subscription' => 'Failed to resume subscription: '.$e->getMessage(),
             ]);
         }
     }
@@ -1150,12 +1151,20 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return back()->withErrors(['billing' => 'Invalid company.']);
         }
 
         $this->authorizeBillingView($user, $tenant);
+
+        $demoBillingMessage = app(DemoTenantService::class)->demoRestrictionMessage(
+            DemoTenantService::ACTION_BILLING_CHANGE,
+            $tenant
+        );
+        if ($demoBillingMessage !== null) {
+            return back()->withErrors(['billing' => $demoBillingMessage]);
+        }
 
         try {
             $portalUrl = $this->billingService->getCustomerPortalUrl(
@@ -1279,7 +1288,7 @@ class BillingController extends Controller
      */
     private function getSubscriptionStatus($subscription): string
     {
-        if (!$subscription || !$subscription->stripe_id) {
+        if (! $subscription || ! $subscription->stripe_id) {
             return 'unknown';
         }
 
@@ -1290,13 +1299,13 @@ class BillingController extends Controller
                 $stripeSubscription = \Stripe\Subscription::retrieve($subscription->stripe_id);
                 if ($stripeSubscription) {
                     $stripeStatus = $stripeSubscription->status;
-                    
+
                     // Sync status back to database
                     if ($subscription->stripe_status !== $stripeStatus) {
                         $subscription->stripe_status = $stripeStatus;
                         $subscription->save();
                     }
-                    
+
                     return $stripeStatus;
                 }
             }
@@ -1317,7 +1326,7 @@ class BillingController extends Controller
         $user = $request->user();
         $tenantId = session('tenant_id');
         $tenant = $tenantId ? Tenant::find($tenantId) : $user->tenants->first();
-        
+
         if (! $tenant || ! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             return redirect()->route('billing')->withErrors(['billing' => 'Invalid company.']);
         }
@@ -1326,22 +1335,22 @@ class BillingController extends Controller
 
         try {
             $stripeSecret = config('services.stripe.secret');
-            if (!$stripeSecret) {
+            if (! $stripeSecret) {
                 throw new \RuntimeException('Stripe is not configured.');
             }
 
             Stripe::setApiKey($stripeSecret);
-            
+
             // Retrieve the payment intent from Stripe
             $paymentIntent = \Stripe\PaymentIntent::retrieve($paymentId);
-            
-            if (!$paymentIntent) {
+
+            if (! $paymentIntent) {
                 throw new \RuntimeException('Payment not found.');
             }
 
             // Get redirect URL from query parameter or default to billing overview page
             $redirectUrl = $request->get('redirect', route('billing.overview'));
-            
+
             // Always redirect to Stripe's hosted confirmation page if payment requires action
             // This ensures we never try to embed Stripe Elements in our React/Inertia app
             if ($paymentIntent->status === 'requires_action' || $paymentIntent->status === 'requires_payment_method') {
@@ -1350,19 +1359,19 @@ class BillingController extends Controller
                     // Full redirect to Stripe's hosted confirmation page (no Inertia)
                     return redirect()->away($paymentIntent->next_action->redirect_to_url->url);
                 }
-                
+
                 // If no redirect URL but payment requires confirmation, try to get it
                 try {
                     // Retrieve the payment intent again to get latest next_action
                     $updatedPaymentIntent = \Stripe\PaymentIntent::retrieve($paymentId);
-                    
+
                     if (isset($updatedPaymentIntent->next_action->redirect_to_url->url)) {
                         return redirect()->away($updatedPaymentIntent->next_action->redirect_to_url->url);
                     }
                 } catch (\Exception $retrieveError) {
                     // Continue to fallback
                 }
-                
+
                 // Fallback: redirect to Stripe Customer Portal where they can update payment method
                 if ($tenant->stripe_id) {
                     try {
@@ -1370,15 +1379,16 @@ class BillingController extends Controller
                             $tenant,
                             $redirectUrl
                         );
+
                         return redirect()->away($portalUrl);
                     } catch (\Exception $portalError) {
                         // Continue to error message
                     }
                 }
-                
+
                 // Final fallback: redirect to billing with error
                 return redirect()->route('billing')->withErrors([
-                    'payment' => 'Payment requires additional confirmation. Please update your payment method in Stripe Customer Portal.'
+                    'payment' => 'Payment requires additional confirmation. Please update your payment method in Stripe Customer Portal.',
                 ]);
             }
 
@@ -1388,11 +1398,11 @@ class BillingController extends Controller
             }
 
             // For other statuses, redirect back with status
-            return redirect($redirectUrl)->with('info', 'Payment status: ' . $paymentIntent->status);
-            
+            return redirect($redirectUrl)->with('info', 'Payment status: '.$paymentIntent->status);
+
         } catch (\Exception $e) {
             return redirect()->route('billing')->withErrors([
-                'payment' => 'Failed to process payment confirmation: ' . $e->getMessage()
+                'payment' => 'Failed to process payment confirmation: '.$e->getMessage(),
             ]);
         }
     }

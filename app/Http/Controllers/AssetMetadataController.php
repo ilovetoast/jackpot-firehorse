@@ -1021,6 +1021,7 @@ class AssetMetadataController extends Controller
                 'field_key' => $field['key'],
                 'key' => $field['key'], // Also include as 'key' for consistency
                 'display_label' => $displayLabel,
+                'description' => $field['description'] ?? null,
                 'type' => $field['type'],
                 'options' => $field['options'] ?? [],
                 'is_user_editable' => ! $isReadonly && $canEdit, // Only editable if not readonly AND has permission
@@ -1079,6 +1080,7 @@ class AssetMetadataController extends Controller
                 'field_key' => $systemKey,
                 'key' => $systemKey,
                 'display_label' => $fieldDef->system_label ?? $systemKey,
+                'description' => $fieldDef->description ?? null,
                 'type' => $fieldDef->type ?? 'text',
                 'options' => $options,
                 'is_user_editable' => false,

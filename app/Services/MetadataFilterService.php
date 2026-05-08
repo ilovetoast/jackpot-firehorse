@@ -674,6 +674,7 @@ class MetadataFilterService
                 'field_id' => $field['field_id'],
                 'field_key' => $field['key'],
                 'display_label' => $field['display_label'] ?? $field['key'],
+                'description' => $field['description'] ?? null,
                 'type' => $fieldType,
                 'operators' => $operators,
                 'options' => $field['options'] ?? [],

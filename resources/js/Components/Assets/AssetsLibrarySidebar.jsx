@@ -51,7 +51,7 @@ export default function AssetsLibrarySidebar({
     // Optional: custom add button slot
     addButtonSlot,
     // Optional: empty state when no categories
-    emptyLabel = 'No categories yet',
+    emptyLabel = 'No folders yet',
 }) {
     const hasSystemItems = showStaged || showResearch || (showTrash && canViewTrash)
     // References always shown when enabled so users can open builder reference materials

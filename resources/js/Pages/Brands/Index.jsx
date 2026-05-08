@@ -246,11 +246,11 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                         </dl>
                                                     </div>
 
-                                                    {/* Categories Section */}
+                                                    {/* Folders (library structure) */}
                                                     <div>
                                                         <div className="flex items-center justify-between mb-3">
                                                             <h3 className="text-base font-semibold leading-6 text-gray-900">
-                                                                Categories
+                                                                Folders
                                                             </h3>
                                                         </div>
                                                         {brand.categories && brand.categories.length > 0 ? (
@@ -308,7 +308,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                         </button>
                                                                     </nav>
                                                                 </div>
-                                                                {/* Categories List */}
+                                                                {/* Folder list */}
                                                                 <div className="divide-y divide-gray-200">
                                                                     {brand.categories
                                                                         .filter(category => category.asset_type === (categoryTab[brand.id] || 'asset'))
@@ -341,13 +341,13 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                         ))}
                                                                     {brand.categories.filter(category => category.asset_type === (categoryTab[brand.id] || 'asset')).length === 0 && (
                                                                         <div className="px-4 py-8 text-center text-sm text-gray-500">
-                                                                            No {(categoryTab[brand.id] || 'asset') === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR} categories yet.
+                                                                            No {(categoryTab[brand.id] || 'asset') === 'asset' ? 'Asset' : DELIVERABLES_PAGE_LABEL_SINGULAR} folders yet.
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <p className="text-sm text-gray-500">No categories yet.</p>
+                                                            <p className="text-sm text-gray-500">No folders yet.</p>
                                                         )}
                                                     </div>
 
@@ -361,7 +361,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                             </div>
                                                             <div className="bg-white rounded-lg border border-gray-200 p-4">
                                                                 <p className="text-sm text-gray-700 mb-4">
-                                                                    Manage metadata fields and visibility settings for this brand. Configure where fields appear in upload, edit, and filter interfaces.
+                                                                    Manage folder fields and visibility for this brand. Configure where fields appear in upload, edit, and filter interfaces.
                                                                 </p>
                                                                 <Link
                                                                     href={
@@ -372,7 +372,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                                     onClick={(e) => e.stopPropagation()}
                                                                     className="inline-flex items-center rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)]"
                                                                 >
-                                                                    Manage Metadata Fields
+                                                                    Manage folders & fields
                                                                     <svg className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                                                                         <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                                                                     </svg>

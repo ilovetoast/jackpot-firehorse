@@ -1097,7 +1097,7 @@ class DevelopmentDataSeeder extends Seeder
             'event_type' => fake()->randomElement(['booths', 'transit', 'experiential']),
             'execution_video_type' => fake()->randomElement(['broadcast', 'pre_roll', 'brand_video', 'explainer', 'product_demo']),
             'sales_collateral_type' => fake()->randomElement(['catalogs', 'sales_sheets', 'trade_show_materials']),
-            'pr_type' => fake()->randomElement(['press_releases', 'media_kits', 'backgrounders']),
+            'pr_type' => fake()->randomElement(['press_release', 'media_kit', 'internal', 'fact_sheet', 'announcement']),
             'packaging_type' => fake()->randomElement(['flat_art', 'renders_3d']),
             'radio_type' => fake()->randomElement(['broadcast_spots', 'live_reads']),
             // Other common fields

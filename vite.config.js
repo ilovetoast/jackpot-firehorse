@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import laravel from 'laravel-vite-plugin'
 import react from '@vitejs/plugin-react'
 
+// Must match compose.yaml: "${VITE_PORT:-5173}:${VITE_PORT:-5173}" (Sail publishes 5173 by default).
+const VITE_PORT = Number.parseInt(process.env.VITE_PORT || '5173', 10) || 5173
+
 export default defineConfig({
     plugins: [
         laravel({
@@ -12,12 +15,12 @@ export default defineConfig({
     ],
     server: {
         host: '0.0.0.0',
-        port: 5174,
+        port: VITE_PORT,
         strictPort: false,
         hmr: {
             host: 'jackpot.local',
             protocol: 'ws',
-            clientPort: 5174,
+            clientPort: VITE_PORT,
         },
         cors: true,
         headers: {
