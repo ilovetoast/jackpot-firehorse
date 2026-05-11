@@ -424,9 +424,18 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
-            /** Commit timestamp for authenticated console banner (UTC compact stamp + styled log). */
+            /** Release metadata for the authenticated console banner (UTC stamp + short SHA). */
             'jackpotConsole' => [
                 'commitIso8601' => JackpotConsoleRelease::committedAtIso8601(),
+                'commitSha' => JackpotConsoleRelease::commitShortSha(),
+            ],
+            /*
+            | Audio playback feature flags shared with the React audio components.
+            | live_analyser is opt-in because it requires CORS-correct CloudFront —
+            | see config/assets.php audio.live_analyser_enabled for the toggle rationale.
+            */
+            'audioPlayback' => [
+                'live_analyser_enabled' => (bool) config('assets.audio.live_analyser_enabled', false),
             ],
             'privacy' => $this->buildPrivacySharedProps($request),
             'currentWorkspace' => $tenant ? [

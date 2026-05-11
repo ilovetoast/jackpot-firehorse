@@ -20,6 +20,7 @@ import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
 import AudioCardVisual from './Audio/AudioCardVisual'
+import { audioMasonryWrapperStyle } from '../utils/audioCardSizing'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import {
@@ -730,11 +731,31 @@ export default function AssetCard({
                         )}
 
                         {isAudio ? (
-                            <AudioCardVisual
-                                asset={asset}
-                                primaryColor={primaryColor}
-                                className={isMasonry ? 'w-full max-h-full min-h-0' : 'w-full h-full'}
-                            />
+                            // Masonry: AudioCardVisual paints itself with `h-full`, but the
+                            // parent div only sets `min-height` (no explicit height) so a
+                            // pure-CSS child with `height:100%` resolves to 0 — the same
+                            // issue ThumbnailPreview works around by setting an explicit
+                            // `height` for its placeholder. We wrap with that same target
+                            // height so the audio waveform actually has a tile to paint
+                            // into instead of collapsing and exposing the parent
+                            // `bg-gray-50` (which read as a white card on staging).
+                            (() => {
+                                const wrapStyle = audioMasonryWrapperStyle({
+                                    isMasonry,
+                                    masonryThumbnailMinHeightPx,
+                                    masonryMaxHeightPx,
+                                })
+                                const child = (
+                                    <AudioCardVisual
+                                        asset={asset}
+                                        primaryColor={primaryColor}
+                                        className="w-full h-full"
+                                    />
+                                )
+                                return wrapStyle ? (
+                                    <div className="w-full" style={wrapStyle}>{child}</div>
+                                ) : child
+                            })()
                         ) : showExecutionDualThumb || showExecutionSingleThumb ? (
                             executionUsePresentationCss && executionPresentationPreset ? (
                                 <div

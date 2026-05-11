@@ -148,6 +148,23 @@ class EventType
     public const ASSET_VIDEO_PREVIEW_COMPLETED = 'asset.video_preview.completed';
     public const ASSET_VIDEO_PREVIEW_FAILED = 'asset.video_preview.failed';
     public const ASSET_VIDEO_PREVIEW_SKIPPED = 'asset.video_preview.skipped';
+
+    // Audio web-playback derivative events (GenerateAudioWebPlaybackJob /
+    // AudioPlaybackOptimizationService). The "skipped" variant matters here
+    // — small MP3 sources legitimately don't need a derivative, and we want
+    // the timeline to say so explicitly rather than leave a gap.
+    public const ASSET_AUDIO_WEB_PLAYBACK_STARTED = 'asset.audio_web_playback.started';
+    public const ASSET_AUDIO_WEB_PLAYBACK_COMPLETED = 'asset.audio_web_playback.completed';
+    public const ASSET_AUDIO_WEB_PLAYBACK_SKIPPED = 'asset.audio_web_playback.skipped';
+    public const ASSET_AUDIO_WEB_PLAYBACK_FAILED = 'asset.audio_web_playback.failed';
+
+    // Audio AI analysis events (RunAudioAiAnalysisJob / AudioAiAnalysisService).
+    // `skipped` covers admin-disabled / plan-limit-blocked — both meaningful
+    // operator signals that should appear in the timeline + Activity tab.
+    public const ASSET_AUDIO_AI_STARTED = 'asset.audio_ai.started';
+    public const ASSET_AUDIO_AI_COMPLETED = 'asset.audio_ai.completed';
+    public const ASSET_AUDIO_AI_SKIPPED = 'asset.audio_ai.skipped';
+    public const ASSET_AUDIO_AI_FAILED = 'asset.audio_ai.failed';
     public const ASSET_PROMOTED = 'asset.promoted';
     public const ASSET_READY = 'asset.ready';
 
@@ -353,6 +370,14 @@ class EventType
             self::ASSET_VIDEO_PREVIEW_COMPLETED,
             self::ASSET_VIDEO_PREVIEW_FAILED,
             self::ASSET_VIDEO_PREVIEW_SKIPPED,
+            self::ASSET_AUDIO_WEB_PLAYBACK_STARTED,
+            self::ASSET_AUDIO_WEB_PLAYBACK_COMPLETED,
+            self::ASSET_AUDIO_WEB_PLAYBACK_SKIPPED,
+            self::ASSET_AUDIO_WEB_PLAYBACK_FAILED,
+            self::ASSET_AUDIO_AI_STARTED,
+            self::ASSET_AUDIO_AI_COMPLETED,
+            self::ASSET_AUDIO_AI_SKIPPED,
+            self::ASSET_AUDIO_AI_FAILED,
             self::ASSET_PROMOTED,
             self::ASSET_READY,
             self::ASSET_BRAND_COMPLIANCE_REQUESTED,

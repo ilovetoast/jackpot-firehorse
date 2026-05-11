@@ -599,6 +599,30 @@ return [
         // Master switch for the browser-playback transcoding step.
         'optimize_for_browser' => (bool) env('ASSET_AUDIO_OPTIMIZE_FOR_BROWSER', true),
 
+        /*
+        | Live amplitude visualisation (Web Audio AnalyserNode) requires the
+        | <audio> element to set `crossOrigin="anonymous"`, which in turn
+        | requires every byte returned by S3 / CloudFront to carry CORS
+        | headers (`Access-Control-Allow-Origin`). When CloudFront is in
+        | front of S3, that means a Response Headers Policy that forwards
+        | `Access-Control-*` AND a CORS-aware origin request policy.
+        |
+        | Without that the browser rejects every <audio> source with
+        | `NotSupportedError: the element has no supported sources` — and
+        | the user can't play anything. Keeping this opt-in (default off)
+        | guarantees playback works the moment a tenant's bucket is
+        | provisioned, even before the CORS round-trip on CloudFront has
+        | been verified end-to-end. Flip to true once `curl -I -H
+        | 'Origin: https://app.example' <signed-url>` returns
+        | `Access-Control-Allow-Origin: *` (or matching origin) on the
+        | environment.
+        |
+        | When false: bars react to play-head progress (opacity wipe) and
+        | the synthetic envelope animation — no live frequency-data drive,
+        | which is a minor visual regression but reliable playback.
+        */
+        'live_analyser_enabled' => (bool) env('ASSET_AUDIO_LIVE_ANALYSER', false),
+
         // Source bytes >= this triggers generation of the 128 kbps MP3 derivative
         // even when the source codec would otherwise stream fine.
         'web_playback_min_source_bytes' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_MIN_BYTES', 5 * 1024 * 1024),

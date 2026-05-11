@@ -1,5 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import useAudioPlayer from '../../hooks/useAudioPlayer'
+import { audioCardIntrinsicMinHeightPx } from '../../utils/audioCardSizing'
+import { isLiveAudioAnalyserEnabled } from '../../utils/audioPlaybackFlags'
 
 /**
  * Card-sized audio visual.
@@ -304,10 +306,18 @@ export default function AudioCardVisual({
           ? 0.32 + 0.45 * payLinePulse
           : 0
 
+    // Per-size intrinsic floor: when the parent only specifies a percentage
+    // height (e.g. masonry `min-height` only), `h-full` here resolves to 0
+    // and the gradient + waveform never paint. We fall back to a sensible
+    // pixel floor so the component is always self-painting regardless of
+    // parent layout. See {@link audioCardIntrinsicMinHeightPx} for the
+    // size-specific values + rationale.
+    const intrinsicMinHeight = audioCardIntrinsicMinHeightPx(size)
+
     return (
         <div
             className={`relative flex h-full w-full items-center justify-center overflow-hidden ${className}`}
-            style={{ background: bgGradient }}
+            style={{ background: bgGradient, minHeight: intrinsicMinHeight }}
             aria-label={asset?.title || asset?.original_filename || 'Audio'}
         >
             {/* Reel-spin keyframes: only used while audio is buffering. Defining the
@@ -448,7 +458,18 @@ export default function AudioCardVisual({
                     ref={audioRef}
                     src={src}
                     preload="metadata"
-                    crossOrigin="anonymous"
+                    /*
+                     * Only set `crossOrigin` when the live analyser is opted-in
+                     * via config/assets.php audio.live_analyser_enabled. With
+                     * the attribute set, every byte of the audio response must
+                     * carry CORS headers — without that the browser rejects
+                     * the source with `NotSupportedError: the element has no
+                     * supported sources` and `play()` fails. Default off is
+                     * the reliable choice; flip on per-environment once a
+                     * `curl -H 'Origin: ...'` against a signed audio URL
+                     * confirms `Access-Control-Allow-Origin` is forwarded.
+                     */
+                    {...(isLiveAudioAnalyserEnabled() ? { crossOrigin: 'anonymous' } : {})}
                     className="hidden"
                 />
             ) : null}

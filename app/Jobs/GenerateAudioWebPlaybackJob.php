@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Enums\EventType;
 use App\Jobs\Concerns\AppliesQueueSafeModeMiddleware;
 use App\Models\Asset;
+use App\Services\ActivityRecorder;
 use App\Services\Audio\AudioPlaybackOptimizationService;
 use App\Support\AudioPipelineQueueResolver;
 use Illuminate\Bus\Queueable;
@@ -70,20 +72,37 @@ class GenerateAudioWebPlaybackJob implements ShouldQueue
             return;
         }
 
+        // Timeline: started — surfaced in the asset drawer Timeline + the
+        // Activity tab so operators can confirm the transcode actually
+        // queued and which lane (audio_queue vs audio_heavy_queue) handled it.
+        ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_WEB_PLAYBACK_STARTED, [
+            'queue' => $this->queue ?: 'audio',
+            'source_size_bytes' => (int) ($asset->size_bytes ?? 0),
+        ]);
+
         $result = $service->generateForAsset($asset);
         if (! ($result['success'] ?? false)) {
+            $reason = (string) ($result['reason'] ?? 'unknown');
             Log::warning('[GenerateAudioWebPlaybackJob] derivative not generated', [
                 'asset_id' => $asset->id,
-                'reason' => $result['reason'] ?? 'unknown',
+                'reason' => $reason,
+            ]);
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_WEB_PLAYBACK_FAILED, [
+                'reason' => $reason,
+                'error' => $result['error'] ?? null,
             ]);
 
             return;
         }
 
         if ($result['skipped'] ?? false) {
+            $reason = (string) ($result['reason'] ?? 'unknown');
             Log::info('[GenerateAudioWebPlaybackJob] skipped — original is browser-friendly', [
                 'asset_id' => $asset->id,
-                'reason' => $result['reason'] ?? null,
+                'reason' => $reason,
+            ]);
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_WEB_PLAYBACK_SKIPPED, [
+                'reason' => $reason,
             ]);
 
             return;
@@ -94,6 +113,12 @@ class GenerateAudioWebPlaybackJob implements ShouldQueue
             'path' => $result['path'] ?? null,
             'size_bytes' => $result['size_bytes'] ?? null,
             'reason' => $result['reason'] ?? null,
+        ]);
+        ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_WEB_PLAYBACK_COMPLETED, [
+            'reason' => $result['reason'] ?? null,
+            'output_size_bytes' => (int) ($result['size_bytes'] ?? 0),
+            'bitrate_kbps' => (int) ($result['bitrate_kbps'] ?? 0),
+            'codec' => 'mp3',
         ]);
     }
 

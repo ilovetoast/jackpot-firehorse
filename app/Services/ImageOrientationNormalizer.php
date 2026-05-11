@@ -207,6 +207,16 @@ final class ImageOrientationNormalizer
      * Apply Imagick auto-orientation, then reset orientation metadata to top-left so downstream
      * encoders and browsers do not double-rotate.
      *
+     * The native {@see \Imagick::autoOrientImage()} can silently no-op on some
+     * Imagick / ImageMagick builds (or specific EXIF layouts) — in that case
+     * we'd happily proceed downstream thinking pixels are upright when they're
+     * not, and the manual rotate-asset path then re-rotates the raw raster
+     * giving a 180° flip on photos with orientation 6/8 (e.g. older Canon
+     * portraits). To prevent that, when the native call doesn't move pixels
+     * for an orientation that *should* swap dimensions (5–8) — or doesn't run
+     * at all for a non-1 tag — we fall back to a manual rotate/flop sequence
+     * that matches the EXIF spec exactly.
+     *
      * @return array{
      *   applied: bool,
      *   imagick_orientation_before: ?int,
@@ -215,6 +225,7 @@ final class ImageOrientationNormalizer
      *   width_after: int,
      *   height_after: int,
      *   reset_to_topleft: bool,
+     *   manual_fallback_applied: bool,
      * }
      */
     public static function imagickAutoOrientAndResetOrientation(\Imagick $im): array
@@ -237,6 +248,24 @@ final class ImageOrientationNormalizer
                 $applied = true;
             }
         } catch (\Throwable) {
+            $applied = false;
+        }
+
+        // Detect the silent-no-op case: native call ran but pixel dimensions
+        // didn't swap for an orientation tag (5–8) that should have swapped
+        // them. That means the call's a lie — we still have the raw raster.
+        $manualFallback = false;
+        $widthMid = (int) $im->getImageWidth();
+        $heightMid = (int) $im->getImageHeight();
+        if ($orientBefore !== null && $orientBefore >= 2 && $orientBefore <= 8) {
+            $shouldSwap = self::exifOrientationSwapsDimensions($orientBefore);
+            $didSwap = ($widthMid !== $wb) || ($heightMid !== $hb);
+            if (! $applied || ($shouldSwap && ! $didSwap)) {
+                if (self::applyExifOrientationToImagick($im, $orientBefore)) {
+                    $manualFallback = true;
+                    $applied = true;
+                }
+            }
         }
 
         $reset = false;
@@ -263,7 +292,69 @@ final class ImageOrientationNormalizer
             'width_after' => (int) $im->getImageWidth(),
             'height_after' => (int) $im->getImageHeight(),
             'reset_to_topleft' => $reset,
+            'manual_fallback_applied' => $manualFallback,
         ];
+    }
+
+    /**
+     * Manually apply an EXIF orientation tag (1–8) to an Imagick image using
+     * rotateImage / flopImage / flipImage. Used when {@see \Imagick::autoOrientImage()}
+     * is unavailable (Imagick 3.7+ removed it) or silently no-ops.
+     *
+     * EXIF orientation → display transform:
+     *   1 = top-left      : identity (no-op)
+     *   2 = top-right     : flop (mirror horizontal)
+     *   3 = bottom-right  : rotate 180
+     *   4 = bottom-left   : flip (mirror vertical)
+     *   5 = left-top      : flop + rotate 90 CW
+     *   6 = right-top     : rotate 90 CW
+     *   7 = right-bottom  : flop + rotate 90 CCW
+     *   8 = left-bottom   : rotate 90 CCW
+     *
+     * Imagick::rotateImage: positive angle = clockwise (verified empirically
+     * against Imagick 3.8.1 / ImageMagick 6.9.12 — the Imagick PHP docstring
+     * is misleading, MagickRotateImage rotates CW for positive degrees per
+     * ImageMagick spec).
+     */
+    private static function applyExifOrientationToImagick(\Imagick $im, int $orientation): bool
+    {
+        if ($orientation < 2 || $orientation > 8) {
+            return false;
+        }
+        $bg = new \ImagickPixel('rgba(0,0,0,0)');
+        try {
+            switch ($orientation) {
+                case 2:
+                    $im->flopImage();
+                    break;
+                case 3:
+                    $im->rotateImage($bg, 180.0);
+                    break;
+                case 4:
+                    $im->flipImage();
+                    break;
+                case 5:
+                    $im->flopImage();
+                    $im->rotateImage($bg, 90.0);
+                    break;
+                case 6:
+                    $im->rotateImage($bg, 90.0);
+                    break;
+                case 7:
+                    $im->flopImage();
+                    $im->rotateImage($bg, -90.0);
+                    break;
+                case 8:
+                    $im->rotateImage($bg, -90.0);
+                    break;
+                default:
+                    return false;
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

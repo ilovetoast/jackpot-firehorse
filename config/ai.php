@@ -73,6 +73,57 @@ return [
     */
     'metadata_tagging' => [
         'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.90),
+
+        /*
+         * Active provider for free-form image tag candidates (asset_tag_candidates).
+         *
+         * Supported values:
+         *   - 'aws_rekognition' (default): use AWS Rekognition DetectLabels for tags. OpenAI vision still
+         *      handles structured metadata field inference (select/multiselect candidates) when those
+         *      fields are AI-eligible for the asset's category. Tags are no longer requested from OpenAI
+         *      in the same call.
+         *   - 'openai': legacy combined behavior — tags are requested from OpenAI Vision in the same
+         *      call as structured fields. Use this to revert if Rekognition has a regression.
+         *
+         * Image tags only. Structured fields are unaffected by this switch.
+         */
+        'vision_provider' => env('AI_METADATA_VISION_PROVIDER', 'aws_rekognition'),
+
+        /*
+         * Optional fallback to OpenAI tags when Rekognition fails (network/throttle/etc).
+         * Off by default — we prefer empty Rekognition results over hallucinated OpenAI ones.
+         */
+        'rekognition_fallback_to_openai' => (bool) env('AI_METADATA_REKOGNITION_FALLBACK_TO_OPENAI', false),
+
+        /*
+         * AWS Rekognition DetectLabels provider settings.
+         *
+         * Pricing note: DetectLabels GENERAL_LABELS is billed per image (not per token).
+         * IMAGE_PROPERTIES is a separate add-on charged per image — disabled by default.
+         * Costs vary by region/tier; keep these env-overridable.
+         */
+        'aws_rekognition' => [
+            'enabled' => (bool) env('AI_METADATA_REKOGNITION_ENABLED', true),
+            'region' => env('AI_METADATA_REKOGNITION_REGION', env('AWS_DEFAULT_REGION', 'us-east-1')),
+            'feature_types' => ['GENERAL_LABELS'],
+            'max_labels' => (int) env('AI_METADATA_REKOGNITION_MAX_LABELS', 20),
+            /** Rekognition uses a 0–100 confidence scale (we convert to 0–1 before our sanitizer). */
+            'min_confidence' => (float) env('AI_METADATA_REKOGNITION_MIN_CONFIDENCE', 70),
+
+            /** USD per DetectLabels API call (GENERAL_LABELS only). */
+            'cost_usd_per_image' => (float) env('AI_METADATA_REKOGNITION_COST_USD_PER_IMAGE', 0.001),
+
+            /** Opt-in: also request IMAGE_PROPERTIES (separate AWS charge). */
+            'include_image_properties' => (bool) env('AI_METADATA_REKOGNITION_IMAGE_PROPERTIES', false),
+            'image_properties_cost_usd_per_image' => (float) env('AI_METADATA_REKOGNITION_IMAGE_PROPERTIES_COST_USD_PER_IMAGE', 0.00075),
+
+            /**
+             * Legacy stub for cost-to-credit translation. We still bill via the unified `tagging`
+             * credit weight ({@see config('ai_credits.weights.tagging')}) so a single Rekognition
+             * call counts as one tagging credit. Keep here for future per-cent or per-image billing.
+             */
+            'minimum_billable_credits' => (int) env('AI_METADATA_REKOGNITION_MIN_CREDITS', 0),
+        ],
         /**
          * Custom category only (settings.ai_use_library_references): rank peer assets in-DB
          * (quality_rating, download count) and add tag text + optional reference thumbnails. No ML — local SQL only.
@@ -612,6 +663,27 @@ PROMPT,
             'permissions' => [
                 // Tenant-scoped agent - runs automatically during asset processing
                 // No specific permissions required (system-triggered)
+            ],
+        ],
+        /*
+         * Per-image vision tag candidate provider (AWS Rekognition DetectLabels).
+         * Distinct from `metadata_generator` because Rekognition is billed per image,
+         * not per token, and is intentionally restricted to free-form tag candidates.
+         * Structured field candidates still go through `metadata_generator` (OpenAI vision).
+         */
+        'metadata_image_tags_rekognition' => [
+            'name' => 'Image Tags (AWS Rekognition)',
+            'description' => 'Generates image tag candidates via AWS Rekognition DetectLabels (per-image billing).',
+            'scope' => 'tenant',
+            'provider' => 'aws_rekognition',
+            'default_model' => 'rekognition-detect-labels',
+            'capability' => 'vision_tagging',
+            'cost_unit' => 'image',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped agent - runs automatically during asset processing.
+                // IAM (worker role): rekognition:DetectLabels + s3:GetObject on the asset bucket prefix(es).
+                // SSE-KMS encrypted buckets also require kms:Decrypt for the relevant key.
             ],
         ],
         'sentry_error_analyzer' => [

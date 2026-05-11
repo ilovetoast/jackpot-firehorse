@@ -122,10 +122,33 @@ final class AssetOriginalRasterRotationService
         $im->readImageBlob($bytes);
         $im->setFirstIterator();
 
-        ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($im);
+        // CRITICAL: this MUST upright the pixel data before we apply the
+        // user's rotation. If EXIF normalization silently no-ops (some
+        // Imagick builds / specific EXIF layouts), we'd rotate the raw
+        // sensor raster instead of the upright display image, producing a
+        // visible 180° flip for portraits with orientation tag 6/8 — the
+        // exact bug surfaced on staging with older Canon JPEGs. The
+        // normalizer now has a manual rotate/flop fallback; the assertion
+        // here is a hard guard so a future regression in the normalizer
+        // can't silently corrupt user rotations.
+        $diag = ImageOrientationNormalizer::imagickAutoOrientAndResetOrientation($im);
+        $tagBefore = $diag['imagick_orientation_before'] ?? null;
+        if (is_int($tagBefore) && $tagBefore > 1 && ! ($diag['applied'] ?? false)) {
+            throw new \RuntimeException(
+                "Refusing to rotate: EXIF orientation tag {$tagBefore} could not be normalized. ".
+                'Aborting to avoid 180° flip from rotating raw raster.',
+            );
+        }
 
-        // Imagick::rotateImage: positive angle = counter-clockwise.
-        $im->rotateImage(new \ImagickPixel('rgba(0,0,0,0)'), -1.0 * $degreesClockwise);
+        // Imagick::rotateImage: positive angle = CLOCKWISE (verified empirically
+        // against Imagick 3.8.1 / ImageMagick 6.9.12). The Imagick PHP docstring
+        // claims CCW which is wrong — MagickRotateImage rotates CW for positive
+        // degrees per the ImageMagick C API. The previous `-1.0 *` multiplier
+        // here was based on that misleading docstring and silently produced
+        // CCW output for every "rotate clockwise" click, which combined with
+        // the EXIF normalization no-op below produced a 180° flip on portraits
+        // with orientation tag 6/8 (e.g. older Canon JPEGs).
+        $im->rotateImage(new \ImagickPixel('rgba(0,0,0,0)'), (float) $degreesClockwise);
 
         if (defined('Imagick::ORIENTATION_TOPLEFT') && method_exists($im, 'setImageOrientation')) {
             $im->setImageOrientation(Imagick::ORIENTATION_TOPLEFT);

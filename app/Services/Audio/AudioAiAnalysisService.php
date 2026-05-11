@@ -3,10 +3,12 @@
 namespace App\Services\Audio;
 
 use App\Enums\AITaskType;
+use App\Enums\EventType;
 use App\Exceptions\PlanLimitExceededException;
 use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Models\Tenant;
+use App\Services\ActivityRecorder;
 use App\Services\AIConfigService;
 use App\Services\AiUsageService;
 use App\Services\Audio\Providers\AudioAiProviderInterface;
@@ -65,11 +67,29 @@ class AudioAiAnalysisService
      */
     public function analyzeForAsset(Asset $asset): array
     {
+        // Resolve agent config + tenant up front so the misconfiguration
+        // branches below can record an AIAgentRun row (otherwise repeated
+        // bulk reruns silently no-op and AI Control Center stays empty —
+        // operators have no way to see "we tried, but no provider is set").
+        $agentConfig = $this->aiConfigService->getAgentConfig(self::AGENT_ID) ?? [];
+        $tenant = $asset->tenant_id ? Tenant::find($asset->tenant_id) : null;
+
         $providerKey = config('assets.audio_ai.provider');
         if (! $providerKey) {
             $this->markStatus($asset, 'pending_provider');
             Log::info('[AudioAiAnalysisService] No provider configured — marking pending', [
                 'asset_id' => $asset->id,
+            ]);
+            $this->recordBlockedRun(
+                $asset,
+                $tenant,
+                null,
+                $agentConfig,
+                'no_provider',
+                'Audio AI provider not configured (set ASSET_AUDIO_AI_PROVIDER)',
+            );
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_SKIPPED, [
+                'reason' => 'no_provider',
             ]);
 
             return ['success' => false, 'status' => 'pending_provider', 'reason' => 'no_provider'];
@@ -78,26 +98,47 @@ class AudioAiAnalysisService
         $provider = $this->resolveProvider((string) $providerKey);
         if (! $provider) {
             $this->markStatus($asset, 'failed', ['error' => "unknown provider: {$providerKey}"]);
+            $this->recordBlockedRun(
+                $asset,
+                $tenant,
+                (string) $providerKey,
+                $agentConfig,
+                'unknown_provider',
+                "Audio AI provider key not registered: {$providerKey}",
+            );
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_FAILED, [
+                'reason' => 'unknown_provider',
+                'provider' => (string) $providerKey,
+            ]);
 
             return ['success' => false, 'status' => 'failed', 'reason' => 'unknown_provider'];
         }
 
         // Honor the Admin → AI → Agents toggle. Operators flipping this row
         // off must immediately stop new audio AI runs without redeploying.
-        $agentConfig = $this->aiConfigService->getAgentConfig(self::AGENT_ID) ?? [];
         if (array_key_exists('active', $agentConfig) && $agentConfig['active'] === false) {
             $this->markStatus($asset, 'pending_provider', ['reason' => 'agent_disabled']);
             Log::info('[AudioAiAnalysisService] agent disabled in admin', [
                 'asset_id' => $asset->id,
             ]);
+            $this->recordBlockedRun(
+                $asset,
+                $tenant,
+                (string) $providerKey,
+                $agentConfig,
+                'agent_disabled',
+                'Audio AI agent disabled by admin',
+            );
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_SKIPPED, [
+                'reason' => 'agent_disabled',
+            ]);
 
             return ['success' => false, 'status' => 'pending_provider', 'reason' => 'agent_disabled'];
         }
 
-        // Resolve tenant + plan-pool cost up-front so we can short-circuit when
-        // the workspace is out of credits (or has AI globally disabled in
-        // tenant settings) without burning S3 egress + a Whisper call.
-        $tenant = Tenant::find($asset->tenant_id);
+        // Plan-pool cost gating: short-circuit when the workspace is out of
+        // credits (or has AI globally disabled in tenant settings) without
+        // burning S3 egress + a Whisper call.
         $durationSeconds = (float) ($asset->metadata['audio']['duration_seconds'] ?? 0.0);
         $creditsRequired = $this->aiUsageService->getAudioInsightsCreditCost($durationSeconds / 60.0);
 
@@ -111,13 +152,29 @@ class AudioAiAnalysisService
                     'credits_required' => $creditsRequired,
                     'duration_seconds' => $durationSeconds,
                 ]);
-                $this->recordBlockedRun($asset, $tenant, $providerKey, $agentConfig, $reason, $creditsRequired, $durationSeconds);
+                $this->recordBlockedRun(
+                    $asset,
+                    $tenant,
+                    (string) $providerKey,
+                    $agentConfig,
+                    $reason,
+                    'Audio AI blocked by plan limit',
+                    [
+                        'duration_seconds' => $durationSeconds,
+                        'credits_required' => $creditsRequired,
+                    ],
+                );
                 Log::warning('[AudioAiAnalysisService] credit pool gate blocked audio AI', [
                     'asset_id' => $asset->id,
                     'tenant_id' => $tenant->id,
                     'credits_required' => $creditsRequired,
                     'duration_seconds' => $durationSeconds,
                     'limit_type' => $e->limitType,
+                ]);
+                ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_SKIPPED, [
+                    'reason' => $reason,
+                    'credits_required' => $creditsRequired,
+                    'duration_seconds' => $durationSeconds,
                 ]);
 
                 return [
@@ -129,6 +186,11 @@ class AudioAiAnalysisService
         }
 
         $this->markStatus($asset, 'processing');
+        ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_STARTED, [
+            'provider' => (string) $providerKey,
+            'duration_seconds' => $durationSeconds,
+            'credits_required' => $creditsRequired,
+        ]);
 
         // Open the agent run row BEFORE calling out so operators see in-flight
         // audio AI calls in Activity (status='failed' until we mark success
@@ -143,6 +205,11 @@ class AudioAiAnalysisService
             Log::error('[AudioAiAnalysisService] provider threw', [
                 'asset_id' => $asset->id,
                 'provider' => $providerKey,
+                'error' => $e->getMessage(),
+            ]);
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_FAILED, [
+                'reason' => 'provider_exception',
+                'provider' => (string) $providerKey,
                 'error' => $e->getMessage(),
             ]);
 
@@ -162,6 +229,20 @@ class AudioAiAnalysisService
                 'reason' => $reason,
             ]);
             $this->failAgentRun($agentRun, $reason, ['provider_error' => $result['error'] ?? null]);
+            // budget_exceeded / duration_exceeded / no_api_key are not really
+            // "failures" in the operator sense — they're skips. Reflect that
+            // distinction in the timeline so the entry shows informational
+            // styling rather than red.
+            $isSkip = in_array($reason, ['budget_exceeded', 'duration_exceeded', 'no_api_key'], true);
+            ActivityRecorder::logAsset(
+                $asset,
+                $isSkip ? EventType::ASSET_AUDIO_AI_SKIPPED : EventType::ASSET_AUDIO_AI_FAILED,
+                [
+                    'reason' => $reason,
+                    'provider' => (string) $providerKey,
+                    'error' => $result['error'] ?? null,
+                ],
+            );
 
             return ['success' => false, 'status' => $terminalStatus, 'reason' => $reason];
         }
@@ -208,6 +289,15 @@ class AudioAiAnalysisService
         ]);
 
         $this->completeAgentRun($agentRun, $result, $creditsCharged);
+        ActivityRecorder::logAsset($asset, EventType::ASSET_AUDIO_AI_COMPLETED, [
+            'provider' => $result['provider'] ?? (string) $providerKey,
+            'duration_seconds' => $durationSeconds,
+            'credits_charged' => $creditsCharged,
+            'cost_cents' => $result['cost_cents'] ?? null,
+            'detected_language' => $result['detected_language'] ?? null,
+            'transcript_chars' => is_string($result['transcript'] ?? null) ? mb_strlen($result['transcript']) : 0,
+            'mood' => is_array($result['mood'] ?? null) ? array_values($result['mood']) : null,
+        ]);
 
         return ['success' => true, 'status' => 'completed', 'credits_charged' => $creditsCharged];
     }
@@ -316,28 +406,41 @@ class AudioAiAnalysisService
     }
 
     /**
-     * Plan-limit / blocked runs still get a row so admins can see "we tried,
-     * the workspace was out of credits." Marked `status=failed` with
-     * `blocked_reason` so it shows distinct from real provider failures.
+     * Blocked / misconfigured runs still get an `ai_agent_runs` row so admins
+     * can see "we tried — here's why nothing happened" in AI Control Center.
+     * Covers:
+     *   - plan_limit_exceeded / ai_disabled (credit-pool gate)
+     *   - no_provider / unknown_provider (operator forgot to set
+     *     ASSET_AUDIO_AI_PROVIDER) — without this row, repeated bulk reruns
+     *     silently no-op and the dashboard looks like nothing was ever
+     *     attempted, which is exactly the staging puzzle this addresses.
+     *   - agent_disabled (Admin → AI → Agents toggle)
+     *
+     * Marked `status=failed` with `blocked_reason` so it stays distinct from
+     * real provider/network failures.
      *
      * @param  array<string, mixed>  $agentConfig
+     * @param  array<string, mixed>  $extra  Extra metadata (e.g. credits_required)
      */
     protected function recordBlockedRun(
         Asset $asset,
-        Tenant $tenant,
-        string $providerKey,
+        ?Tenant $tenant,
+        ?string $providerKey,
         array $agentConfig,
         string $reason,
-        int $creditsRequired,
-        float $durationSeconds,
+        string $summary,
+        array $extra = [],
     ): void {
         try {
             AIAgentRun::create([
                 'agent_id' => self::AGENT_ID,
                 'agent_name' => $agentConfig['name'] ?? 'Audio Insights',
-                'triggering_context' => 'tenant',
+                // tenant context when we know the workspace; falls back to
+                // 'system' when the asset has no tenant (shouldn't happen in
+                // practice but keeps the row creation safe).
+                'triggering_context' => $tenant !== null ? 'tenant' : 'system',
                 'environment' => app()->environment(),
-                'tenant_id' => $tenant->id,
+                'tenant_id' => $tenant?->id ?? $asset->tenant_id,
                 'user_id' => null,
                 'task_type' => AITaskType::AUDIO_INSIGHTS,
                 'entity_type' => Asset::class,
@@ -348,20 +451,19 @@ class AudioAiAnalysisService
                 'estimated_cost' => 0,
                 'status' => 'failed',
                 'severity' => 'warning',
-                'summary' => 'Audio AI blocked by plan limit',
+                'summary' => $summary,
                 'blocked_reason' => $reason,
                 'started_at' => now(),
                 'completed_at' => now(),
-                'metadata' => [
+                'metadata' => array_merge([
                     'trigger_source' => 'audio_pipeline',
                     'provider' => $providerKey,
-                    'duration_seconds' => $durationSeconds,
-                    'credits_required' => $creditsRequired,
-                ],
+                ], $extra),
             ]);
         } catch (\Throwable $e) {
             Log::warning('[AudioAiAnalysisService] could not record blocked run', [
                 'asset_id' => $asset->id,
+                'reason' => $reason,
                 'error' => $e->getMessage(),
             ]);
         }

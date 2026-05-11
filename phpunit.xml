@@ -27,6 +27,10 @@
         <env name="DB_DATABASE" value="testing"/>
         <!-- OpenAIProvider throws if empty; unit tests mock AI — value is not used for real API calls -->
         <env name="OPENAI_API_KEY" value="phpunit-placeholder-not-a-real-key"/>
+        <!-- Default existing AI metadata tests to the legacy combined OpenAI vision call.
+             Rekognition-specific tests opt in via Config::set('ai.metadata_tagging.vision_provider', ...). -->
+        <env name="AI_METADATA_VISION_PROVIDER" value="openai"/>
+        <env name="AI_METADATA_REKOGNITION_ENABLED" value="false"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="MAIL_AUTOMATIONS_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

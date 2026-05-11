@@ -1,10 +1,15 @@
 /**
- * Jackpot console banner: slot-machine ASCII + deploy stamp.
+ * Jackpot console banner: slot-machine ASCII + release stamp.
  *
- * Stamp uses the latest git commit time (ISO-8601) when Laravel shares it:
- * `.release-info.json`, `APP_BUILD_TIME` (see config/jackpot_console.php), or `git log -1`
- * on local/staging when `.git` exists. Otherwise falls back to this browser’s local clock
- * and prefixes `local ·` in the badge.
+ * Stamp uses the server's release metadata when Laravel shares it:
+ * `.release-info.json`, `APP_BUILD_*`, the deploy manifest (DEPLOYED_AT —
+ * same source as the Admin Command Center), or `git log -1`. When a short
+ * commit SHA is also available it is appended (e.g. `v:05112026:2114 UTC · c77c0c9`).
+ *
+ * Falls back to this browser's local clock with a `local ·` prefix when no
+ * server-side metadata is available. We do NOT print a hint message in that
+ * case — the badge itself is the signal, and a verbose hint leaked through
+ * to staging when the manifest fallback was missing (now fixed server-side).
  *
  * The version line is printed with %c (black background, white monospace text).
  */
@@ -52,8 +57,6 @@ export function formatVersionLabelFromCommitIso(iso) {
 const VERSION_BADGE_STYLE =
     'background:#000;color:#fff;font-weight:700;padding:4px 12px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;letter-spacing:0.03em'
 
-const LOCAL_HINT_STYLE = 'color:#6b7280;font-size:10px;margin-top:2px'
-
 /**
  * Four “reels” like the JACKPOT wordmark: top J A C K, bottom P O T, last cell = cherry (@@).
  * Monospace only — tuned for ~62–72 column devtools.
@@ -72,31 +75,64 @@ const BANNER_LINES = [
 ]
 
 let cachedCommitIso = null
+let cachedCommitSha = null
 
-function resolveVersionBadge(sharedPayload) {
-    const iso = sharedPayload?.commitIso8601 ?? cachedCommitIso
+/**
+ * Whitelist a short SHA so we never echo arbitrary server input verbatim into
+ * the badge — keeps the console clean and immune to a typo in a deploy
+ * manifest sneaking ANSI codes / very long strings into the styled log line.
+ *
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+export function sanitizeCommitSha(raw) {
+    if (typeof raw !== 'string') return null
+    const trimmed = raw.trim()
+    if (trimmed.length < 7 || trimmed.length > 40) return null
+    if (!/^[0-9a-f]+$/i.test(trimmed)) return null
+    return trimmed.slice(0, 8).toLowerCase()
+}
+
+/**
+ * Decide what the version badge should say.
+ *
+ * @param {{ commitIso8601?: string|null, commitSha?: string|null }|null} sharedPayload
+ * @param {string|null} cachedIso
+ * @param {string|null} cachedSha
+ * @returns {{ badgeText: string, releaseString: string, sha: string|null }}
+ */
+export function buildVersionBadge(sharedPayload, cachedIso = null, cachedSha = null) {
+    const iso = sharedPayload?.commitIso8601 ?? cachedIso ?? null
+    const sha = sanitizeCommitSha(sharedPayload?.commitSha) ?? cachedSha ?? null
+
     if (iso) {
-        cachedCommitIso = iso
         const label = formatVersionLabelFromCommitIso(iso)
         if (label) {
-            return { badgeText: `  ${label} UTC  `, hint: null }
+            const tail = sha ? ` · ${sha}` : ''
+            return {
+                badgeText: `  ${label} UTC${tail}  `,
+                releaseString: `${label} UTC${tail}`,
+                sha,
+            }
         }
     }
     const local = formatJackpotConsoleVersionLocal()
     return {
         badgeText: `  local · ${local}  `,
-        hint: 'No commit time from the server — using your computer’s clock. Set APP_BUILD_TIME or .release-info.json on deploy.',
+        releaseString: `local · ${local}`,
+        sha: null,
     }
 }
 
+function resolveVersionBadge(sharedPayload) {
+    const out = buildVersionBadge(sharedPayload, cachedCommitIso, cachedCommitSha)
+    if (sharedPayload?.commitIso8601) cachedCommitIso = sharedPayload.commitIso8601
+    if (out.sha) cachedCommitSha = out.sha
+    return out
+}
+
 function getJpReleaseString() {
-    if (cachedCommitIso) {
-        const label = formatVersionLabelFromCommitIso(cachedCommitIso)
-        if (label) {
-            return `${label} UTC`
-        }
-    }
-    return `local · ${formatJackpotConsoleVersionLocal()}`
+    return buildVersionBadge(null, cachedCommitIso, cachedCommitSha).releaseString
 }
 
 if (typeof window !== 'undefined') {
@@ -120,11 +156,8 @@ export function logJackpotConsoleBanner(sharedPayload = null) {
         console.log(line)
     }
 
-    const { badgeText, hint } = resolveVersionBadge(sharedPayload)
+    const { badgeText } = resolveVersionBadge(sharedPayload)
     console.log('%c' + badgeText, VERSION_BADGE_STYLE)
-    if (hint) {
-        console.log('%c' + hint, LOCAL_HINT_STYLE)
-    }
 }
 
 /**

@@ -22,6 +22,8 @@
  * `token` is any unique value; we use the asset id but anything works.
  */
 
+import { isLiveAudioAnalyserEnabled } from './audioPlaybackFlags'
+
 let singleton = null
 
 function createRegistry() {
@@ -70,6 +72,14 @@ function createRegistry() {
 
     function attach(audioEl) {
         if (!audioEl) return null
+        // Live analyser is opt-in (see config/assets.php audio.live_analyser_enabled).
+        // When off we deliberately do NOT route the element through the analyser:
+        // for cross-origin sources without CORS headers the routed audio is
+        // silenced through Web Audio (only the analyser tap "hears" it). The
+        // audio element's default output path is used instead so playback is
+        // always audible — at the cost of frequency-data driven bars (which
+        // gracefully fall back to the synthetic envelope animation).
+        if (!isLiveAudioAnalyserEnabled()) return null
         const ctx = ensureContext()
         if (!ctx || !analyser) return null
         if (sourceCache.has(audioEl)) return sourceCache.get(audioEl)

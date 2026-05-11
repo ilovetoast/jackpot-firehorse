@@ -19,7 +19,6 @@ use App\Models\Tenant;
 use App\Models\UploadSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -45,18 +44,16 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
     public function test_rerun_ai_tagging_on_audio_dispatches_audio_ai_only(): void
     {
         Bus::fake();
-        Queue::fake();
 
         $asset = $this->makeAsset('audio/mpeg', 'voice.mp3');
         $this->callRerunAiTagging($asset);
 
-        Queue::assertPushed(RunAudioAiAnalysisJob::class, function ($job) use ($asset) {
+        Bus::assertDispatched(RunAudioAiAnalysisJob::class, function ($job) use ($asset) {
             return $job->assetId === (string) $asset->id;
         });
-        Queue::assertNotPushed(AiMetadataGenerationJob::class);
-        Queue::assertNotPushed(AiTagAutoApplyJob::class);
-        Queue::assertNotPushed(AiMetadataSuggestionJob::class);
-        Bus::assertNothingDispatched();
+        Bus::assertNotDispatched(AiMetadataGenerationJob::class);
+        Bus::assertNotDispatched(AiTagAutoApplyJob::class);
+        Bus::assertNotDispatched(AiMetadataSuggestionJob::class);
 
         $asset->refresh();
         $this->assertSame('queued', $asset->metadata['audio']['ai_status'] ?? null,
@@ -66,7 +63,6 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
     public function test_rerun_ai_tagging_on_image_dispatches_vision_chain_only(): void
     {
         Bus::fake();
-        Queue::fake();
 
         $asset = $this->makeAsset('image/jpeg', 'logo.jpg');
         $this->callRerunAiTagging($asset);
@@ -76,8 +72,8 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
             AiTagAutoApplyJob::class,
             AiMetadataSuggestionJob::class,
         ]);
-        Queue::assertNotPushed(RunAudioAiAnalysisJob::class);
-        Queue::assertNotPushed(ProcessVideoInsightsBatchJob::class);
+        Bus::assertNotDispatched(RunAudioAiAnalysisJob::class);
+        Bus::assertNotDispatched(ProcessVideoInsightsBatchJob::class);
     }
 
     public function test_rerun_ai_tagging_on_video_dispatches_vision_chain_and_video_insights(): void
@@ -85,7 +81,6 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
         config()->set('assets.video_ai.enabled', true);
 
         Bus::fake();
-        Queue::fake();
 
         $asset = $this->makeAsset('video/mp4', 'spot.mp4');
         $this->callRerunAiTagging($asset);
@@ -95,10 +90,10 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
             AiTagAutoApplyJob::class,
             AiMetadataSuggestionJob::class,
         ]);
-        Queue::assertPushed(ProcessVideoInsightsBatchJob::class, function ($job) use ($asset) {
+        Bus::assertDispatched(ProcessVideoInsightsBatchJob::class, function ($job) use ($asset) {
             return in_array((string) $asset->id, $job->assetIds, true);
         });
-        Queue::assertNotPushed(RunAudioAiAnalysisJob::class);
+        Bus::assertNotDispatched(RunAudioAiAnalysisJob::class);
 
         $asset->refresh();
         $this->assertSame('queued', $asset->metadata['ai_video_status'] ?? null);
@@ -109,7 +104,6 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
         config()->set('assets.video_ai.enabled', false);
 
         Bus::fake();
-        Queue::fake();
 
         $asset = $this->makeAsset('video/mp4', 'spot.mp4');
         $this->callRerunAiTagging($asset);
@@ -119,16 +113,14 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
             AiTagAutoApplyJob::class,
             AiMetadataSuggestionJob::class,
         ]);
-        Queue::assertNotPushed(ProcessVideoInsightsBatchJob::class);
+        Bus::assertNotDispatched(ProcessVideoInsightsBatchJob::class);
     }
 
     public function test_audio_skip_flag_is_cleared_so_rerun_actually_runs(): void
     {
         Bus::fake();
-        Queue::fake();
 
         $asset = $this->makeAsset('audio/mpeg', 'voice.mp3');
-        // Simulate a prior upload-time skip flag (e.g. operator opted-out at upload).
         $asset->update(['metadata' => array_merge($asset->metadata ?? [], [
             '_skip_ai_audio_analysis' => true,
         ])]);
@@ -138,7 +130,7 @@ class AdminAssetBulkRerunAiTaggingTest extends TestCase
         $asset->refresh();
         $this->assertArrayNotHasKey('_skip_ai_audio_analysis', $asset->metadata,
             'Manual rerun must clear the upload-time skip flag — otherwise admins click rerun and nothing happens');
-        Queue::assertPushed(RunAudioAiAnalysisJob::class);
+        Bus::assertDispatched(RunAudioAiAnalysisJob::class);
     }
 
     protected function callRerunAiTagging(Asset $asset): void

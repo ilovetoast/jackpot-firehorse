@@ -159,6 +159,18 @@ class AppServiceProvider extends ServiceProvider
             return new OpenAIProvider;
         });
 
+        // AWS Rekognition vision tag candidate provider — image tags only.
+        // Bound only when config flag is on so accidental missing IAM doesn't break tests/local.
+        $this->app->singleton(\App\Services\AI\Vision\AwsRekognitionVisionTagProvider::class, function ($app) {
+            return new \App\Services\AI\Vision\AwsRekognitionVisionTagProvider(
+                $app->make(\App\Services\TenantBucketService::class)
+            );
+        });
+        $this->app->bind(
+            \App\Services\AI\Vision\Contracts\VisionTagCandidateProvider::class,
+            \App\Services\AI\Vision\AwsRekognitionVisionTagProvider::class,
+        );
+
         if (config('ai.gemini.api_key')) {
             $this->app->singleton(GeminiProvider::class, function ($app) {
                 return new GeminiProvider;

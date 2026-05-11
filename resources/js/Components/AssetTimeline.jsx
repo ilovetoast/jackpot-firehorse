@@ -13,6 +13,7 @@
  */
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { Activity, AlertCircle, Slash, RefreshCw, History } from 'lucide-react'
+import { formatBytesHuman } from '../utils/formatBytesHuman'
 
 export default function AssetTimeline({
     events = [],
@@ -38,6 +39,46 @@ export default function AssetTimeline({
             'asset.video_preview.completed': 'Video preview generation completed',
             'asset.video_preview.failed': 'Video preview generation failed',
             'asset.video_preview.skipped': 'Video preview generation skipped',
+            // Audio web-playback derivative — the 128 kbps MP3 we transcode for
+            // the browser. `skipped` is informational (small MP3 sources don't
+            // need a derivative) so we name the reason rather than just "skipped".
+            'asset.audio_web_playback.started': 'Web playback MP3 transcode started',
+            'asset.audio_web_playback.completed': metadata?.bitrate_kbps
+                ? `Web playback MP3 generated (${metadata.bitrate_kbps} kbps${metadata?.output_size_bytes ? `, ${formatBytesHuman(metadata.output_size_bytes)}` : ''})`
+                : 'Web playback MP3 generated',
+            'asset.audio_web_playback.skipped': metadata?.reason === 'mp3_under_threshold'
+                ? 'Web playback MP3 not needed — original MP3 streams directly'
+                : metadata?.reason === 'small_browser_compatible'
+                  ? 'Web playback MP3 not needed — original is browser-friendly'
+                  : metadata?.reason === 'disabled_by_config'
+                    ? 'Web playback MP3 disabled by config'
+                    : 'Web playback MP3 generation skipped',
+            'asset.audio_web_playback.failed': metadata?.reason
+                ? `Web playback MP3 generation failed (${metadata.reason})`
+                : 'Web playback MP3 generation failed',
+            // Audio AI insights (Whisper transcript + mood + summary).
+            'asset.audio_ai.started': 'Audio AI analysis started',
+            'asset.audio_ai.completed': metadata?.credits_charged
+                ? `Audio AI analysis completed (${metadata.credits_charged} credit${metadata.credits_charged === 1 ? '' : 's'}${metadata?.detected_language ? `, ${metadata.detected_language}` : ''})`
+                : 'Audio AI analysis completed',
+            'asset.audio_ai.skipped': metadata?.reason === 'plan_limit_exceeded'
+                ? 'Audio AI skipped — plan credit limit exceeded'
+                : metadata?.reason === 'ai_disabled'
+                  ? 'Audio AI skipped — AI is disabled for this workspace'
+                  : metadata?.reason === 'agent_disabled'
+                    ? 'Audio AI skipped — agent disabled in admin'
+                    : metadata?.reason === 'no_provider'
+                      ? 'Audio AI skipped — no provider configured yet'
+                      : metadata?.reason === 'budget_exceeded'
+                        ? 'Audio AI skipped — per-asset budget exceeded'
+                        : metadata?.reason === 'duration_exceeded'
+                          ? 'Audio AI skipped — clip exceeds duration cap'
+                          : metadata?.reason === 'no_api_key'
+                            ? 'Audio AI skipped — provider API key missing'
+                            : 'Audio AI analysis skipped',
+            'asset.audio_ai.failed': metadata?.reason
+                ? `Audio AI analysis failed (${metadata.reason})`
+                : 'Audio AI analysis failed',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
@@ -96,6 +137,20 @@ export default function AssetTimeline({
                 e.event_type === 'asset.video_preview.completed' || 
                 e.event_type === 'asset.video_preview.failed' ||
                 e.event_type === 'asset.video_preview.skipped'
+            )
+        }
+        if (eventType === 'asset.audio_web_playback.started') {
+            return allEvents.some(e =>
+                e.event_type === 'asset.audio_web_playback.completed' ||
+                e.event_type === 'asset.audio_web_playback.failed' ||
+                e.event_type === 'asset.audio_web_playback.skipped'
+            )
+        }
+        if (eventType === 'asset.audio_ai.started') {
+            return allEvents.some(e =>
+                e.event_type === 'asset.audio_ai.completed' ||
+                e.event_type === 'asset.audio_ai.failed' ||
+                e.event_type === 'asset.audio_ai.skipped'
             )
         }
         if (eventType === 'asset.brand_compliance.requested') {
