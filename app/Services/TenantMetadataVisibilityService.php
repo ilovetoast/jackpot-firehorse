@@ -1176,7 +1176,7 @@ class TenantMetadataVisibilityService
             ];
         }
 
-        // Pinned (DB key `starred`): not in primary / More filters by default; still enabled and visible in drawer
+        // Featured (DB key `starred`): not in primary / More filters by default; still enabled and visible in drawer
         if ($fieldKey === 'starred') {
             $v = config('metadata_category_defaults.pinned_default_visibility', []);
             if (! empty($v)) {

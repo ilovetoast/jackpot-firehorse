@@ -532,7 +532,7 @@ class DevelopmentDataSeeder extends Seeder
     /**
      * Sync sort fields (starred, quality_rating) from metadata.fields to assets.metadata root.
      * Grid/sort/filter read from assets.metadata.starred (and quality_rating); drawer shows from asset_metadata.
-     * Without this, seeded assets show "Starred: Yes" in the drawer but no star icon on the tile.
+     * Without this, seeded assets show "Featured: Yes" in the drawer but no star icon on the tile.
      *
      * @see docs/STARRED_CANONICAL.md
      */

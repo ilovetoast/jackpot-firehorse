@@ -12,6 +12,7 @@ import {
     EyeIcon,
     FunnelIcon,
     LockClosedIcon,
+    PencilSquareIcon,
     SparklesIcon,
     StarIcon,
     TrashIcon,
@@ -48,6 +49,19 @@ function LockAffix({ children }) {
             <LockClosedIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {hint ? <span className="sr-only">{hint}</span> : null}
         </span>
+    )
+}
+
+/** Short section label — sentence case + accent dot (friendlier than all-caps). */
+function ModalSectionTitle({ id, children }) {
+    return (
+        <h3 id={id} className="mb-3 flex items-center gap-2 text-sm font-semibold tracking-tight text-slate-900">
+            <span
+                className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--wb-accent)] opacity-75"
+                aria-hidden
+            />
+            {children}
+        </h3>
     )
 }
 
@@ -175,6 +189,8 @@ export default function MetadataFieldModal({
     const categoryDropdownRef = useRef(null)
     const [originalEnabledCategories, setOriginalEnabledCategories] = useState([]) // Track original enabled categories when editing
     const [keyManuallyEdited, setKeyManuallyEdited] = useState(false) // When false, key syncs from display name
+    /** Create flow: compact key preview; expand to edit raw key (power users). */
+    const [keyEditorExpanded, setKeyEditorExpanded] = useState(false)
     const [filterTransitionNotice, setFilterTransitionNotice] = useState(null)
     /** Avoid wiping the "new field" form when parent re-renders (e.g. Inertia) while the modal stays open. */
     const wasModalOpenRef = useRef(false)
@@ -243,6 +259,7 @@ export default function MetadataFieldModal({
         wasModalOpenRef.current = true
 
         if (isOpen && field) {
+            setKeyEditorExpanded(false)
             setLoadingField(true)
             const isSystem = field.scope === 'system' || field.is_system
             
@@ -405,6 +422,7 @@ export default function MetadataFieldModal({
             const initialCategories = preselectedCategoryId ? [preselectedCategoryId] : []
             setOriginalEnabledCategories([])
             setKeyManuallyEdited(false)
+            setKeyEditorExpanded(false)
             setFormData({
                 key: '',
                 system_label: '',
@@ -428,6 +446,13 @@ export default function MetadataFieldModal({
             setLoadingField(false)
         }
     }, [isOpen, field, categories, preselectedCategoryId])
+
+    const storageKeySuffixPreview = useMemo(() => {
+        let k = (formData.key || '').trim()
+        if (k.startsWith('custom__')) k = k.slice('custom__'.length)
+        if (k) return k
+        return toSnakeCase(formData.system_label || '')
+    }, [formData.key, formData.system_label])
 
     if (!isOpen) return null
 
@@ -491,6 +516,31 @@ export default function MetadataFieldModal({
             if (dupes.length > 0) {
                 setErrors({ options: 'Duplicate values are not allowed.', error: 'Remove duplicate option values.' })
                 setSubmitting(false)
+                return
+            }
+        }
+
+        // New custom fields: internal key suffix required and must be valid snake_case
+        if (!isEditing && !isSystemField) {
+            let suffix = (formData.key || '').trim()
+            if (suffix.startsWith('custom__')) suffix = suffix.slice('custom__'.length)
+            if (!suffix) {
+                setErrors({
+                    key: 'Add a field name (or open Customize key and set the key).',
+                    error: 'We need an internal key — start by giving this field a name.',
+                })
+                setSubmitting(false)
+                setKeyEditorExpanded(true)
+                return
+            }
+            const snakeCheck = validateSnakeCase(suffix)
+            if (!snakeCheck.valid) {
+                setErrors({
+                    key: snakeCheck.message,
+                    error: snakeCheck.message,
+                })
+                setSubmitting(false)
+                setKeyEditorExpanded(true)
                 return
             }
         }
@@ -808,17 +858,17 @@ export default function MetadataFieldModal({
         >
             <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
                 {/* Backdrop */}
-                <div 
-                    className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                <div
+                    className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] transition-opacity"
                     onClick={onClose}
                 />
 
                 {/* Modal */}
-                <div className="relative flex min-h-0 max-h-[min(90vh,100dvh-2rem)] w-full transform flex-col overflow-hidden rounded-xl bg-white text-left shadow-xl transition-all sm:my-8 sm:max-w-4xl">
-                    <div className="flex flex-shrink-0 flex-col gap-1 border-b border-slate-200 px-4 py-3 sm:px-5">
+                <div className="relative flex min-h-0 max-h-[min(90vh,100dvh-2rem)] w-full transform flex-col overflow-hidden rounded-2xl bg-white text-left shadow-2xl ring-1 ring-slate-200/80 transition-all sm:my-8 sm:max-w-4xl">
+                    <div className="flex flex-shrink-0 flex-col gap-2 border-b border-slate-100/90 bg-gradient-to-br from-[color:color-mix(in_srgb,var(--wb-accent)_16%,white)] via-white to-[color:color-mix(in_srgb,var(--wb-accent)_8%,white)] px-4 py-4 sm:px-6 sm:py-4">
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
-                                <h2 id="modal-title" className="truncate text-base font-semibold text-slate-900">
+                                <h2 id="modal-title" className="truncate text-lg font-semibold tracking-tight text-slate-900">
                                     {isEditing ? 'Edit field' : 'Create field'}
                                 </h2>
                                 {!isEditing && customFieldsLimit && customFieldsLimit.max > 0 && (
@@ -842,39 +892,44 @@ export default function MetadataFieldModal({
                                 <XMarkIcon className="h-5 w-5" />
                             </button>
                         </div>
-                        <p className="text-left text-xs leading-snug text-slate-600">
-                            Visibility controls where this field appears for assets.
+                        <p className="flex items-start gap-2 text-left text-sm leading-snug text-slate-600">
+                            <SparklesIcon
+                                className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--wb-accent)] opacity-85"
+                                aria-hidden
+                            />
+                            <span>
+                                {isEditing
+                                    ? 'Adjust the name, hints, and where this field shows up in your library.'
+                                    : 'Give it a friendly name — we handle the technical bits unless you want to tweak them.'}
+                            </span>
                         </p>
                     </div>
 
                     <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-                        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+                        <div className="min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-slate-50/40 to-white px-4 py-5 sm:px-6 sm:py-6">
                         {errors.error && (
-                            <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                            <div className="mb-4 rounded-xl border border-red-100 bg-red-50/90 px-4 py-3 text-sm text-red-900">
                                 {errors.error}
                             </div>
                         )}
 
-                        <div className="space-y-6">
+                        <div className="space-y-8">
                             <section aria-labelledby="modal-field-basics-heading">
-                                <h3
-                                    id="modal-field-basics-heading"
-                                    className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500"
-                                >
-                                    Field basics
-                                </h3>
-                                <div className="grid grid-cols-1 gap-5">
-                                    <div className="min-w-0 space-y-4">
+                                <ModalSectionTitle id="modal-field-basics-heading">
+                                    {isEditing ? 'The basics' : 'Start with a name'}
+                                </ModalSectionTitle>
+                                <div className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/30 p-4 shadow-sm sm:p-5">
+                                    <div className="min-w-0 space-y-5">
                                         <div>
                                             <label
                                                 htmlFor="system_label"
-                                                className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-700"
+                                                className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900"
                                             >
                                                 <span>
-                                                    Display Name <span className="text-red-500">*</span>
+                                                    Field name <span className="text-red-500">*</span>
                                                 </span>
                                                 {isEditing && isSystemField ? (
-                                                    <LockAffix>Preset field — display name is not edited here.</LockAffix>
+                                                    <LockAffix>Preset — name is fixed here.</LockAffix>
                                                 ) : null}
                                             </label>
                                             <input
@@ -891,22 +946,146 @@ export default function MetadataFieldModal({
                                                         ...(!isEditing && !keyManuallyEdited && { key: toSnakeCase(label) }),
                                                     }))
                                                 }}
-                                                className={`block w-full rounded-md border border-slate-300 py-1.5 px-2.5 text-sm placeholder-slate-400 focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-600 ${productFocusInput}`}
-                                                placeholder="e.g. Video Type"
+                                                className={`block w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3.5 text-base text-slate-900 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:ring-2 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-600 ${productFocusInput}`}
+                                                placeholder="e.g. Video type"
                                             />
                                             {!(isEditing && isSystemField) ? (
-                                                <p className="mt-1 text-xs text-slate-500">Shown to users in the library.</p>
+                                                <p className="mt-2 text-sm text-slate-500">
+                                                    This is the label your team sees in the library and on assets.
+                                                </p>
                                             ) : null}
                                             {errors.system_label && (
                                                 <p className="mt-1 text-xs text-red-600">{errors.system_label}</p>
                                             )}
+
+                                            {!isEditing && !isSystemField ? (
+                                                <div className="mt-4 rounded-xl border border-dashed border-slate-200/90 bg-slate-50/50 px-3 py-3 sm:px-4">
+                                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                                        <div>
+                                                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                                                Internal key
+                                                            </p>
+                                                            <p className="mt-1 font-mono text-sm text-slate-700">
+                                                                {storageKeySuffixPreview ? (
+                                                                    <>
+                                                                        <span className="text-slate-400">custom__</span>
+                                                                        {storageKeySuffixPreview}
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-slate-400">custom__…</span>
+                                                                )}
+                                                            </p>
+                                                            <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
+                                                                We generate this from the name for APIs and imports. You rarely
+                                                                need to touch it.
+                                                            </p>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setKeyEditorExpanded(true)
+                                                                setKeyManuallyEdited(true)
+                                                            }}
+                                                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:bg-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)]"
+                                                        >
+                                                            <PencilSquareIcon className="h-3.5 w-3.5" aria-hidden />
+                                                            Customize key
+                                                        </button>
+                                                    </div>
+                                                    {keyEditorExpanded ? (
+                                                        <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3">
+                                                            <label htmlFor="key" className="sr-only">
+                                                                Custom internal key (snake_case)
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                id="key"
+                                                                value={formData.key}
+                                                                onChange={(e) => {
+                                                                    setKeyManuallyEdited(true)
+                                                                    setFormData({ ...formData, key: e.target.value })
+                                                                }}
+                                                                onBlur={(e) => {
+                                                                    const v = e.target.value.trim()
+                                                                    if (v)
+                                                                        setFormData((prev) => ({
+                                                                            ...prev,
+                                                                            key: v.startsWith('custom__')
+                                                                                ? v.slice('custom__'.length)
+                                                                                : toSnakeCase(v) || v,
+                                                                        }))
+                                                                }}
+                                                                className={`block w-full rounded-lg border border-slate-200 bg-white py-2 px-3 font-mono text-sm placeholder-slate-400 focus:ring-2 ${productFocusInput}`}
+                                                                placeholder="video_type"
+                                                                autoComplete="off"
+                                                                spellCheck="false"
+                                                            />
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setKeyManuallyEdited(false)
+                                                                        setFormData((prev) => ({
+                                                                            ...prev,
+                                                                            key: toSnakeCase(prev.system_label || ''),
+                                                                        }))
+                                                                        setKeyEditorExpanded(false)
+                                                                    }}
+                                                                    className="text-xs font-medium text-[var(--wb-link)] hover:opacity-90"
+                                                                >
+                                                                    Sync key from name again
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setKeyEditorExpanded(false)}
+                                                                    className="text-xs font-medium text-slate-600 hover:text-slate-800"
+                                                                >
+                                                                    Done
+                                                                </button>
+                                                            </div>
+                                                            <p className="text-xs text-slate-500">
+                                                                Use lowercase snake_case (e.g.{' '}
+                                                                <span className="font-mono text-slate-600">shoot_date</span>
+                                                                ). We store it as{' '}
+                                                                <span className="font-mono text-slate-600">custom__</span> plus
+                                                                your key.
+                                                            </p>
+                                                        </div>
+                                                    ) : null}
+                                                    {errors.key ? (
+                                                        <p className="mt-2 text-xs text-red-600">{errors.key}</p>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+
+                                            {isEditing && !isSystemField ? (
+                                                <div className="mt-4 rounded-xl border border-dashed border-slate-200/90 bg-slate-50/50 px-3 py-3 sm:px-4">
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                                        Internal key
+                                                    </p>
+                                                    <p className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-sm text-slate-700">
+                                                        {formData.key}
+                                                        <LockAffix>Cannot be changed after creation.</LockAffix>
+                                                    </p>
+                                                </div>
+                                            ) : null}
+
+                                            {isEditing && isSystemField ? (
+                                                <div className="mt-4 rounded-xl border border-dashed border-slate-200/90 bg-slate-50/50 px-3 py-3 sm:px-4">
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                                        Internal key
+                                                    </p>
+                                                    <p className="mt-1 font-mono text-sm text-slate-700">{formData.key}</p>
+                                                </div>
+                                            ) : null}
                                         </div>
                                         <div>
                                             <label
                                                 htmlFor="field_description"
-                                                className="mb-1 block text-xs font-medium text-slate-700"
+                                                className="mb-2 block text-sm font-semibold text-slate-900"
                                             >
-                                                Helper text <span className="font-normal text-slate-500">(optional)</span>
+                                                Tip for your team{' '}
+                                                <span className="font-normal text-slate-500">(optional)</span>
                                             </label>
                                             <textarea
                                                 id="field_description"
@@ -917,17 +1096,17 @@ export default function MetadataFieldModal({
                                                     setFormData((prev) => ({ ...prev, description: e.target.value }))
                                                 }
                                                 disabled={isSystemField}
-                                                className={`block w-full rounded-md border border-slate-300 py-1.5 px-2.5 text-sm placeholder-slate-400 focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-600 ${productFocusInput}`}
-                                                placeholder="Short line shown under the field in upload and asset details"
+                                                className={`block w-full rounded-xl border border-slate-200 bg-white py-2.5 px-3.5 text-sm placeholder-slate-400 shadow-inner shadow-slate-900/5 focus:ring-2 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-600 ${productFocusInput}`}
+                                                placeholder="Short hint under the field when people upload or view assets"
                                             />
-                                            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                                            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
                                                 {isSystemField ? (
                                                     <>
-                                                        <LockAffix>Helper text is fixed for this preset field.</LockAffix>
-                                                        <span>Contact support to change this text.</span>
+                                                        <LockAffix>Fixed for this preset.</LockAffix>
+                                                        <span>Contact support to change.</span>
                                                     </>
                                                 ) : (
-                                                    <span>One short sentence is enough.</span>
+                                                    <span>A single sentence keeps things scannable.</span>
                                                 )}
                                             </p>
                                             {errors.description && (
@@ -935,48 +1114,18 @@ export default function MetadataFieldModal({
                                             )}
                                         </div>
                                         <div>
-                                            <label
-                                                htmlFor="key"
-                                                className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-700"
-                                            >
+                                            <span className="mb-2 flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-900">
                                                 <span>
-                                                    Field Key {!isEditing && <span className="text-red-500">*</span>}
+                                                    What kind of field? <span className="text-red-500">*</span>
                                                 </span>
-                                                {isEditing ? <LockAffix>Field key cannot be changed after creation.</LockAffix> : null}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                id="key"
-                                                required={!isEditing}
-                                                disabled={isEditing}
-                                                value={formData.key}
-                                                onChange={(e) => {
-                                                    setKeyManuallyEdited(true)
-                                                    setFormData({ ...formData, key: e.target.value })
-                                                }}
-                                                className={`block w-full rounded-md border border-slate-300 py-1.5 px-2.5 text-sm placeholder-slate-400 focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-600 ${productFocusInput}`}
-                                                placeholder={isEditing ? '—' : 'my_field'}
-                                            />
-                                            {!isEditing && (
-                                                <p className="mt-1 text-xs text-slate-500">
-                                                    Used internally for imports, automation, and APIs. Saved internally as{' '}
-                                                    <span className="font-mono text-slate-600">custom__</span>
-                                                    {' '}
-                                                    plus your key (e.g.{' '}
-                                                    <span className="font-mono text-slate-600">custom__video_type</span>).
-                                                </p>
-                                            )}
-                                            {errors.key && <p className="mt-1 text-xs text-red-600">{errors.key}</p>}
-                                        </div>
-                                        <div>
-                                            <span className="mb-2 flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-700">
-                                                <span>
-                                                    Field Type <span className="text-red-500">*</span>
-                                                </span>
-                                                {isEditing ? <LockAffix>Field type cannot be changed after creation.</LockAffix> : null}
+                                                {isEditing ? (
+                                                    <LockAffix>Type is locked after creation.</LockAffix>
+                                                ) : null}
                                             </span>
                                             {!isEditing ? (
-                                                <p className="mb-2 text-xs text-slate-500">Pick how values are stored.</p>
+                                                <p className="mb-3 text-sm text-slate-500">
+                                                    Pick how people enter values — you can always change visibility below.
+                                                </p>
                                             ) : null}
                                             <div className="flex flex-wrap items-center gap-2">
                                                 {[
@@ -1028,12 +1177,12 @@ export default function MetadataFieldModal({
                                                                 )
                                                             }, 0)
                                                         }}
-                                                        className={`rounded-md px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-1 disabled:cursor-not-allowed ${
+                                                        className={`rounded-full px-3.5 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-1 disabled:cursor-not-allowed ${
                                                             formData.type === value
-                                                                ? `bg-[var(--wb-accent)] text-[var(--wb-on-accent)] ${
+                                                                ? `bg-[var(--wb-accent)] text-[var(--wb-on-accent)] shadow-sm ${
                                                                       isEditing ? 'opacity-100' : ''
                                                                   }`
-                                                                : `bg-slate-100 text-slate-700 hover:bg-slate-200 ${
+                                                                : `bg-white text-slate-700 shadow-sm ring-1 ring-slate-200/90 hover:bg-slate-50 hover:ring-slate-300 ${
                                                                       isEditing ? 'opacity-55' : ''
                                                                   }`
                                                         }`}
@@ -1056,7 +1205,7 @@ export default function MetadataFieldModal({
                                                         ) : null
                                                     })()}
                                             </div>
-                                            <p className="mt-2 text-xs text-slate-600">
+                                            <p className="mt-2 text-sm text-slate-600">
                                                 {FIELD_TYPE_ONE_LINER[formData.type] || FIELD_TYPE_ONE_LINER.text}
                                             </p>
                                             {errors.type && <p className="mt-1 text-xs text-red-600">{errors.type}</p>}
@@ -1066,18 +1215,15 @@ export default function MetadataFieldModal({
                             </section>
 
                             <section
-                                className="rounded-lg border border-slate-100 bg-slate-50/40 px-3 py-4 sm:px-4"
+                                className="rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white to-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] px-4 py-4 sm:px-5 sm:py-5"
                                 aria-labelledby="modal-values-heading"
                             >
-                                <h3
-                                    id="modal-values-heading"
-                                    className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
-                                >
-                                    {requiresOptions ? 'Values' : 'Field behavior by type'}
-                                </h3>
+                                <ModalSectionTitle id="modal-values-heading">
+                                    {requiresOptions ? 'Answer choices' : 'How this type behaves'}
+                                </ModalSectionTitle>
                                 {requiresOptions ? (
                                     <>
-                                        <p className="text-xs text-slate-600">Choices users can pick from.</p>
+                                        <p className="text-sm text-slate-600">Add the options people can pick from.</p>
                                         <div className="mt-3">
                                             {formData.option_editing_restricted && (
                                                 <p className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
@@ -1241,45 +1387,39 @@ export default function MetadataFieldModal({
                                         </div>
                                     </>
                                 ) : (
-                                    <div className="space-y-2 text-xs leading-relaxed text-slate-600">
+                                    <div className="space-y-2.5 text-sm leading-relaxed text-slate-600">
                                         {formData.type === 'boolean' && (
-                                            <p>Boolean fields create a Yes / No style choice.</p>
+                                            <p>A simple Yes / No toggle — great for flags and approvals.</p>
                                         )}
                                         {(formData.type === 'text' || formData.type === 'textarea') && (
                                             <>
-                                                <p>
-                                                    Text fields are best for notes, descriptions, or searchable details.
-                                                </p>
+                                                <p>Perfect for notes, descriptions, or anything people type freely.</p>
                                                 <p className="text-slate-500">
-                                                    Text fields are usually found through search instead of sidebar
-                                                    filters.
+                                                    Longer text is easy to search; sidebar filters work a bit differently
+                                                    for plain text.
                                                 </p>
                                             </>
                                         )}
                                         {formData.type === 'date' && (
-                                            <p>
-                                                Date fields are useful for expiration dates, publish dates, or review
-                                                dates.
-                                            </p>
+                                            <p>Ideal for deadlines, publish dates, or “review by” moments.</p>
                                         )}
                                         {formData.type === 'number' && (
-                                            <p>Number fields are useful for ratings, quantities, or scores.</p>
+                                            <p>Handy for ratings, counts, durations, or anything numeric.</p>
                                         )}
                                     </div>
                                 )}
                             </section>
 
                             <section aria-labelledby="modal-folders-heading">
-                                <h3
-                                    id="modal-folders-heading"
-                                    className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
-                                >
-                                    Used in folders{' '}
-                                    <span className="text-red-500" aria-hidden>
+                                <ModalSectionTitle id="modal-folders-heading">
+                                    Which folders?{' '}
+                                    <span className="font-normal text-red-500" aria-hidden>
                                         *
                                     </span>
-                                </h3>
-                                <p className="mb-2 text-xs text-slate-600">Choose which folders should use this field.</p>
+                                </ModalSectionTitle>
+                                <p className="mb-3 text-sm text-slate-600">
+                                    Pick where this field is available — you can refine per-folder visibility later.
+                                </p>
                                 {!isEditing && preselectedCategoryId && (
                                     <p className="mb-2 text-xs font-medium text-slate-700">
                                         Pre-selected from the folder you are editing.
@@ -1438,17 +1578,14 @@ export default function MetadataFieldModal({
 
 
                             <section aria-labelledby="modal-where-heading">
-                                <h3
-                                    id="modal-where-heading"
-                                    className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
-                                >
-                                    Where this appears
-                                </h3>
-                                <p className="mb-3 text-xs text-slate-600">Toggle where this field shows up.</p>
+                                <ModalSectionTitle id="modal-where-heading">Where it shows up</ModalSectionTitle>
+                                <p className="mb-4 text-sm text-slate-600">
+                                    Turn on the surfaces that make sense — upload, details, and filters can mix and match.
+                                </p>
                                 <fieldset className="space-y-2">
                                     <legend className="sr-only">Visibility and behavior</legend>
                                     {!isFilterOnlyField && (
-                                        <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)]">
+                                        <label className="flex cursor-pointer gap-3 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:shadow-md">
                                             <div className="pt-0.5">
                                                 <StyledCheckbox
                                                     id="show_on_upload"
@@ -1468,14 +1605,16 @@ export default function MetadataFieldModal({
                                                         />
                                                         Show on Upload
                                                     </span>
-                                                    <p className="mt-0.5 text-xs text-slate-600">Shown on upload.</p>
+                                                    <p className="mt-0.5 text-xs text-slate-600">
+                                                        Shows up alongside other details when someone adds an asset.
+                                                    </p>
                                                 </div>
                                                 <WhereAppearMiniPreview variant="upload" />
                                             </div>
                                         </label>
                                     )}
                                     {!isFilterOnlyField && (
-                                        <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)]">
+                                        <label className="flex cursor-pointer gap-3 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:shadow-md">
                                             <div className="pt-0.5">
                                                 <StyledCheckbox
                                                     id="show_on_edit"
@@ -1495,16 +1634,18 @@ export default function MetadataFieldModal({
                                                         />
                                                         Quick View / Asset Details
                                                     </span>
-                                                    <p className="mt-0.5 text-xs text-slate-600">Shown in asset details.</p>
+                                                    <p className="mt-0.5 text-xs text-slate-600">
+                                                        Visible in quick view and the asset details panel.
+                                                    </p>
                                                 </div>
                                                 <WhereAppearMiniPreview variant="details" />
                                             </div>
                                         </label>
                                     )}
                                     <label
-                                        className={`flex gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition ${
+                                        className={`flex gap-3 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition ${
                                             filterEligible
-                                                ? 'cursor-pointer hover:border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)]'
+                                                ? 'cursor-pointer hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:shadow-md'
                                                 : 'cursor-not-allowed opacity-80'
                                         }`}
                                     >
@@ -1538,7 +1679,9 @@ export default function MetadataFieldModal({
                                                     />
                                                     Show in Filters
                                                 </span>
-                                                <p className="mt-0.5 text-xs text-slate-600">Shown in library filters.</p>
+                                                <p className="mt-0.5 text-xs text-slate-600">
+                                                    Appears in the library sidebar when filters are on.
+                                                </p>
                                                 {!filterEligible && ineligibleFilterNote ? (
                                                     <p id="filter-ineligible-reason" className="mt-1.5 text-xs text-slate-500">
                                                         {ineligibleFilterNote}
@@ -1549,7 +1692,7 @@ export default function MetadataFieldModal({
                                         </div>
                                     </label>
                                     {!isFilterOnlyField && formData.show_in_filters && filterEligible && (
-                                        <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)]">
+                                        <label className="flex cursor-pointer gap-3 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:shadow-md">
                                             <div className="pt-0.5">
                                                 <StyledCheckbox
                                                     id="is_primary"
@@ -1580,7 +1723,7 @@ export default function MetadataFieldModal({
                                         </label>
                                     )}
                                     {!isFilterOnlyField && formData.show_on_upload && (
-                                        <label className="flex cursor-pointer gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)]">
+                                        <label className="flex cursor-pointer gap-3 rounded-xl border border-slate-200/90 bg-white p-3.5 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] hover:shadow-md">
                                             <div className="pt-0.5">
                                                 <StyledCheckbox
                                                     id="is_required"
@@ -1615,16 +1758,21 @@ export default function MetadataFieldModal({
                                 {filterAppearsHint ? (
                                     <p className="mt-3 text-xs text-slate-500">{filterAppearsHint}</p>
                                 ) : null}
-                                <div className="mt-5 border-t border-slate-100 pt-4">
-                                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                        AI suggestions
-                                    </h4>
+                                <div className="mt-6 border-t border-slate-100 pt-5">
+                                    <div className="mb-3 flex items-center gap-2">
+                                        <SparklesIcon
+                                            className="h-4 w-4 shrink-0 text-[color:var(--wb-accent)]"
+                                            aria-hidden
+                                        />
+                                        <h4 className="text-sm font-semibold text-slate-900">AI suggestions</h4>
+                                        <span className="text-xs font-normal text-slate-500">(optional)</span>
+                                    </div>
                                     {(() => {
                                         const aiAvailable =
                                             (requiresOptions && formData.options.length > 0) || isTagsField
                                         const aiChecked = formData.ai_eligible
                                         return (
-                                            <div className="rounded-lg border border-[color:color-mix(in_srgb,var(--wb-accent)_18%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_5%,white)] px-3 py-3">
+                                            <div className="rounded-xl border border-[color:color-mix(in_srgb,var(--wb-accent)_20%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_7%,white)] px-4 py-3.5">
                                                 <label
                                                     className={`flex items-start gap-3 ${aiAvailable ? 'cursor-pointer' : 'cursor-default'}`}
                                                 >
@@ -1673,11 +1821,11 @@ export default function MetadataFieldModal({
                         </div>
                         </div>
 
-                        <div className="flex flex-shrink-0 items-center justify-end gap-3 border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
+                        <div className="flex flex-shrink-0 items-center justify-end gap-3 rounded-b-2xl border-t border-slate-100 bg-slate-50/90 px-4 py-4 sm:px-6">
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
+                                className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200/90 transition hover:bg-slate-50"
                             >
                                 Cancel
                             </button>
@@ -1692,12 +1840,18 @@ export default function MetadataFieldModal({
                                         ? `Plan limit reached (${customFieldsLimit.current}/${customFieldsLimit.max} custom fields).`
                                         : undefined
                                 }
-                                className={`inline-flex items-center gap-2 font-semibold ${productButtonPrimary} disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:hover:bg-slate-200 disabled:hover:text-slate-500`}
+                                className={`${productButtonPrimary} gap-2 font-semibold disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:hover:bg-slate-200 disabled:hover:text-slate-500`}
                             >
                                 {submitting && (
                                     <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden />
                                 )}
-                                {submitting ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save Changes' : 'Create Field')}
+                                {submitting
+                                    ? isEditing
+                                        ? 'Saving...'
+                                        : 'Creating...'
+                                    : isEditing
+                                      ? 'Save changes'
+                                      : 'Create field'}
                             </button>
                         </div>
                     </form>

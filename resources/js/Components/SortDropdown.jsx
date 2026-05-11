@@ -25,7 +25,7 @@ const MENU_VIEWPORT_PAD = 8
 const MENU_Z_CLASS = 'z-[280]'
 
 const SORT_OPTIONS = [
-    { value: 'featured', label: 'Featured', tooltip: 'Starred items first, then by upload date' },
+    { value: 'featured', label: 'Featured', tooltip: 'Featured items first, then by upload date' },
     { value: 'created', label: 'Created', tooltip: 'Upload date' },
     { value: 'quality', label: 'Quality', tooltip: 'Asset quality score' },
     { value: 'modified', label: 'Modified', tooltip: 'Last modified date' },

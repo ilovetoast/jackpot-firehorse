@@ -54,7 +54,7 @@ class MetadataFieldsSeeder extends Seeder
         $this->configureCategorySettings();
 
         // User-facing labels (e.g. Pinned) and optional field helper text
-        $this->syncPinnedLabelAndFieldDescriptions();
+        $this->syncFeaturedFieldLabelAndDescriptions();
 
         // Guarantee default system fields exist and are enabled (staging consistency)
         $this->ensureDefaultSystemFields();
@@ -611,11 +611,11 @@ class MetadataFieldsSeeder extends Seeder
                 'updated_at' => now(),
             ]);
 
-        // Pinned asset (boolean, DB key `starred`). User-facing label: Pinned.
+        // Featured asset (boolean, DB key `starred`). User-facing label: Featured.
         // is_filterable => true so the field appears in grid filters when "Filter" is enabled per category
         $this->getOrCreateField([
             'key' => 'starred',
-            'system_label' => 'Pinned',
+            'system_label' => 'Featured',
             'type' => 'boolean',
             'applies_to' => 'all',
             'scope' => 'system',
@@ -631,7 +631,7 @@ class MetadataFieldsSeeder extends Seeder
         DB::table('metadata_fields')
             ->where('key', 'starred')
             ->update([
-                'system_label' => 'Pinned',
+                'system_label' => 'Featured',
                 'type' => 'boolean',
                 'is_filterable' => true,
                 'is_user_editable' => true,
@@ -1199,10 +1199,10 @@ class MetadataFieldsSeeder extends Seeder
      * @return int Field ID
      */
     /**
-     * Sync user-facing label for pinned assets (DB key `starred`) and short helper text for system fields.
+     * Sync user-facing label for the featured asset field (DB key `starred`) and short helper text for system fields.
      * Safe to run on every seed: updates labels/descriptions only.
      */
-    protected function syncPinnedLabelAndFieldDescriptions(): void
+    protected function syncFeaturedFieldLabelAndDescriptions(): void
     {
         if (! Schema::hasColumn('metadata_fields', 'description')) {
             return;
@@ -1261,8 +1261,8 @@ class MetadataFieldsSeeder extends Seeder
                 'description' => 'Team quality score from 1–5 stars.',
             ],
             'starred' => [
-                'system_label' => 'Pinned',
-                'description' => 'Pin this asset to feature it at the top of the list.',
+                'system_label' => 'Featured',
+                'description' => 'Feature this asset to keep it at the top of the list.',
             ],
             'environment_type' => [
                 'description' => 'Where the scene takes place.',

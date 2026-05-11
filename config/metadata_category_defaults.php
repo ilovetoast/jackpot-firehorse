@@ -186,7 +186,7 @@ return [
     ],
 
     /**
-     * Default visibility for the pinned asset field (DB key remains `starred`).
+     * Default visibility for the featured asset field (DB key remains `starred`; UI label: Featured).
      */
     'pinned_default_visibility' => [
         'is_hidden' => false,

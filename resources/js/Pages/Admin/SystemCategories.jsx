@@ -915,7 +915,7 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
                                             className="mt-2 block w-full max-w-md rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 sm:text-sm"
                                         >
                                             <option value="none">None (config fallback until you edit bundle)</option>
-                                            <option value="minimal">Minimal — tags, collection, starred</option>
+                                            <option value="minimal">Minimal — tags, collection, featured</option>
                                             <option value="photography_like">Rich — common field types (boolean, selects, text, …)</option>
                                             <option value="by_field_types">By field types (choose below)</option>
                                         </select>

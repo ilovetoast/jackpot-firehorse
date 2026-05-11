@@ -16,7 +16,11 @@ export default defineConfig({
     server: {
         host: '0.0.0.0',
         port: VITE_PORT,
-        strictPort: false,
+        // Must stay on VITE_PORT: Laravel's @vite() uses VITE_DEV_SERVER_URL (default :5173).
+        // If something else grabs this port, Vite used to pick 5174+ silently → white screen / ERR_EMPTY_RESPONSE.
+        strictPort: true,
+        // Vite 6+ host checks; custom APP_URL hosts must be allowed or the dev server closes the connection.
+        allowedHosts: ['jackpot.local', 'localhost', '127.0.0.1'],
         hmr: {
             host: 'jackpot.local',
             protocol: 'ws',
