@@ -3276,9 +3276,19 @@ class AssetController extends Controller
     }
 
     /**
-     * Phase 3: Signed playback URL for an audio asset (the original file
-     * itself — MP3 / WAV / AAC — used by AudioCardVisual / AudioLightboxPlayer
-     * for actual audio playback). Empty when the asset is not audio.
+     * Phase 3: Signed playback URL for an audio asset, used by AudioCardVisual
+     * and AudioLightboxPlayer for actual playback.
+     *
+     * Prefers the AUDIO_WEB derivative when present:
+     *   - Browser-friendly 128 kbps MP3 produced by AudioPlaybackOptimizationService
+     *   - Always present for WAV / FLAC sources, large M4A / AAC, and any source
+     *     above `assets.audio.web_playback_min_source_bytes`.
+     *   - Original is still available via the download flow; this URL is for
+     *     streaming playback only.
+     *
+     * Falls back to ORIGINAL when no derivative has been written (the original
+     * is itself MP3 / AAC / M4A / OGG and small enough for direct streaming).
+     * Returns null for non-audio assets.
      */
     private function audioPlaybackUrl(Asset $asset): ?string
     {
@@ -3287,6 +3297,14 @@ class AssetController extends Controller
             $ext = strtolower((string) pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
             if (! in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba'], true)) {
                 return null;
+            }
+        }
+
+        $webPath = $asset->metadata['audio']['web_playback_path'] ?? null;
+        if (is_string($webPath) && $webPath !== '') {
+            $webUrl = $asset->deliveryUrl(AssetVariant::AUDIO_WEB, DeliveryContext::AUTHENTICATED);
+            if (is_string($webUrl) && $webUrl !== '') {
+                return $webUrl;
             }
         }
 

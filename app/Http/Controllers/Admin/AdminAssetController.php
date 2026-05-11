@@ -1247,7 +1247,27 @@ class AdminAssetController extends Controller
                 \App\Jobs\ExtractMetadataJob::dispatch($asset->id)->onQueue(config('queue.images_queue', 'images'));
                 break;
             case 'rerun_ai_tagging':
+                // The vision chain only makes sense for assets whose thumbnail
+                // contains the actual content. For audio (where the "thumbnail"
+                // is just a waveform PNG) we re-trigger the audio AI agent
+                // instead — that's the agent users actually expect to rerun.
+                // Video keeps the standard chain *and* fans out to video
+                // insights so the transcript/scene tags refresh too.
                 $aiQueue = (string) config('queue.ai_queue', 'ai');
+                $fileType = app(FileTypeService::class)->detectFileTypeFromAsset($asset);
+
+                if ($fileType === 'audio') {
+                    // Reset agent status so the run is visible in the asset
+                    // drawer + Activity tab as a fresh queued attempt.
+                    $meta = $asset->metadata ?? [];
+                    $meta['audio'] = array_merge($meta['audio'] ?? [], ['ai_status' => 'queued']);
+                    unset($meta['_skip_ai_audio_analysis']);
+                    $asset->update(['metadata' => $meta]);
+
+                    \App\Jobs\RunAudioAiAnalysisJob::dispatch((string) $asset->id)->onQueue($aiQueue);
+                    break;
+                }
+
                 Bus::chain([
                     (new \App\Jobs\AiMetadataGenerationJob($asset->id, true))->onQueue($aiQueue),
                     (new \App\Jobs\AiTagAutoApplyJob($asset->id))->onQueue($aiQueue),
@@ -1255,6 +1275,17 @@ class AdminAssetController extends Controller
                 ])
                     ->onQueue($aiQueue)
                     ->dispatch();
+
+                if ($fileType === 'video' && config('assets.video_ai.enabled', true)) {
+                    // Re-fan-out video insights (transcript + scene tags) on
+                    // the same admin click — operators don't want to chase
+                    // two separate menu items per asset.
+                    $meta = $asset->metadata ?? [];
+                    unset($meta['_skip_ai_video_insights']);
+                    $meta['ai_video_status'] = 'queued';
+                    $asset->update(['metadata' => $meta]);
+                    \App\Jobs\ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id])->onQueue($aiQueue);
+                }
                 break;
             case 'publish':
                 app(AssetPublicationService::class)->publishFromAdminConsole($asset, Auth::user());

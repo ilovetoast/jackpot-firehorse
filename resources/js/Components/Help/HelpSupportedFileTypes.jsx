@@ -76,6 +76,28 @@ function CapabilityChips({ capabilities }) {
     )
 }
 
+function CodecDetails({ details }) {
+    if (!details || typeof details !== 'object') return null
+    const entries = Object.entries(details)
+    if (entries.length === 0) return null
+    return (
+        <ul className="mt-1.5 space-y-0.5 text-[11px] leading-snug text-slate-500">
+            {entries.map(([ext, meta]) => {
+                const browser = meta?.browser_playback === 'transcoded' ? 'auto-converted' : 'native'
+                return (
+                    <li key={ext} className="flex items-baseline gap-1.5">
+                        <code className="rounded bg-slate-100 px-1 py-px font-mono text-[10px] uppercase text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                            .{ext}
+                        </code>
+                        <span className="text-[10px] uppercase tracking-wide text-slate-400">{browser}</span>
+                        {meta?.note ? <span className="text-slate-500">{meta.note}</span> : null}
+                    </li>
+                )
+            })}
+        </ul>
+    )
+}
+
 function AllowedRow({ type }) {
     const sizeLabel = bytesToHumanLabel(type.max_size_bytes)
     return (
@@ -93,6 +115,7 @@ function AllowedRow({ type }) {
                 </span>
             </div>
             <ExtensionPills extensions={type.extensions} />
+            <CodecDetails details={type.codec_details} />
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
                 {sizeLabel ? <span>Max {sizeLabel} per file</span> : <span>Plan-based size limits</span>}
             </div>

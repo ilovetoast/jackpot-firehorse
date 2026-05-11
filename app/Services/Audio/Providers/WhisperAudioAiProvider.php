@@ -3,6 +3,7 @@
 namespace App\Services\Audio\Providers;
 
 use App\Models\Asset;
+use App\Services\Audio\AudioAiPreparationService;
 use App\Services\TenantBucketService;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\Facades\Log;
@@ -11,8 +12,11 @@ use Illuminate\Support\Facades\Log;
  * Phase 4: OpenAI Whisper transcription provider for audio assets.
  *
  * Behavior:
- *   - Downloads the asset's original bytes from S3 via TenantBucketService
- *     (Whisper API expects a multipart upload — no presigned URL ingress).
+ *   - Resolves the right local file via {@see AudioAiPreparationService}:
+ *     prefer the persisted 128 kbps MP3 web derivative if it fits Whisper's
+ *     25 MB cap, else use the original (when it's an accepted codec and small
+ *     enough), else transcode to a 32 kbps mono MP3 specifically for AI ingest.
+ *     Whisper API expects a multipart upload — no presigned URL ingress.
  *   - Posts to the `audio/transcriptions` endpoint with
  *     `response_format=verbose_json` so we get word-/segment-level
  *     timestamps, which we persist as `transcript_chunks` for the
@@ -31,7 +35,9 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
     public function __construct(
         protected HttpFactory $http,
         protected TenantBucketService $bucketService,
+        protected ?AudioAiPreparationService $preparation = null,
     ) {
+        $this->preparation ??= app(AudioAiPreparationService::class);
     }
 
     public function analyze(Asset $asset): array
@@ -66,19 +72,41 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
             return ['success' => false, 'reason' => 'budget_exceeded'];
         }
 
-        $local = $this->downloadOriginal($asset);
-        if ($local === null) {
-            return ['success' => false, 'reason' => 'download_failed'];
+        $prep = $this->preparation->prepareLocalFile($asset);
+        if (! ($prep['success'] ?? false)) {
+            Log::warning('[WhisperAudioAiProvider] prep failed', [
+                'asset_id' => $asset->id,
+                'reason' => $prep['reason'] ?? 'unknown',
+                'error' => $prep['error'] ?? null,
+            ]);
+
+            // Surface oversized-after-transcode separately so the caller (and
+            // operators) can distinguish a hard-skip ("file too long even at
+            // 32 kbps mono") from generic download/ffmpeg failures.
+            return [
+                'success' => false,
+                'reason' => $prep['reason'] ?? 'prep_failed',
+                'error' => $prep['error'] ?? null,
+            ];
         }
 
+        $local = (string) $prep['path'];
+        $isTemp = (bool) ($prep['temporary'] ?? true);
+        $usedKind = (string) ($prep['decision'] ?? 'original');
+
         try {
+            // Whisper sniffs by extension when no Content-Type hint is given;
+            // pick a filename that matches the file we actually upload so we
+            // don't accidentally tell the API "audio.mp3" when we sent FLAC.
+            $filename = $this->whisperFilename($asset, $local, $usedKind);
+
             $response = $this->http
                 ->withToken($apiKey)
                 ->timeout(180)
                 ->attach(
                     'file',
                     fopen($local, 'rb'),
-                    basename($asset->original_filename ?? 'audio.mp3'),
+                    $filename,
                 )
                 ->asMultipart()
                 ->post((string) $cfg['endpoint'], [
@@ -92,6 +120,7 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
                     'asset_id' => $asset->id,
                     'status' => $response->status(),
                     'body' => substr((string) $response->body(), 0, 500),
+                    'used_kind' => $usedKind,
                 ]);
 
                 return ['success' => false, 'reason' => 'api_error', 'error' => $response->status()];
@@ -114,6 +143,8 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
                 'provider' => 'whisper',
                 'cost_cents' => $estimatedCents,
                 'analyzed_at' => now()->toIso8601String(),
+                'source_kind' => $usedKind,
+                'source_size_bytes' => (int) ($prep['size_bytes'] ?? 0),
             ];
         } catch (\Throwable $e) {
             Log::error('[WhisperAudioAiProvider] exception', [
@@ -123,38 +154,23 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
 
             return ['success' => false, 'reason' => 'exception', 'error' => $e->getMessage()];
         } finally {
-            if ($local && file_exists($local)) {
+            if ($isTemp && $local !== '' && file_exists($local)) {
                 @unlink($local);
             }
         }
     }
 
-    protected function downloadOriginal(Asset $asset): ?string
+    /**
+     * Pick a filename that matches the bytes we're actually uploading. The
+     * preparation service produces `.mp3` for transcoded files and for the
+     * web derivative; passthrough originals keep their real extension.
+     */
+    protected function whisperFilename(Asset $asset, string $localPath, string $kind): string
     {
-        $bucket = $asset->storageBucket;
-        $key = (string) ($asset->storage_root_path ?? '');
-        if (! $bucket || $key === '') {
-            return null;
-        }
-        try {
-            $bytes = $this->bucketService->getObjectContents($bucket, $key);
-            if ($bytes === '' || $bytes === null) {
-                return null;
-            }
-            $tmp = tempnam(sys_get_temp_dir(), 'whisper_').'.'.pathinfo($key, PATHINFO_EXTENSION);
-            if (@file_put_contents($tmp, $bytes) === false) {
-                return null;
-            }
+        $ext = strtolower(pathinfo($localPath, PATHINFO_EXTENSION) ?: 'mp3');
+        $base = pathinfo((string) ($asset->original_filename ?? 'audio'), PATHINFO_FILENAME) ?: 'audio';
 
-            return $tmp;
-        } catch (\Throwable $e) {
-            Log::warning('[WhisperAudioAiProvider] download_failed', [
-                'asset_id' => $asset->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
-        }
+        return $base.'.'.$ext;
     }
 
     /**

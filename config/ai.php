@@ -825,6 +825,31 @@ PROMPT
             'allowed_actions' => ['read'],
             'permissions' => [],
         ],
+        'audio_insights' => [
+            'name' => 'Audio Insights',
+            'description' => 'Transcribes audio assets and derives summary, mood, and language. Source bytes are auto-prepared (web MP3 / 32 kbps mono fallback) so files that exceed the provider 25 MB cap still complete. Tenant-scoped, billed against the unified credit pool (audio_insights).',
+            'scope' => 'tenant',
+            'default_model' => 'whisper-1',
+            /** Registry keys (ai.models) valid for default_model overrides. Add other STT models here as we plug them in. */
+            'allowed_models' => [
+                'whisper-1',
+            ],
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered after upload. No user permission required.
+            ],
+            'prompt' => <<<'PROMPT'
+You MUST:
+- Transcribe the audio verbatim with segment-level timestamps when supported.
+- Output a short factual summary (1–2 sentences) of the spoken content.
+- Detect mood/tone using a small fixed label set (energetic, calm, serious, humorous, instructional).
+
+You MUST NOT:
+- Invent content not present in the audio.
+- Persist source bytes outside the analysis temp file (deleted after upload).
+- Stream raw audio to any non-allowlisted external provider.
+PROMPT,
+        ],
     ],
 
     /*

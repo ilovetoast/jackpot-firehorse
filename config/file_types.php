@@ -588,7 +588,7 @@ return [
 
         'audio' => [
             'name' => 'Audio',
-            'description' => 'Audio files (MP3, WAV, AAC, M4A, OGG, FLAC). Waveform thumbnail + AI transcript/mood.',
+            'description' => 'Audio files (MP3, WAV, AAC, M4A, OGG, FLAC). MP3 / AAC / M4A / OGG stream directly in every modern browser. WAV and FLAC (and any source above 5 MB) are auto-converted to a 128 kbps MP3 derivative for fast playback — the original always remains downloadable. AI transcript, mood, and summary run on a Whisper-friendly version, transcoded to mono 32 kbps when the file is over 25 MB.',
 
             'mime_types' => [
                 'audio/mpeg',
@@ -606,6 +606,44 @@ return [
                 'audio/webm',
             ],
             'extensions' => ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba'],
+
+            /**
+             * Per-codec notes shown in the help panel + documentation. Keeps
+             * the supported-types help dynamic and matches the actual playback
+             * pipeline ({@see \App\Services\Audio\AudioPlaybackOptimizationService}).
+             */
+            'codec_details' => [
+                'mp3' => [
+                    'browser_playback' => 'native',
+                    'ai_ingest' => 'native',
+                    'note' => 'Streams directly. No conversion. Original is the playback file unless > 5 MB.',
+                ],
+                'wav' => [
+                    'browser_playback' => 'transcoded',
+                    'ai_ingest' => 'native',
+                    'note' => 'Uncompressed PCM is huge — auto-converted to 128 kbps MP3 for streaming.',
+                ],
+                'aac' => [
+                    'browser_playback' => 'native',
+                    'ai_ingest' => 'native',
+                    'note' => 'Streams directly. Original used unless > 5 MB.',
+                ],
+                'm4a' => [
+                    'browser_playback' => 'native',
+                    'ai_ingest' => 'native',
+                    'note' => 'Streams directly (AAC in MP4 container). Original used unless > 5 MB.',
+                ],
+                'ogg' => [
+                    'browser_playback' => 'native',
+                    'ai_ingest' => 'native',
+                    'note' => 'Streams in modern browsers; an MP3 derivative is generated for legacy clients when source > 5 MB.',
+                ],
+                'flac' => [
+                    'browser_playback' => 'transcoded',
+                    'ai_ingest' => 'native',
+                    'note' => 'Lossless original is preserved. A 128 kbps MP3 derivative is generated for fast streaming.',
+                ],
+            ],
 
             'upload' => [
                 'enabled' => true,
@@ -629,11 +667,14 @@ return [
                 'preview' => true,
                 'ai_analysis' => true,
                 'download_only' => false,
+                /** Web-playback derivative is generated on demand for non-MP3 / large sources. */
+                'web_playback_derivative' => true,
             ],
 
             'handlers' => [
                 'thumbnail' => 'generateAudioWaveform',
                 'metadata' => 'extractAudioMetadata',
+                'web_playback' => 'generateAudioWebPlayback',
                 'ai_analysis' => 'runAudioAiAnalysis',
             ],
 
@@ -647,6 +688,8 @@ return [
                 'ffmpeg_not_found' => 'Audio processing requires FFmpeg to be installed.',
                 'waveform_failed' => 'Unable to generate waveform image. Please try again.',
                 'transcription_failed' => 'Unable to generate transcript for this audio.',
+                'web_playback_failed' => 'Unable to generate the web playback version. The original file is still available for download.',
+                'oversized_for_ai' => 'Audio is too long for AI analysis even after compression. Trim to under 3 hours and re-upload to enable transcripts.',
             ],
 
             'frontend_hints' => [

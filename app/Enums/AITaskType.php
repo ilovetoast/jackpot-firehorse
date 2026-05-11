@@ -110,6 +110,9 @@ class AITaskType
     /** In-app help: grounded answers from retrieved help_actions only (gpt-4o-mini) */
     public const IN_APP_HELP_ACTION_ANSWER = 'in_app_help_action_answer';
 
+    /** Audio asset transcription + mood/summary (Whisper or future STT providers) */
+    public const AUDIO_INSIGHTS = 'audio_insights';
+
     /**
      * Get all task types as an array.
      *
@@ -151,6 +154,7 @@ class AITaskType
             self::THUMBNAIL_ENHANCEMENT,
             self::THUMBNAIL_PRESENTATION_PREVIEW,
             self::IN_APP_HELP_ACTION_ANSWER,
+            self::AUDIO_INSIGHTS,
         ];
     }
 
@@ -179,7 +183,7 @@ class AITaskType
             ],
             'engineering' => [self::ERROR_PATTERN_ANALYSIS],
             'audit' => [self::AUDIT_REPORT_GENERATION, self::PERFORMANCE_ANALYSIS, self::SYSTEM_RELIABILITY_ANALYSIS],
-            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::PHOTOGRAPHY_FOCAL_POINT, self::VIDEO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW, self::STUDIO_COMPOSITION_ANIMATION],
+            'asset' => [self::ASSET_TAG_SUGGESTION, self::ASSET_METADATA_GENERATION, self::PHOTOGRAPHY_FOCAL_POINT, self::VIDEO_INSIGHTS, self::AUDIO_INSIGHTS, self::APPROVAL_FEEDBACK_SUMMARY, self::THUMBNAIL_ENHANCEMENT, self::THUMBNAIL_PRESENTATION_PREVIEW, self::STUDIO_COMPOSITION_ANIMATION],
         ];
 
         return $mapping[$category] ?? [];

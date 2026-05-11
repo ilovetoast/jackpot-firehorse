@@ -91,6 +91,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Audio pipeline queues
+    |--------------------------------------------------------------------------
+    |
+    | The audio chain (waveform render, FFprobe metadata) is light and stays
+    | on `images_queue` for now. The new transcoding step
+    | ({@see \App\Jobs\GenerateAudioWebPlaybackJob}) re-encodes potentially
+    | very long files and is routed to one of these dedicated queues so it
+    | does not starve fast thumbnail workers:
+    |
+    |   - `audio_queue`        small/medium audio (default)
+    |   - `audio_heavy_queue`  source bytes >= assets.audio.heavy_queue_min_bytes
+    |
+    | If you do not run a separate Horizon supervisor for these, set both
+    | env vars to `images` and the jobs will fall back into the standard pipeline.
+    |
+    */
+    'audio_queue' => env('QUEUE_AUDIO_QUEUE', 'audio'),
+    'audio_heavy_queue' => env('QUEUE_AUDIO_HEAVY_QUEUE', 'audio-heavy'),
+
+    /*
+    |--------------------------------------------------------------------------
     | AI queue (video insights, future long-running AI work)
     |--------------------------------------------------------------------------
     |

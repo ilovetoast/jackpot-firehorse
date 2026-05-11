@@ -580,6 +580,71 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Audio playback + AI prep
+    |--------------------------------------------------------------------------
+    |
+    | Browser playback compatibility is uneven for raw WAV/FLAC, very large
+    | files of any codec, and (historically) OGG on Safari. The asset pipeline
+    | runs a transcoding step ({@see \App\Jobs\GenerateAudioWebPlaybackJob})
+    | that produces a 128 kbps stereo MP3 derivative when the source meets
+    | any of the conditions below. The frontend prefers the derivative when
+    | it exists so every browser gets a predictable, light playback path.
+    |
+    | Whisper has a 25 MB hard upload cap. When the source (or even the web
+    | derivative) is larger we transcode to a 32 kbps mono MP3 specifically
+    | for AI ingest before posting to the Whisper endpoint.
+    |
+    */
+    'audio' => [
+        // Master switch for the browser-playback transcoding step.
+        'optimize_for_browser' => (bool) env('ASSET_AUDIO_OPTIMIZE_FOR_BROWSER', true),
+
+        // Source bytes >= this triggers generation of the 128 kbps MP3 derivative
+        // even when the source codec would otherwise stream fine.
+        'web_playback_min_source_bytes' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_MIN_BYTES', 5 * 1024 * 1024),
+
+        // Codecs/extensions that always produce a derivative — these are heavy
+        // (uncompressed PCM, lossless, or browser-inconsistent containers).
+        'web_playback_force_codecs' => [
+            'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le',
+            'wav', 'wma', 'wmav1', 'wmav2',
+        ],
+
+        // Output knobs for the browser playback derivative (stored as audio_web.mp3).
+        'web_playback_bitrate_kbps' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_BITRATE_KBPS', 128),
+        'web_playback_sample_rate_hz' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_SAMPLE_HZ', 44100),
+        'web_playback_channels' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_CHANNELS', 2),
+
+        // Source bytes >= this routes the audio chain transcode step to a heavy
+        // worker queue with a longer timeout (see queue.audio_heavy_queue).
+        'heavy_queue_min_bytes' => (int) env('ASSET_AUDIO_HEAVY_MIN_BYTES', 100 * 1024 * 1024),
+
+        // Per-job timeouts (seconds) for the transcoding step.
+        'web_playback_job_timeout_seconds' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_TIMEOUT', 900),
+        'web_playback_job_timeout_heavy_seconds' => (int) env('ASSET_AUDIO_WEB_PLAYBACK_TIMEOUT_HEAVY', 1780),
+
+        // AI prep transcoder — Whisper-friendly mono MP3 produced on demand
+        // when the source/web derivative is too large or in a non-accepted format.
+        'ai_prep' => [
+            'enabled' => (bool) env('ASSET_AUDIO_AI_PREP_ENABLED', true),
+            // Whisper's hard cap is 25 MB; keep our trigger slightly under that
+            // to leave headroom for the multipart envelope.
+            'whisper_max_bytes' => (int) env('ASSET_AUDIO_AI_PREP_WHISPER_MAX_BYTES', 24 * 1024 * 1024),
+            // Mono, low bitrate is fine for speech recognition.
+            'bitrate_kbps' => (int) env('ASSET_AUDIO_AI_PREP_BITRATE_KBPS', 32),
+            'sample_rate_hz' => (int) env('ASSET_AUDIO_AI_PREP_SAMPLE_HZ', 16000),
+            'channels' => 1,
+            // Codecs Whisper ingests directly (per OpenAI docs). Anything else
+            // gets transcoded before upload.
+            'whisper_accepted_codecs' => [
+                'mp3', 'mp4', 'aac', 'm4a', 'flac', 'ogg', 'oga',
+                'mpeg', 'mpga', 'wav', 'webm', 'opus',
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Upload security
     |--------------------------------------------------------------------------
     |

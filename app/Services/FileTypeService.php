@@ -754,7 +754,14 @@ class FileTypeService
                     'thumbnail' => (bool) ($typeConfig['capabilities']['thumbnail'] ?? false),
                     'ai_analysis' => (bool) ($typeConfig['capabilities']['ai_analysis'] ?? false),
                     'download_only' => (bool) ($typeConfig['capabilities']['download_only'] ?? false),
+                    'web_playback_derivative' => (bool) ($typeConfig['capabilities']['web_playback_derivative'] ?? false),
                 ],
+                // Optional per-format notes (currently audio-only). When present
+                // the help panel renders one short line per codec so users can
+                // see which formats are converted vs streamed natively.
+                'codec_details' => is_array($typeConfig['codec_details'] ?? null)
+                    ? $typeConfig['codec_details']
+                    : null,
             ];
         }
 

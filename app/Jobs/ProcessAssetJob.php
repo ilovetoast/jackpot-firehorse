@@ -627,6 +627,10 @@ class ProcessAssetJob implements ShouldQueue
             // the chain. AI analysis (transcript / mood) dispatches separately
             // on the `ai` queue so it can run in parallel without blocking the
             // grid from rendering the waveform thumbnail.
+            //
+            // The web-playback transcode dispatches separately on the dedicated
+            // audio queue (see below) so a long re-encode does not block the
+            // rest of the chain (FinalizeAssetJob, PromoteAssetJob, etc.).
             if ($isAudio) {
                 $chainJobs[] = new GenerateAudioWaveformJob($asset->id);
                 $chainJobs[] = new ExtractAudioMetadataJob($asset->id);
@@ -744,6 +748,16 @@ class ProcessAssetJob implements ShouldQueue
                     $asset->update(['metadata' => $mergedMeta]);
                     ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id]);
                 }
+            }
+
+            // Audio web-playback transcode (WAV/FLAC -> MP3, large sources -> 128 kbps MP3)
+            // runs on its own queue so the heavy re-encode does not block the
+            // images pipeline. The job's constructor decides audio vs audio-heavy
+            // based on source size (see AudioPipelineQueueResolver). Whether the
+            // transcode actually runs is decided inside the service — a small MP3
+            // source short-circuits to "skipped".
+            if ($isAudio && config('assets.audio.optimize_for_browser', true)) {
+                GenerateAudioWebPlaybackJob::dispatch((string) $asset->id);
             }
 
             // Audio AI analysis dispatches separately so it does not gate the

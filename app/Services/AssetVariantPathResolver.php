@@ -51,6 +51,7 @@ class AssetVariantPathResolver
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
             AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
             AssetVariant::AUDIO_WAVEFORM => $this->resolveAudioWaveformPath($asset, $basePath),
+            AssetVariant::AUDIO_WEB => $this->resolveAudioWebPlaybackPath($asset, $basePath),
         };
     }
 
@@ -70,6 +71,23 @@ class AssetVariantPathResolver
         }
 
         return $basePath !== '' ? $basePath.'previews/audio_waveform.png' : '';
+    }
+
+    /**
+     * Resolve the browser-playback MP3 derivative path. Returns '' when no
+     * derivative has been generated yet (callers should fall back to the
+     * ORIGINAL variant in that case — the original is browser-playable
+     * for MP3 / AAC / M4A; the derivative is only required for WAV / FLAC
+     * or sources above the size threshold).
+     */
+    protected function resolveAudioWebPlaybackPath(Asset $asset, string $basePath): string
+    {
+        $metadataPath = $asset->metadata['audio']['web_playback_path'] ?? null;
+        if (is_string($metadataPath) && $metadataPath !== '' && ! str_starts_with($metadataPath, 'http')) {
+            return $metadataPath;
+        }
+
+        return '';
     }
 
     /**

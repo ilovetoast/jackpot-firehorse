@@ -26,6 +26,15 @@ enum AssetVariant: string
     case AUDIO_WAVEFORM = 'audio_waveform';
 
     /**
+     * Browser-friendly MP3 derivative produced by
+     * {@see \App\Services\Audio\AudioPlaybackOptimizationService} when the
+     * source is uncompressed (WAV), lossless (FLAC), or above the size
+     * threshold. Referenced from `metadata.audio.web_playback_path`.
+     * Frontends prefer this over the original for streaming playback.
+     */
+    case AUDIO_WEB = 'audio_web';
+
+    /**
      * Whether this variant requires options (e.g. page number for PDF_PAGE).
      */
     public function requiresOptions(): bool

@@ -2,9 +2,12 @@
 
 namespace App\Services\Audio;
 
+use App\Enums\AITaskType;
 use App\Exceptions\PlanLimitExceededException;
+use App\Models\AIAgentRun;
 use App\Models\Asset;
 use App\Models\Tenant;
+use App\Services\AIConfigService;
 use App\Services\AiUsageService;
 use App\Services\Audio\Providers\AudioAiProviderInterface;
 use App\Services\Audio\Providers\WhisperAudioAiProvider;
@@ -47,9 +50,14 @@ class AudioAiAnalysisService
 {
     public const FEATURE_KEY = 'audio_insights';
 
+    /** Agent ID registered in config/ai.php — also the credit feature key. */
+    public const AGENT_ID = 'audio_insights';
+
     public function __construct(
         protected AiUsageService $aiUsageService,
+        protected ?AIConfigService $aiConfigService = null,
     ) {
+        $this->aiConfigService ??= app(AIConfigService::class);
     }
 
     /**
@@ -74,6 +82,18 @@ class AudioAiAnalysisService
             return ['success' => false, 'status' => 'failed', 'reason' => 'unknown_provider'];
         }
 
+        // Honor the Admin → AI → Agents toggle. Operators flipping this row
+        // off must immediately stop new audio AI runs without redeploying.
+        $agentConfig = $this->aiConfigService->getAgentConfig(self::AGENT_ID) ?? [];
+        if (array_key_exists('active', $agentConfig) && $agentConfig['active'] === false) {
+            $this->markStatus($asset, 'pending_provider', ['reason' => 'agent_disabled']);
+            Log::info('[AudioAiAnalysisService] agent disabled in admin', [
+                'asset_id' => $asset->id,
+            ]);
+
+            return ['success' => false, 'status' => 'pending_provider', 'reason' => 'agent_disabled'];
+        }
+
         // Resolve tenant + plan-pool cost up-front so we can short-circuit when
         // the workspace is out of credits (or has AI globally disabled in
         // tenant settings) without burning S3 egress + a Whisper call.
@@ -91,6 +111,7 @@ class AudioAiAnalysisService
                     'credits_required' => $creditsRequired,
                     'duration_seconds' => $durationSeconds,
                 ]);
+                $this->recordBlockedRun($asset, $tenant, $providerKey, $agentConfig, $reason, $creditsRequired, $durationSeconds);
                 Log::warning('[AudioAiAnalysisService] credit pool gate blocked audio AI', [
                     'asset_id' => $asset->id,
                     'tenant_id' => $tenant->id,
@@ -109,10 +130,16 @@ class AudioAiAnalysisService
 
         $this->markStatus($asset, 'processing');
 
+        // Open the agent run row BEFORE calling out so operators see in-flight
+        // audio AI calls in Activity (status='failed' until we mark success
+        // — same convention the AIService text agents use).
+        $agentRun = $this->openAgentRun($asset, $tenant, $providerKey, $agentConfig, $durationSeconds);
+
         try {
             $result = $provider->analyze($asset);
         } catch (\Throwable $e) {
             $this->markStatus($asset, 'failed', ['error' => $e->getMessage()]);
+            $this->failAgentRun($agentRun, $e->getMessage());
             Log::error('[AudioAiAnalysisService] provider threw', [
                 'asset_id' => $asset->id,
                 'provider' => $providerKey,
@@ -134,6 +161,7 @@ class AudioAiAnalysisService
                 'error' => $result['error'] ?? null,
                 'reason' => $reason,
             ]);
+            $this->failAgentRun($agentRun, $reason, ['provider_error' => $result['error'] ?? null]);
 
             return ['success' => false, 'status' => $terminalStatus, 'reason' => $reason];
         }
@@ -179,7 +207,174 @@ class AudioAiAnalysisService
             'analyzed_at' => $result['analyzed_at'] ?? now()->toIso8601String(),
         ]);
 
+        $this->completeAgentRun($agentRun, $result, $creditsCharged);
+
         return ['success' => true, 'status' => 'completed', 'credits_charged' => $creditsCharged];
+    }
+
+    /**
+     * Open an `ai_agent_runs` row so the Activity tab + observability tools
+     * see audio AI in-flight. Mirrors the convention used by the text-agent
+     * path in {@see \App\Services\AIService}: row starts as `failed`, gets
+     * marked successful on completion.
+     *
+     * @param  array<string, mixed>  $agentConfig
+     */
+    protected function openAgentRun(
+        Asset $asset,
+        ?Tenant $tenant,
+        string $providerKey,
+        array $agentConfig,
+        float $durationSeconds,
+    ): ?AIAgentRun {
+        try {
+            return AIAgentRun::create([
+                'agent_id' => self::AGENT_ID,
+                'agent_name' => $agentConfig['name'] ?? 'Audio Insights',
+                // Tenant-scoped, system-triggered (no end-user). The pipeline
+                // detail lives under metadata.trigger_source for observability.
+                'triggering_context' => $tenant !== null ? 'tenant' : 'system',
+                'environment' => app()->environment(),
+                'tenant_id' => $tenant?->id,
+                'user_id' => null,
+                'task_type' => AITaskType::AUDIO_INSIGHTS,
+                'entity_type' => Asset::class,
+                'entity_id' => (string) $asset->id,
+                'model_used' => (string) ($agentConfig['default_model'] ?? config('assets.audio_ai.whisper.model', 'whisper-1')),
+                'tokens_in' => 0,
+                'tokens_out' => 0,
+                'estimated_cost' => 0,
+                'status' => 'failed',
+                'started_at' => now(),
+                'metadata' => [
+                    'trigger_source' => 'audio_pipeline',
+                    'provider' => $providerKey,
+                    'duration_seconds' => $durationSeconds,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            // Never let observability bookkeeping break the actual analysis.
+            Log::warning('[AudioAiAnalysisService] could not open agent run', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    protected function completeAgentRun(?AIAgentRun $run, array $result, int $creditsCharged): void
+    {
+        if ($run === null) {
+            return;
+        }
+        try {
+            $run->markAsSuccessful(
+                tokensIn: 0,
+                tokensOut: 0,
+                estimatedCost: isset($result['cost_cents']) ? ((int) $result['cost_cents']) / 100.0 : 0.0,
+                metadata: array_merge($run->metadata ?? [], [
+                    'provider' => $result['provider'] ?? null,
+                    'detected_language' => $result['detected_language'] ?? null,
+                    'mood' => $result['mood'] ?? null,
+                    'transcript_chunk_count' => is_array($result['transcript_chunks'] ?? null)
+                        ? count($result['transcript_chunks'])
+                        : 0,
+                    'credits_charged' => $creditsCharged,
+                    'source_kind' => $result['source_kind'] ?? null,
+                    'source_size_bytes' => $result['source_size_bytes'] ?? null,
+                ]),
+                summary: $this->shortLine($result['summary'] ?? null) ?: 'Audio transcription complete',
+            );
+        } catch (\Throwable $e) {
+            Log::warning('[AudioAiAnalysisService] could not mark agent run success', [
+                'run_id' => $run->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    protected function failAgentRun(?AIAgentRun $run, string $errorMessage, array $extra = []): void
+    {
+        if ($run === null) {
+            return;
+        }
+        try {
+            $run->markAsFailed($errorMessage, array_merge($run->metadata ?? [], $extra));
+        } catch (\Throwable $e) {
+            Log::warning('[AudioAiAnalysisService] could not mark agent run failed', [
+                'run_id' => $run->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Plan-limit / blocked runs still get a row so admins can see "we tried,
+     * the workspace was out of credits." Marked `status=failed` with
+     * `blocked_reason` so it shows distinct from real provider failures.
+     *
+     * @param  array<string, mixed>  $agentConfig
+     */
+    protected function recordBlockedRun(
+        Asset $asset,
+        Tenant $tenant,
+        string $providerKey,
+        array $agentConfig,
+        string $reason,
+        int $creditsRequired,
+        float $durationSeconds,
+    ): void {
+        try {
+            AIAgentRun::create([
+                'agent_id' => self::AGENT_ID,
+                'agent_name' => $agentConfig['name'] ?? 'Audio Insights',
+                'triggering_context' => 'tenant',
+                'environment' => app()->environment(),
+                'tenant_id' => $tenant->id,
+                'user_id' => null,
+                'task_type' => AITaskType::AUDIO_INSIGHTS,
+                'entity_type' => Asset::class,
+                'entity_id' => (string) $asset->id,
+                'model_used' => (string) ($agentConfig['default_model'] ?? 'whisper-1'),
+                'tokens_in' => 0,
+                'tokens_out' => 0,
+                'estimated_cost' => 0,
+                'status' => 'failed',
+                'severity' => 'warning',
+                'summary' => 'Audio AI blocked by plan limit',
+                'blocked_reason' => $reason,
+                'started_at' => now(),
+                'completed_at' => now(),
+                'metadata' => [
+                    'trigger_source' => 'audio_pipeline',
+                    'provider' => $providerKey,
+                    'duration_seconds' => $durationSeconds,
+                    'credits_required' => $creditsRequired,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[AudioAiAnalysisService] could not record blocked run', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    protected function shortLine(?string $text): ?string
+    {
+        if (! is_string($text) || $text === '') {
+            return null;
+        }
+        $clean = preg_replace('/\s+/u', ' ', $text);
+
+        return mb_substr((string) $clean, 0, 220);
     }
 
     protected function resolveProvider(string $key): ?AudioAiProviderInterface
