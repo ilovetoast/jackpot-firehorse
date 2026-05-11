@@ -28,8 +28,8 @@ import CollectionFiltersBar from '../../Components/Collections/CollectionFilters
 import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
-    getContrastTextColor,
     getWorkspaceSidebarForegroundHex,
+    getWorkspaceSidebarActiveRowForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import axios from 'axios'
@@ -94,7 +94,7 @@ export default function CollectionsIndex({
     /** Same selection chrome as AssetSidebar (darkened accent), not full saturation — keeps white/light rail legible. */
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
-    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const activeTextColor = getWorkspaceSidebarActiveRowForegroundHex(contextualDarkColor, textColor)
     const hoverBgColor = contextualDarkColor
 
     const brandPrimaryHex = auth?.activeBrand?.primary_color || '#6366f1'

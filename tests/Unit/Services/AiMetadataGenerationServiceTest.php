@@ -595,6 +595,146 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
+     * UI screenshot classification: photo-world tags from the model are dropped; interface tags persist.
+     */
+    public function test_ui_screenshot_sanitizer_rejects_studio_lighting_tags(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'ui_screenshot',
+                    'tags' => [
+                        ['value' => 'lighting setup', 'confidence' => 0.95],
+                        ['value' => 'studio background', 'confidence' => 0.95],
+                        ['value' => 'screenshot', 'confidence' => 0.96],
+                        ['value' => 'user interface', 'confidence' => 0.96],
+                        ['value' => 'form', 'confidence' => 0.96],
+                        ['value' => 'input field', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset);
+
+        $this->assertGreaterThanOrEqual(2, (int) ($results['tag_parse_stats']['rejected_sanitizer_count'] ?? 0));
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->orderBy('tag')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('screenshot', $tags);
+        $this->assertContains('user interface', $tags);
+        $this->assertContains('form', $tags);
+        $this->assertContains('input field', $tags);
+        $this->assertNotContains('lighting setup', $tags);
+        $this->assertNotContains('studio background', $tags);
+    }
+
+    /**
+     * Product-style classification must not drop legitimate studio-related tags.
+     */
+    public function test_product_photo_does_not_apply_ui_screenshot_photo_tag_rejections(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'product_photo',
+                    'tags' => [
+                        ['value' => 'studio lighting', 'confidence' => 0.95],
+                        ['value' => 'indoor', 'confidence' => 0.95],
+                        ['value' => 'bottle', 'confidence' => 0.95],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $results = $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->orderBy('tag')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('studio lighting', $tags);
+        $this->assertContains('indoor', $tags);
+        $this->assertContains('bottle', $tags);
+        $this->assertSame(0, (int) ($results['tag_parse_stats']['rejected_sanitizer_count'] ?? -1));
+    }
+
+    /**
+     * Tags with more than three words after canonicalization are rejected.
+     */
+    public function test_sanitizer_rejects_tags_over_three_words(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'document',
+                    'tags' => [
+                        ['value' => 'one two three four', 'confidence' => 0.99],
+                        ['value' => 'valid short phrase', 'confidence' => 0.99],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('valid short phrase', $tags);
+        $this->assertNotContains('one two three four', $tags);
+    }
+
+    /**
      * Helper: Create asset with category
      */
     protected function createAssetWithCategory(): Asset

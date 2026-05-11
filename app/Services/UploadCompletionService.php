@@ -9,6 +9,7 @@ use App\Enums\UploadStatus;
 use App\Enums\UploadType;
 use App\Events\AssetProcessingCompleteEvent;
 use App\Events\AssetUploaded;
+use App\Exceptions\UploadContentRejectedException;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
@@ -232,6 +233,15 @@ class UploadCompletionService
         // Use provided filename (resolvedFilename from frontend) or fall back to original filename from S3
         // Frontend derives resolvedFilename from title + extension, so this respects user's title
         $finalFilename = $filename ?? $fileInfo['original_filename'];
+
+        // Gate 3: content-sniff allowlist check BEFORE Asset::create.
+        // Uses FileInspectionService (libmagic on actual S3 bytes) to derive the
+        // real MIME and re-runs FileTypeService::isUploadAllowed against it. If
+        // the bytes don't match an allowed type, we delete the temp S3 object,
+        // mark the upload session failed, and throw — never creating an asset
+        // row. SVGs are sanitized in place at this point so the bytes that flow
+        // into the asset version are already cleaned.
+        $this->enforcePostUploadContentGate($uploadSession, $s3Key, $finalFilename, $fileInfo);
 
         // Final validation: Ensure resolved filename extension matches original file extension
         if ($filename !== null && $fileInfo['original_filename'] !== null) {
@@ -1347,6 +1357,235 @@ class UploadCompletionService
         // Path is deterministic and based solely on upload_session_id
         // MUST match UploadInitiationService::generateTempUploadPath() exactly
         return "temp/uploads/{$uploadSession->id}/original";
+    }
+
+    /**
+     * Gate 3 of the upload allowlist ladder — runs at finalize, on real bytes,
+     * BEFORE any Asset row is created.
+     *
+     * Steps:
+     *   1. Inspect the S3 object with FileInspectionService (libmagic / finfo
+     *      on the actual file content).
+     *   2. Map the sniffed MIME through FileTypeService::canonicalizeSniffedMime
+     *      to fold known aliases into the registry's canonical MIMEs.
+     *   3. Call FileTypeService::isUploadAllowed against (canonical MIME, ext).
+     *      If not allowed: delete temp S3 object, mark UploadSession failed,
+     *      throw UploadContentRejectedException — no Asset row is ever created.
+     *   4. If the registered type requires sanitization (SVG today), download
+     *      the bytes, run SvgSanitizationService, and re-PUT the cleaned bytes
+     *      back to the same temp key so downstream copy-to-versioned uses the
+     *      sanitized version.
+     *
+     * @param  array<string, mixed>  $fileInfo
+     */
+    protected function enforcePostUploadContentGate(
+        UploadSession $uploadSession,
+        ?string $s3Key,
+        ?string $finalFilename,
+        array &$fileInfo,
+    ): void {
+        $tempKey = $s3Key ?? $this->generateTempUploadPath($uploadSession);
+        $bucket = $uploadSession->storageBucket ?? null;
+
+        $extension = '';
+        if ($finalFilename) {
+            $extension = strtolower((string) pathinfo($finalFilename, PATHINFO_EXTENSION));
+        }
+
+        try {
+            $inspection = app(FileInspectionService::class)->inspect($tempKey, $bucket);
+        } catch (\Throwable $e) {
+            Log::warning('upload_content_gate_inspection_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            // If we cannot determine the real MIME, fall back to the declared
+            // MIME from S3 metadata. The earlier gates (preflight + initiate-batch)
+            // have already validated that, so we still get an allowlist enforcement.
+            $inspection = ['mime_type' => $fileInfo['mime_type'] ?? null];
+        }
+
+        $fileTypeService = app(FileTypeService::class);
+        $sniffedMime = $inspection['mime_type'] ?? null;
+        $canonicalMime = $fileTypeService->canonicalizeSniffedMime($sniffedMime, $extension);
+
+        $decision = $fileTypeService->isUploadAllowed($canonicalMime, $extension);
+        if (! $decision['allowed']) {
+            $this->deleteTempUploadOnContentReject($uploadSession, $tempKey, $bucket);
+            $this->markSessionFailedForContentReject($uploadSession, $decision['code']);
+
+            Log::log(
+                $decision['log_severity'] === 'warning' ? 'warning' : 'info',
+                'upload_blocked',
+                [
+                    'gate' => 'finalize_content_sniff',
+                    'tenant_id' => $uploadSession->tenant_id,
+                    'brand_id' => $uploadSession->brand_id,
+                    'upload_session_id' => $uploadSession->id,
+                    'name' => $finalFilename,
+                    'declared_mime' => $fileInfo['mime_type'] ?? null,
+                    'sniffed_mime' => $sniffedMime,
+                    'canonical_mime' => $canonicalMime,
+                    'extension' => $extension,
+                    'code' => $decision['code'],
+                    'blocked_group' => $decision['blocked_group'],
+                    'file_type' => $decision['file_type'],
+                ]
+            );
+
+            throw new UploadContentRejectedException(
+                $decision['message'] ?? 'This file cannot be uploaded.',
+                errorCode: 'content_'.$decision['code'],
+                blockedGroup: $decision['blocked_group'],
+                detectedMime: $sniffedMime,
+                declaredMime: $fileInfo['mime_type'] ?? null,
+                extension: $extension !== '' ? $extension : null,
+            );
+        }
+
+        // Update fileInfo with the canonical sniffed MIME so the asset row reflects
+        // the real content, not whatever the client claimed.
+        if (is_string($canonicalMime) && $canonicalMime !== '') {
+            $fileInfo['mime_type'] = $canonicalMime;
+        }
+
+        // SVG sanitization (and any other registered type that opts in via
+        // upload.requires_sanitization) — reads the temp object, sanitizes,
+        // and re-PUTs the cleaned bytes to the SAME key.
+        $detectedType = $decision['file_type'] ?? $fileTypeService->detectFileType($canonicalMime, $extension);
+        if ($detectedType !== null && $fileTypeService->requiresSanitization($detectedType)) {
+            $this->sanitizeTempUploadIfNeeded($uploadSession, $tempKey, $bucket, $detectedType);
+        }
+    }
+
+    /**
+     * Delete the temp S3 object after a content-sniff rejection.
+     * Best-effort: log on failure but do not let cleanup errors mask the
+     * primary rejection path.
+     */
+    protected function deleteTempUploadOnContentReject(UploadSession $uploadSession, string $tempKey, $bucket): void
+    {
+        try {
+            if ($bucket) {
+                app(TenantBucketService::class)->getS3Client()->deleteObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $tempKey,
+                ]);
+            } else {
+                Storage::disk('s3')->delete($tempKey);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('upload_content_gate_temp_delete_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Mark the upload session failed with a content-mismatch reason.
+     * Idempotent and non-fatal: a logging-only fallback if the update fails.
+     */
+    protected function markSessionFailedForContentReject(UploadSession $uploadSession, string $code): void
+    {
+        try {
+            $uploadSession->update([
+                'status' => UploadStatus::FAILED,
+                'error_message' => 'content_rejected:'.$code,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('upload_content_gate_session_update_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Run SvgSanitizationService (or future per-type sanitizers) on the temp
+     * object and re-upload the cleaned bytes to the same S3 key. If sanitization
+     * fails, we treat that as a content rejection (delete + throw).
+     */
+    protected function sanitizeTempUploadIfNeeded(UploadSession $uploadSession, string $tempKey, $bucket, string $fileType): void
+    {
+        if ($fileType !== 'svg') {
+            // Future: switch on $fileType when other sanitizers are added.
+            return;
+        }
+
+        try {
+            $bytes = $bucket
+                ? app(TenantBucketService::class)->getObjectContents($bucket, $tempKey)
+                : Storage::disk('s3')->get($tempKey);
+        } catch (\Throwable $e) {
+            Log::warning('upload_content_gate_svg_read_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+            $this->deleteTempUploadOnContentReject($uploadSession, $tempKey, $bucket);
+            $this->markSessionFailedForContentReject($uploadSession, 'svg_unreadable');
+            throw new UploadContentRejectedException(
+                'Unable to read SVG file for sanitization.',
+                errorCode: 'content_svg_unreadable',
+                extension: 'svg',
+            );
+        }
+
+        $clean = app(SvgSanitizationService::class)->sanitize((string) $bytes);
+        if ($clean === null) {
+            Log::warning('upload_blocked', [
+                'gate' => 'finalize_content_sniff',
+                'reason' => 'svg_sanitization_failed',
+                'tenant_id' => $uploadSession->tenant_id,
+                'brand_id' => $uploadSession->brand_id,
+                'upload_session_id' => $uploadSession->id,
+            ]);
+            $this->deleteTempUploadOnContentReject($uploadSession, $tempKey, $bucket);
+            $this->markSessionFailedForContentReject($uploadSession, 'svg_sanitization_failed');
+            throw new UploadContentRejectedException(
+                'This SVG could not be safely sanitized and was rejected.',
+                errorCode: 'content_svg_sanitization_failed',
+                extension: 'svg',
+            );
+        }
+
+        if ($clean === (string) $bytes) {
+            return; // Nothing to rewrite; bytes are already clean.
+        }
+
+        try {
+            if ($bucket) {
+                app(TenantBucketService::class)->getS3Client()->putObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $tempKey,
+                    'Body' => $clean,
+                    'ContentType' => 'image/svg+xml',
+                    'Metadata' => [
+                        'sanitized-by' => 'svg-sanitize',
+                        'sanitized-at' => now()->toIso8601String(),
+                    ],
+                ]);
+            } else {
+                Storage::disk('s3')->put($tempKey, $clean);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('upload_content_gate_svg_rewrite_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+            // Re-throw to fail the finalize cleanly — Asset row is not created.
+            $this->markSessionFailedForContentReject($uploadSession, 'svg_rewrite_failed');
+            throw new UploadContentRejectedException(
+                'Unable to store the sanitized SVG. Please try again.',
+                errorCode: 'content_svg_rewrite_failed',
+                extension: 'svg',
+            );
+        }
     }
 
     /**

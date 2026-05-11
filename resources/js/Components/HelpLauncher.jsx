@@ -4,6 +4,7 @@ import { router, usePage } from '@inertiajs/react'
 import { applyCsrfTokenToPage } from '../utils/csrf'
 import { HELP_HIGHLIGHT_TOKEN_RE, SHOWME_STORAGE_KEY } from '../hooks/useHelpHighlightFromUrl'
 import { HelpTopicCard } from '../utils/helpCategoryIcons'
+import HelpSupportedFileTypes from './Help/HelpSupportedFileTypes'
 import {
     ArrowLeftIcon,
     ArrowPathIcon,
@@ -678,6 +679,10 @@ export default function HelpLauncher({ textColor = '#000000' }) {
                                                     />
                                                 </HelpPanelSection>
                                             ) : null}
+                                            {/* Registry-driven supported-files panel — single source of truth
+                                                for "what can I upload?" Lives at the bottom because it's
+                                                reference material, not the primary help action. */}
+                                            <HelpSupportedFileTypes />
                                         </>
                                     )}
                                 </>

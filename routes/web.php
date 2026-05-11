@@ -333,6 +333,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
         Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
         Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
+        Route::get('/api/tenant/metadata/categories/{category}/folder-schema', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'folderSchema'])->name('tenant.metadata.category.folder-schema');
         Route::post('/api/tenant/metadata/categories/{targetCategory}/copy-from/{sourceCategory}', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'copyCategoryFrom'])->name('tenant.metadata.category.copy-from');
         Route::post('/api/tenant/metadata/categories/{category}/reset', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'resetCategory'])->name('tenant.metadata.category.reset');
         Route::get('/api/tenant/metadata/categories/{category}/apply-to-other-brands', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getApplyToOtherBrandsTargets'])->name('tenant.metadata.category.apply-to-other-brands.targets');
@@ -1087,10 +1088,10 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
                 Route::get('/uploads/sessions/active', [\App\Http\Controllers\UploadController::class, 'activeFinalizeSessions'])->name('uploads.sessions.active');
                 Route::get('/uploads/sessions/{batchSessionId}/status', [\App\Http\Controllers\UploadController::class, 'finalizeSessionStatus'])->name('uploads.sessions.status');
                 Route::get('/uploads/storage-check', [\App\Http\Controllers\UploadController::class, 'checkStorageLimits'])->name('uploads.storage-check');
-                Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->name('uploads.validate');
-                Route::post('/uploads/preflight', [\App\Http\Controllers\UploadController::class, 'preflight'])->name('uploads.preflight');
-                Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->name('uploads.initiate');
-                Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->name('uploads.initiate-batch');
+                Route::post('/uploads/validate', [\App\Http\Controllers\UploadController::class, 'validateUpload'])->middleware('throttle:upload')->name('uploads.validate');
+                Route::post('/uploads/preflight', [\App\Http\Controllers\UploadController::class, 'preflight'])->middleware('throttle:upload')->name('uploads.preflight');
+                Route::post('/uploads/initiate', [\App\Http\Controllers\UploadController::class, 'initiate'])->middleware('throttle:upload')->name('uploads.initiate');
+                Route::post('/uploads/initiate-batch', [\App\Http\Controllers\UploadController::class, 'initiateBatch'])->middleware('throttle:upload')->name('uploads.initiate-batch');
                 Route::get('/uploads/metadata-schema', [\App\Http\Controllers\UploadController::class, 'getMetadataSchema'])->name('uploads.metadata-schema');
                 Route::post('/uploads/diagnostics', [\App\Http\Controllers\UploadController::class, 'diagnostics'])->name('uploads.diagnostics');
                 Route::get('/uploads/{uploadSession}/resume', [\App\Http\Controllers\UploadController::class, 'resume'])->name('uploads.resume');
@@ -1104,9 +1105,9 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
                 Route::put('/uploads/{uploadSession}/start', [\App\Http\Controllers\UploadController::class, 'markAsUploading'])->name('uploads.start');
                 Route::post('/uploads/{uploadSession}/cancel', [\App\Http\Controllers\UploadController::class, 'cancel'])->name('uploads.cancel');
                 Route::post('/assets/upload/complete', [\App\Http\Controllers\UploadController::class, 'complete'])->name('assets.upload.complete');
-                Route::post('/assets/upload/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('assets.upload.finalize');
+                Route::post('/assets/upload/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->middleware('throttle:upload')->name('assets.upload.finalize');
                 // Phase J.3.1: Alias route for finalize (used by replace file modal)
-                Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->name('uploads.finalize');
+                Route::post('/uploads/finalize', [\App\Http\Controllers\UploadController::class, 'finalize'])->middleware('throttle:upload')->name('uploads.finalize');
             });
 
             // Brand routes (tenant-scoped)

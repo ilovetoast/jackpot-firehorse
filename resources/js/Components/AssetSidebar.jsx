@@ -23,11 +23,12 @@ import {
     PlusIcon,
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../Helpers/categoryIcons'
+import FolderSchemaHelp from './Metadata/FolderSchemaHelp'
 import OnlineUsersIndicator from './OnlineUsersIndicator'
 import {
     getWorkspaceContextualTone,
-    getContrastTextColor,
     getWorkspaceSidebarForegroundHex,
+    getWorkspaceSidebarActiveRowForegroundHex,
     getLuminance,
     normalizeHexColor,
 } from '../utils/colorUtils'
@@ -124,6 +125,8 @@ export default function AssetSidebar({
     canManageCategoriesAndFields = false,
     activeBrandId = null,
     onAddCategoryClick,
+    /** (i) folder fields flyout on row hover — same API as Manage; requires metadata registry view. */
+    showFolderSchemaHelp = false,
 }) {
     const isResearchView = source === 'reference_materials'
     const isStagedView = source === 'staged'
@@ -149,18 +152,25 @@ export default function AssetSidebar({
         })
     }, [])
 
+    const [libraryRowActiveId, setLibraryRowActiveId] = useState(null)
+
     const textColor =
         sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
             ? '#ffffff'
             : getWorkspaceSidebarForegroundHex(sidebarColor)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor || '#6366f1')
     const activeBgColor = contextualDarkColor
-    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const activeTextColor = getWorkspaceSidebarActiveRowForegroundHex(contextualDarkColor, textColor)
     const hoverBgColor = contextualDarkColor
     const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
     const unselectedIconColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
     const unselectedCountColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
     const borderColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)'
+
+    const folderSchemaTriggerClass =
+        textColor === '#ffffff'
+            ? 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-md px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
+            : 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-md px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
 
     const isLibrarySelected = (id) =>
         selectedCategoryId === id && lifecycle !== 'deleted' && !isResearchView && !isStagedView
@@ -246,78 +256,116 @@ export default function AssetSidebar({
                                     const categoryCount = Number(category.asset_count)
                                     const showCategoryCount =
                                         category.id != null && Number.isFinite(categoryCount) && categoryCount > 0
+                                    const showSchemaTrigger = showFolderSchemaHelp && category?.id != null
+                                    const rowHighlighted =
+                                        isSelected ||
+                                        (!isSelected && libraryRowActiveId === category.id)
+                                    const rowBg = isSelected ? activeBgColor : libraryRowActiveId === category.id ? hoverBgColor : 'transparent'
+                                    const rowFg = rowHighlighted ? activeTextColor : unselectedTextColor
+                                    const rowIconColor = rowHighlighted ? activeTextColor : unselectedIconColor
+                                    const rowCountColor = rowHighlighted ? activeTextColor : unselectedCountColor
+
                                     return (
-                                        <button
+                                        <div
                                             key={category.id}
-                                            onClick={() => onCategorySelect(category)}
-                                            className="group flex items-center px-2 py-1.5 lg:px-3 lg:py-2 text-sm font-medium rounded-md w-full text-left"
-                                            style={{
-                                                backgroundColor: isSelected ? activeBgColor : 'transparent',
-                                                color: isSelected ? activeTextColor : unselectedTextColor,
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                if (!isSelected) {
-                                                    e.currentTarget.style.backgroundColor = hoverBgColor
-                                                    e.currentTarget.style.color = activeTextColor
-                                                }
+                                            className="group flex min-w-0 w-full items-stretch rounded-md focus-within:outline-none"
+                                            style={{ backgroundColor: rowBg }}
+                                            onMouseEnter={() => {
+                                                if (!isSelected) setLibraryRowActiveId(category.id)
                                             }}
                                             onMouseLeave={(e) => {
-                                                if (!isSelected) {
-                                                    e.currentTarget.style.backgroundColor = 'transparent'
-                                                    e.currentTarget.style.color = unselectedTextColor
+                                                const rel = e.relatedTarget
+                                                if (rel instanceof Node && e.currentTarget.contains(rel)) return
+                                                requestAnimationFrame(() => {
+                                                    if (!e.currentTarget.contains(document.activeElement)) {
+                                                        setLibraryRowActiveId((id) =>
+                                                            id === category.id ? null : id
+                                                        )
+                                                    }
+                                                })
+                                            }}
+                                            onFocusCapture={() => {
+                                                if (!isSelected) setLibraryRowActiveId(category.id)
+                                            }}
+                                            onBlurCapture={(e) => {
+                                                if (!e.currentTarget.contains(e.relatedTarget)) {
+                                                    setLibraryRowActiveId((id) =>
+                                                        id === category.id ? null : id
+                                                    )
                                                 }
                                             }}
                                         >
-                                            <CategoryIcon
-                                                iconId={category.icon || 'folder'}
-                                                className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5"
-                                                style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
-                                            />
-                                            <span className="flex-1">{category.name}</span>
-                                            {showCategoryCount && (
-                                                <span
-                                                    className="text-xs font-normal opacity-80 ml-2"
-                                                    style={{ color: isSelected ? activeTextColor : unselectedCountColor }}
-                                                >
-                                                    {categoryCount}
-                                                </span>
-                                            )}
-                                            {category.is_private && setTooltipVisible && (
-                                                <div className="relative ml-2 group">
-                                                    <LockClosedIcon
-                                                        className="h-4 w-4 flex-shrink-0 cursor-help"
-                                                        style={{ color: isSelected ? activeTextColor : unselectedIconColor }}
-                                                        onMouseEnter={() => setTooltipVisible(category.id)}
-                                                        onMouseLeave={() => setTooltipVisible(null)}
-                                                    />
-                                                    {tooltipVisible === category.id && (
-                                                        <div
-                                                            className="absolute right-full mr-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-lg shadow-xl z-[9999] pointer-events-none whitespace-normal"
-                                                            style={{ width: '250px' }}
-                                                        >
-                                                            <div className="p-3">
-                                                                <div className="font-semibold mb-2.5 text-white">Restricted folder</div>
-                                                                <div className="space-y-2">
-                                                                    <div className="text-gray-200">Accessible by:</div>
-                                                                    <ul className="list-disc list-outside ml-4 space-y-1 text-gray-200">
-                                                                        <li>Owners</li>
-                                                                        <li>Admins</li>
-                                                                        {category.access_rules?.filter((r) => r.type === 'role').map((rule, idx) => (
-                                                                            <li key={idx} className="capitalize">
-                                                                                {rule.role.replace('_', ' ')}
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => onCategorySelect(category)}
+                                                className="flex min-w-0 flex-1 items-center rounded-l-md px-2 py-1.5 text-left text-sm font-medium lg:px-3 lg:py-2"
+                                                style={{
+                                                    backgroundColor: 'transparent',
+                                                    color: rowFg,
+                                                }}
+                                            >
+                                                <CategoryIcon
+                                                    iconId={category.icon || 'folder'}
+                                                    className="mr-2 lg:mr-3 flex-shrink-0 h-5 w-5"
+                                                    style={{ color: rowIconColor }}
+                                                />
+                                                <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                                                {showCategoryCount && (
+                                                    <span
+                                                        className="text-xs font-normal opacity-80 ml-2 shrink-0"
+                                                        style={{ color: rowCountColor }}
+                                                    >
+                                                        {categoryCount}
+                                                    </span>
+                                                )}
+                                                {category.is_private && setTooltipVisible && (
+                                                    <div className="relative ml-2 shrink-0 group/lock">
+                                                        <LockClosedIcon
+                                                            className="h-4 w-4 flex-shrink-0 cursor-help"
+                                                            style={{ color: rowIconColor }}
+                                                            onMouseEnter={() => setTooltipVisible(category.id)}
+                                                            onMouseLeave={() => setTooltipVisible(null)}
+                                                        />
+                                                        {tooltipVisible === category.id && (
                                                             <div
-                                                                className="absolute left-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-[6px] border-b-[6px] border-l-[6px] border-transparent border-l-gray-900"
-                                                            />
-                                                        </div>
-                                                    )}
+                                                                className="absolute right-full mr-2 top-1/2 transform -translate-y-1/2 bg-gray-900 text-white text-xs rounded-lg shadow-xl z-[9999] pointer-events-none whitespace-normal"
+                                                                style={{ width: '250px' }}
+                                                            >
+                                                                <div className="p-3">
+                                                                    <div className="font-semibold mb-2.5 text-white">Restricted folder</div>
+                                                                    <div className="space-y-2">
+                                                                        <div className="text-gray-200">Accessible by:</div>
+                                                                        <ul className="list-disc list-outside ml-4 space-y-1 text-gray-200">
+                                                                            <li>Owners</li>
+                                                                            <li>Admins</li>
+                                                                            {category.access_rules?.filter((r) => r.type === 'role').map((rule, idx) => (
+                                                                                <li key={idx} className="capitalize">
+                                                                                    {rule.role.replace('_', ' ')}
+                                                                                </li>
+                                                                            ))}
+                                                                        </ul>
+                                                                    </div>
+                                                                </div>
+                                                                <div
+                                                                    className="absolute left-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-t-[6px] border-b-[6px] border-l-[6px] border-transparent border-l-gray-900"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </button>
+                                            {showSchemaTrigger ? (
+                                                <div
+                                                    className="flex shrink-0 items-stretch opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                                    style={{ color: rowIconColor }}
+                                                >
+                                                    <FolderSchemaHelp
+                                                        category={category}
+                                                        triggerClassName={folderSchemaTriggerClass}
+                                                    />
                                                 </div>
-                                            )}
-                                        </button>
+                                            ) : null}
+                                        </div>
                                     )
                                 })}
                                 {filteredCategories.length === 0 && !showAllButton && (

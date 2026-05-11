@@ -546,6 +546,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Audio AI analysis
+    |--------------------------------------------------------------------------
+    |
+    | Async analysis for audio assets (transcript, summary, mood). Triggered
+    | after the per-asset processing chain via RunAudioAiAnalysisJob on the
+    | `ai` queue. Provider is optional — when no provider is set the job
+    | marks `metadata.audio.ai_status = 'pending_provider'` and the rest of
+    | the pipeline still finishes cleanly (waveform + ffprobe metadata).
+    |
+    */
+    'audio_ai' => [
+        'enabled' => (bool) env('ASSET_AUDIO_AI_ENABLED', true),
+        'auto_run_after_upload' => (bool) env('ASSET_AUDIO_AI_AUTO_RUN_AFTER_UPLOAD', true),
+        // Set to a registered provider key (e.g. 'whisper', 'assemblyai') to
+        // activate transcript/mood extraction inside AudioAiAnalysisService.
+        'provider' => env('ASSET_AUDIO_AI_PROVIDER', null),
+        'transcription_enabled' => (bool) env('ASSET_AUDIO_AI_TRANSCRIPTION', true),
+        'mood_enabled' => (bool) env('ASSET_AUDIO_AI_MOOD', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Video-derived files (optional persistence)
     |--------------------------------------------------------------------------
     */

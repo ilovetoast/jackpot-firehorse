@@ -17,17 +17,20 @@ use App\Models\MetadataVisibilityProfile;
 use App\Models\SystemCategory;
 use App\Models\Tenant;
 use App\Services\CategoryVisibilityLimitService;
+use App\Services\MetadataOptionEditGuard;
 use App\Services\SystemCategoryService;
 use App\Services\SystemMetadataOptionProvisioningService;
 use App\Services\TenantMetadataFieldService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
+use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\MetadataCache;
 use App\Support\MetadataFieldFilterEligibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -322,6 +325,289 @@ class TenantMetadataRegistryController extends Controller
         $registry = $this->registryService->getRegistry($tenant);
 
         return response()->json($registry);
+    }
+
+    /**
+     * Folder schema helper: fields on/off for this folder, option previews, access summary.
+     *
+     * GET /api/tenant/metadata/categories/{category}/folder-schema
+     */
+    public function folderSchema(int $category): JsonResponse
+    {
+        $tenant = app('tenant');
+        $user = Auth::user();
+
+        if (! $tenant) {
+            return response()->json(['error' => 'Tenant not found'], 404);
+        }
+
+        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+
+        if (! $canView) {
+            abort(403, 'You do not have permission to view the metadata registry.');
+        }
+
+        $categoryModel = Category::query()
+            ->where('id', $category)
+            ->where('tenant_id', $tenant->id)
+            ->with(['accessRules'])
+            ->first();
+
+        if (! $categoryModel) {
+            return response()->json(['error' => 'Category not found or does not belong to tenant'], 404);
+        }
+
+        $tenantRole = $user->getRoleForTenant($tenant);
+        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin'], true);
+        $canToggleFolderField = $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
+        $canEditDefinitions = $isTenantOwnerOrAdmin || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage');
+        $canManageOptionValues = $isTenantOwnerOrAdmin
+            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.field.manage')
+            || $user->hasPermissionForTenant($tenant, 'metadata.fields.values.manage')
+            || $user->hasPermissionForTenant($tenant, 'metadata.bulk_edit');
+
+        $registry = $this->registryService->getRegistry($tenant);
+        $resolvedType = CategoryTypeResolver::resolve($categoryModel->slug ?? null);
+        $primaryTypeKey = $resolvedType['field_key'] ?? null;
+        $typeFamilyKeys = config('metadata_field_families.type.fields', []);
+        if (! is_array($typeFamilyKeys)) {
+            $typeFamilyKeys = [];
+        }
+        $descriptorKeys = ['environment_type', 'subject_type'];
+
+        $shouldIncludeManageable = function (string $key) use ($primaryTypeKey, $typeFamilyKeys, $descriptorKeys): bool {
+            if (in_array($key, $descriptorKeys, true)) {
+                return true;
+            }
+            if ($primaryTypeKey !== null && $key === $primaryTypeKey) {
+                return true;
+            }
+            if ($typeFamilyKeys !== [] && in_array($key, $typeFamilyKeys, true)) {
+                return $primaryTypeKey !== null && $key === $primaryTypeKey;
+            }
+
+            return true;
+        };
+
+        $rows = [];
+        foreach ($registry['system_fields'] ?? [] as $f) {
+            $rows[] = ['field' => (array) $f, 'is_system' => true];
+        }
+        foreach ($registry['tenant_fields'] ?? [] as $f) {
+            $rows[] = ['field' => (array) $f, 'is_system' => false];
+        }
+
+        $schemaRows = [];
+        foreach ($rows as $row) {
+            $f = $row['field'];
+            $key = (string) ($f['key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+            $isSystem = $row['is_system'];
+            $isAutomated = $isSystem
+                && ($f['population_mode'] ?? 'manual') === 'automatic'
+                && ($f['readonly'] ?? false) === true;
+
+            if ($isAutomated) {
+                $schemaRows[] = array_merge($row, ['is_automated' => true]);
+                continue;
+            }
+            if (! $shouldIncludeManageable($key)) {
+                continue;
+            }
+            $schemaRows[] = array_merge($row, ['is_automated' => false]);
+        }
+
+        $fieldIds = array_values(array_unique(array_filter(array_map(
+            fn (array $r) => (int) ($r['field']['id'] ?? 0),
+            $schemaRows
+        ))));
+
+        $suppressedByField = $this->visibilityService->getSuppressedCategoryIdsByFieldIds(
+            $tenant,
+            $fieldIds,
+            (int) $categoryModel->brand_id
+        );
+
+        $systemFieldIdsForOptions = [];
+        foreach ($schemaRows as $row) {
+            if (! $row['is_system']) {
+                continue;
+            }
+            $f = $row['field'];
+            $t = (string) ($f['field_type'] ?? $f['type'] ?? '');
+            if (in_array($t, ['select', 'multiselect'], true)) {
+                $systemFieldIdsForOptions[] = (int) ($f['id'] ?? 0);
+            }
+        }
+        $systemFieldIdsForOptions = array_values(array_unique(array_filter($systemFieldIdsForOptions)));
+
+        $systemOptionsLabels = [];
+        if ($systemFieldIdsForOptions !== []) {
+            $optionRows = DB::table('metadata_options')
+                ->whereIn('metadata_field_id', $systemFieldIdsForOptions)
+                ->orderBy('metadata_field_id')
+                ->orderBy('id')
+                ->get(['metadata_field_id', 'value', 'system_label']);
+
+            foreach ($optionRows as $opt) {
+                $fid = (int) $opt->metadata_field_id;
+                $systemOptionsLabels[$fid] ??= [];
+                $label = (string) ($opt->system_label ?? '');
+                if ($label === '') {
+                    $label = (string) ($opt->value ?? '');
+                }
+                if ($label !== '') {
+                    $systemOptionsLabels[$fid][] = $label;
+                }
+            }
+        }
+
+        $categoryId = (int) $categoryModel->id;
+
+        $buildPayload = function (array $row) use (
+            $categoryId,
+            $suppressedByField,
+            $primaryTypeKey,
+            $systemOptionsLabels
+        ): array {
+            $f = $row['field'];
+            $fid = (int) ($f['id'] ?? 0);
+            $isSystem = $row['is_system'];
+            $isAutomated = $row['is_automated'];
+            $key = (string) ($f['key'] ?? '');
+            $fieldType = (string) ($f['field_type'] ?? $f['type'] ?? 'text');
+
+            $suppressed = $suppressedByField[$fid] ?? [];
+            $enabled = ! in_array($categoryId, $suppressed, true);
+
+            $labels = [];
+            if (in_array($fieldType, ['select', 'multiselect'], true)) {
+                if ($isSystem) {
+                    $labels = $systemOptionsLabels[$fid] ?? [];
+                } else {
+                    foreach ($f['options'] ?? [] as $opt) {
+                        $opt = (array) $opt;
+                        $lab = (string) ($opt['label'] ?? $opt['system_label'] ?? $opt['value'] ?? '');
+                        if ($lab !== '') {
+                            $labels[] = $lab;
+                        }
+                    }
+                }
+            }
+
+            $total = count($labels);
+            $preview = array_slice($labels, 0, 12);
+
+            $optionEditingRestricted = false;
+            if ($isSystem) {
+                $optionEditingRestricted = MetadataOptionEditGuard::isRestricted([
+                    'key' => $key,
+                    'scope' => 'system',
+                    'type' => $fieldType,
+                    'display_widget' => $f['display_widget'] ?? null,
+                ]);
+            }
+
+            $hasOptions = in_array($fieldType, ['select', 'multiselect'], true);
+
+            return [
+                'id' => $fid,
+                'key' => $key,
+                'label' => self::folderSchemaFieldLabel($f, $primaryTypeKey),
+                'field_type' => $fieldType,
+                'is_system' => $isSystem,
+                'is_automated' => $isAutomated,
+                'enabled_for_folder' => $enabled,
+                'options_preview' => $hasOptions ? $preview : [],
+                'options_total' => $hasOptions ? $total : 0,
+                'values_expandable' => $hasOptions && $total > 0,
+                'option_editing_restricted' => $optionEditingRestricted,
+            ];
+        };
+
+        $enabledOn = [];
+        $enabledAutomated = [];
+        $offManageable = [];
+        $offAutomated = [];
+        foreach ($schemaRows as $row) {
+            $payload = $buildPayload($row);
+            if ($row['is_automated']) {
+                if ($payload['enabled_for_folder']) {
+                    $enabledAutomated[] = $payload;
+                } else {
+                    $offAutomated[] = $payload;
+                }
+            } elseif ($payload['enabled_for_folder']) {
+                $enabledOn[] = $payload;
+            } else {
+                $offManageable[] = $payload;
+            }
+        }
+
+        $labelSort = static fn (array $a, array $b): int => strcasecmp($a['label'], $b['label']);
+        usort($enabledOn, $labelSort);
+        usort($enabledAutomated, $labelSort);
+        usort($offManageable, $labelSort);
+        usort($offAutomated, $labelSort);
+
+        $accessRules = [];
+        if (! $categoryModel->is_system && $categoryModel->is_private) {
+            foreach ($categoryModel->accessRules as $rule) {
+                if ($rule->access_type === 'role') {
+                    $accessRules[] = ['type' => 'role', 'role' => $rule->role];
+                } elseif ($rule->access_type === 'user') {
+                    $accessRules[] = ['type' => 'user', 'user_id' => (int) $rule->user_id];
+                }
+            }
+        }
+
+        $assetType = $categoryModel->asset_type instanceof \BackedEnum
+            ? $categoryModel->asset_type->value
+            : (string) ($categoryModel->asset_type ?? 'asset');
+
+        return response()->json([
+            'category' => [
+                'id' => $categoryModel->id,
+                'name' => $categoryModel->name,
+                'slug' => $categoryModel->slug,
+                'asset_type' => $assetType,
+                'is_system' => (bool) $categoryModel->is_system,
+                'is_private' => (bool) $categoryModel->is_private,
+                'access_rules' => $accessRules,
+            ],
+            'permissions' => [
+                'can_toggle_folder_field' => $canToggleFolderField,
+                'can_edit_definitions' => $canEditDefinitions,
+                'can_manage_option_values' => $canManageOptionValues,
+            ],
+            'fields_on' => $enabledOn,
+            'fields_on_automated' => $enabledAutomated,
+            'fields_off' => $offManageable,
+            'fields_off_automated' => $offAutomated,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $field
+     */
+    private static function folderSchemaFieldLabel(array $field, ?string $primaryTypeKey): string
+    {
+        $key = (string) ($field['key'] ?? '');
+        if ($key !== '' && str_ends_with($key, '_type')) {
+            if ($primaryTypeKey !== null && $key === $primaryTypeKey) {
+                return 'Type';
+            }
+
+            $fallback = preg_replace('/_type$/', '', $key);
+            $fallback = $fallback !== null ? str_replace('_', ' ', $fallback) : '';
+
+            return (string) ($field['label'] ?? $field['system_label'] ?? $fallback ?: 'Field');
+        }
+
+        return (string) ($field['label'] ?? $field['system_label'] ?? $key ?: 'Field');
     }
 
     /**

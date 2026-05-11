@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { usePage } from '@inertiajs/react'
 import { arrayMove } from '@dnd-kit/sortable'
@@ -155,6 +155,8 @@ export default function MetadataFieldModal({
     canManageFields = false,
     customFieldsLimit = null,
     onSuccess,
+    /** When opening create: { systemLabel, fieldType?: 'select'|'multiselect'|'text', highlightValues?: bool } */
+    createPrefill = null,
 }) {
     const pkgFromContext = useBrandWorkbenchChrome()
     const { auth, company } = usePage().props
@@ -194,6 +196,9 @@ export default function MetadataFieldModal({
     const [filterTransitionNotice, setFilterTransitionNotice] = useState(null)
     /** Avoid wiping the "new field" form when parent re-renders (e.g. Inertia) while the modal stays open. */
     const wasModalOpenRef = useRef(false)
+    const highlightValuesAfterOpenRef = useRef(false)
+    const bulkAddTextareaRef = useRef(null)
+    const [valuesPanelEmphasis, setValuesPanelEmphasis] = useState(false)
 
     const isEditing = !!field
     const isSystemField = field?.scope === 'system' || field?.is_system
@@ -420,22 +425,41 @@ export default function MetadataFieldModal({
         } else if (isOpen && !field && modalJustOpened) {
             // Reset form for new field (only when opening — not on every categories/parent re-render)
             const initialCategories = preselectedCategoryId ? [preselectedCategoryId] : []
+            const p = createPrefill
+            const rawLabel = (p?.systemLabel ?? '').trim()
+            let chosenType = 'text'
+            if (p?.fieldType === 'multiselect') chosenType = 'multiselect'
+            else if (p?.fieldType === 'select') chosenType = 'select'
+            else if (p?.fieldType === 'textarea') chosenType = 'textarea'
+            else if (p?.fieldType === 'number') chosenType = 'number'
+            else if (p?.fieldType === 'boolean') chosenType = 'boolean'
+            else if (p?.fieldType === 'date') chosenType = 'date'
+            else if (rawLabel) chosenType = 'select'
+
+            const filterFlags = sanitizeFilterFlagsForForm(chosenType, false, false)
+            const initialKey = rawLabel ? toSnakeCase(rawLabel) : ''
+
+            highlightValuesAfterOpenRef.current = Boolean(
+                p?.highlightValues && (chosenType === 'select' || chosenType === 'multiselect')
+            )
+
             setOriginalEnabledCategories([])
             setKeyManuallyEdited(false)
             setKeyEditorExpanded(false)
+            setValuesPanelEmphasis(false)
             setFormData({
-                key: '',
-                system_label: '',
+                key: initialKey,
+                system_label: rawLabel,
                 description: '',
-                type: 'text',
+                type: chosenType,
                 selectedCategories: initialCategories,
                 options: [],
                 ai_eligible: false,
                 is_filterable: true,
                 show_on_upload: true,
                 show_on_edit: true,
-                show_in_filters: false,
-                is_primary: false,
+                show_in_filters: filterFlags.show_in_filters,
+                is_primary: filterFlags.is_primary,
                 is_required: false,
                 option_editing_restricted: false,
                 group_key: '',
@@ -445,7 +469,7 @@ export default function MetadataFieldModal({
             setErrors({})
             setLoadingField(false)
         }
-    }, [isOpen, field, categories, preselectedCategoryId])
+    }, [isOpen, field, categories, preselectedCategoryId, createPrefill])
 
     const storageKeySuffixPreview = useMemo(() => {
         let k = (formData.key || '').trim()
@@ -454,10 +478,31 @@ export default function MetadataFieldModal({
         return toSnakeCase(formData.system_label || '')
     }, [formData.key, formData.system_label])
 
+    useLayoutEffect(() => {
+        if (!isOpen || field || !highlightValuesAfterOpenRef.current) return
+        if (formData.type !== 'select' && formData.type !== 'multiselect') return
+        if (loadingField) return
+        highlightValuesAfterOpenRef.current = false
+        const frame = requestAnimationFrame(() => {
+            document.getElementById('metadata-modal-values-panel')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            })
+            setValuesPanelEmphasis(true)
+            window.setTimeout(() => setValuesPanelEmphasis(false), 2600)
+            window.setTimeout(() => {
+                bulkAddTextareaRef.current?.focus({ preventScroll: true })
+            }, 450)
+        })
+        return () => cancelAnimationFrame(frame)
+    }, [isOpen, field, formData.type, loadingField])
+
     if (!isOpen) return null
 
     const isTagsField = formData.key === 'tags' || field?.key === 'tags'
     const requiresOptions = (formData.type === 'select' || formData.type === 'multiselect') && !isTagsField
+    /** Select/multiselect fields where options are edited in this modal (excludes Collection, rating, custom widget, etc.). */
+    const mustValidateOptionList = requiresOptions && !formData.option_editing_restricted
     const filterEligible = canUseSidebarFilter(formData.type)
     const filterAppearsHint = whereAppearsFilterHint(formData.type)
     const ineligibleFilterNote = ineligibleFilterRowNote(formData.type)
@@ -490,7 +535,7 @@ export default function MetadataFieldModal({
 
         // Select/multiselect: merge any uncommitted bulk-add lines before validate/submit (same rules as "Add options")
         let effectiveOptions = formData.options
-        if (requiresOptions && bulkAddText.trim()) {
+        if (mustValidateOptionList && bulkAddText.trim()) {
             const merged = mergeBulkAddTextIntoOptions(formData.options, bulkAddText)
             if (merged.error) {
                 setErrors({
@@ -503,8 +548,8 @@ export default function MetadataFieldModal({
             effectiveOptions = merged.options
         }
 
-        // Validate options for select/multiselect
-        if (requiresOptions) {
+        // Validate options for select/multiselect (skip when options are system-managed / not edited here)
+        if (mustValidateOptionList) {
             const prepared = prepareOptionsForSubmit(effectiveOptions)
             if (prepared.length === 0) {
                 setErrors({ options: 'At least one option is required.', error: 'Please add at least one option.' })
@@ -559,7 +604,7 @@ export default function MetadataFieldModal({
             ...formData,
             ...filterSubmitFlags,
             key: fieldKey,
-            options: prepareOptionsForSubmit(requiresOptions ? effectiveOptions : formData.options),
+            options: prepareOptionsForSubmit(mustValidateOptionList ? effectiveOptions : formData.options),
         }
 
         let skipFinally = false
@@ -653,7 +698,7 @@ export default function MetadataFieldModal({
                 }
 
                 // System fields: persist select/multiselect options (global metadata_options rows)
-                if (requiresOptions && !formData.option_editing_restricted) {
+                if (mustValidateOptionList) {
                     const opts = prepareOptionsForSubmit(effectiveOptions)
                     const optionsResponse = await fetch(`/app/tenant/metadata/fields/${field.id}`, {
                         method: 'PUT',
@@ -1215,7 +1260,12 @@ export default function MetadataFieldModal({
                             </section>
 
                             <section
-                                className="rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white to-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] px-4 py-4 sm:px-5 sm:py-5"
+                                id="metadata-modal-values-panel"
+                                className={`rounded-2xl border border-slate-200/70 bg-gradient-to-br from-white to-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] px-4 py-4 transition-shadow duration-300 sm:px-5 sm:py-5 ${
+                                    valuesPanelEmphasis
+                                        ? 'ring-2 ring-[color:var(--wb-accent)] ring-offset-2 shadow-[0_0_0_3px_color-mix(in_srgb,var(--wb-accent)_22%,transparent)]'
+                                        : ''
+                                }`}
                                 aria-labelledby="modal-values-heading"
                             >
                                 <ModalSectionTitle id="modal-values-heading">
@@ -1239,6 +1289,7 @@ export default function MetadataFieldModal({
                                                     </p>
                                                     <div className="flex flex-wrap items-end gap-2">
                                                         <textarea
+                                                            ref={bulkAddTextareaRef}
                                                             value={bulkAddText}
                                                             onChange={(e) => {
                                                                 setBulkAddText(e.target.value)
@@ -1806,7 +1857,8 @@ export default function MetadataFieldModal({
                                                         ) : (
                                                             <p className="mt-1 text-xs text-slate-600">
                                                                 For select-style fields with values.
-                                                                {requiresOptions && formData.options.length === 0
+                                                                {mustValidateOptionList &&
+                                                                formData.options.length === 0
                                                                     ? ' Add values above to enable.'
                                                                     : ''}
                                                             </p>

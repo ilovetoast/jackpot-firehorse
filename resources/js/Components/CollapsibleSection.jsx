@@ -22,6 +22,8 @@ export default function CollapsibleSection({
      * 'flush' = no horizontal padding — use when parent already provides px (e.g. asset drawer body).
      */
     contentInset = 'padded',
+    /** When set (light variant only), focus ring uses this color instead of default indigo — e.g. brand/workspace accent. */
+    focusRingColor = null,
 }) {
     const [isExpanded, setIsExpanded] = useState(defaultExpanded)
 
@@ -48,17 +50,27 @@ export default function CollapsibleSection({
         ? 'rounded-lg border border-neutral-800/70 bg-neutral-900/85 mb-4 overflow-hidden'
         : ''
 
+    const lightFocusRingClass =
+        focusRingColor && typeof focusRingColor === 'string' && focusRingColor.trim() !== ''
+            ? 'hover:bg-gray-50 focus:ring-[color:var(--collapsible-focus-ring)]'
+            : 'hover:bg-gray-50 focus:ring-indigo-500'
+
     return (
         <div className={`${shellClass} ${className}`}>
             <button
                 type="button"
                 onClick={handleToggle}
+                style={
+                    !inCard && !isDark && focusRingColor && String(focusRingColor).trim() !== ''
+                        ? { ['--collapsible-focus-ring']: String(focusRingColor).trim() }
+                        : undefined
+                }
                 className={`w-full flex items-center justify-between gap-2 ${btnPad} text-left focus:outline-none focus:ring-2 focus:ring-inset ${
                     inCard
                         ? 'border-b border-neutral-800/80 hover:bg-neutral-800/50 text-neutral-100 focus:ring-neutral-600'
                         : isDark
                           ? 'hover:bg-neutral-800/40 text-neutral-100 focus:ring-neutral-600'
-                          : 'hover:bg-gray-50 focus:ring-indigo-500'
+                          : lightFocusRingClass
                 }`}
             >
                 <div

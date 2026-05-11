@@ -30,8 +30,10 @@ use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\File;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Cashier\Cashier;
@@ -335,6 +337,21 @@ class AppServiceProvider extends ServiceProvider
 
         // Prevent accidental wipe of primary dev DB via migrate:fresh / db:wipe when not in APP_ENV=testing.
         Event::listen(CommandStarting::class, [BlockUnsafeDestructiveDatabaseCommands::class, 'handle']);
+
+        // Upload endpoint rate limiter — applies to /uploads/preflight,
+        // /uploads/initiate-batch, /uploads/initiate, and /uploads/finalize.
+        // Per-user when authenticated; per-IP otherwise. The cap is generous
+        // (designed for legitimate bulk uploads) but prevents brute-force
+        // probing of the gates with thousands of dangerous filenames.
+        RateLimiter::for('upload', function ($request) {
+            $userId = $request->user()?->id;
+            $key = $userId ? 'user:'.$userId : 'ip:'.$request->ip();
+
+            return [
+                Limit::perMinute(240)->by($key),
+                Limit::perHour(2400)->by($key),
+            ];
+        });
     }
 
     /**

@@ -25,12 +25,13 @@ import { useThumbnailSmartPoll } from '../../hooks/useThumbnailSmartPoll'
 import { filterActiveCategories } from '../../utils/categoryUtils'
 import AssetSidebar from '../../Components/AssetSidebar'
 import AddCategoryModal from '../../Components/Metadata/AddCategoryModal'
+import FolderSchemaHelp from '../../Components/Metadata/FolderSchemaHelp'
 import AddExistingCategoryModal from '../../Components/AddExistingCategoryModal'
 import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
-    getContrastTextColor,
     getWorkspaceSidebarForegroundHex,
+    getWorkspaceSidebarActiveRowForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
@@ -117,7 +118,8 @@ export default function AssetsIndex({
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
     const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false)
-    
+    const [mobileLibraryRowActiveId, setMobileLibraryRowActiveId] = useState(null)
+
     // FINAL FIX: Remount key to force page remount after finalize
     const [remountKey, setRemountKey] = useState(0)
     
@@ -990,12 +992,20 @@ export default function AssetsIndex({
     // Same solid as AddAssetButton (darken workspace accent by 20) for Library row selection
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
-    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const activeTextColor = getWorkspaceSidebarActiveRowForegroundHex(contextualDarkColor, textColor)
     const hoverBgColor = contextualDarkColor
     // Unselected: reduced opacity for visual hierarchy (matches icon treatment)
     const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
     const unselectedIconColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.6)'
     const unselectedCountColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)'
+
+    const canViewFolderSchema =
+        can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
+
+    const folderSchemaTriggerMobile =
+        textColor === '#ffffff'
+            ? 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-lg px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
+            : 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-lg px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
 
     const canPublish = can('asset.publish')
     const pendingReviewTotal = Number(pending_publication_review_count) || 0
@@ -1076,6 +1086,7 @@ export default function AssetsIndex({
                         canManageCategoriesAndFields={(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) || can('brand_categories.manage')}
                         activeBrandId={auth?.activeBrand?.id ?? null}
                         onAddCategoryClick={can('brand_categories.manage') ? () => setAddCategoryModalOpen(true) : undefined}
+                        showFolderSchemaHelp={canViewFolderSchema}
                     />
                 </div>
 
@@ -1135,19 +1146,81 @@ export default function AssetsIndex({
                                         )}
                                         {filterActiveCategories(categories).map((category) => {
                                             const isSelected = selectedCategoryId === category.id
+                                            const rowHighlighted =
+                                                isSelected ||
+                                                (!isSelected && mobileLibraryRowActiveId === category.id)
+                                            const rowBg = isSelected
+                                                ? activeBgColor
+                                                : mobileLibraryRowActiveId === category.id
+                                                  ? hoverBgColor
+                                                  : 'transparent'
+                                            const rowFg = rowHighlighted ? activeTextColor : textColor
+
                                             return (
-                                                <button
+                                                <div
                                                     key={category.id}
-                                                    onClick={() => { handleCategorySelect(category); setMobileCategoriesOpen(false) }}
-                                                    className="flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg text-left"
-                                                    style={{ backgroundColor: isSelected ? activeBgColor : 'transparent', color: isSelected ? activeTextColor : textColor }}
+                                                    className="group flex min-w-0 w-full items-stretch rounded-lg"
+                                                    style={{ backgroundColor: rowBg }}
+                                                    onMouseEnter={() => {
+                                                        if (!isSelected) setMobileLibraryRowActiveId(category.id)
+                                                    }}
+                                                    onMouseLeave={(e) => {
+                                                        const rel = e.relatedTarget
+                                                        if (rel instanceof Node && e.currentTarget.contains(rel))
+                                                            return
+                                                        requestAnimationFrame(() => {
+                                                            if (!e.currentTarget.contains(document.activeElement)) {
+                                                                setMobileLibraryRowActiveId((id) =>
+                                                                    id === category.id ? null : id
+                                                                )
+                                                            }
+                                                        })
+                                                    }}
+                                                    onFocusCapture={() => {
+                                                        if (!isSelected) setMobileLibraryRowActiveId(category.id)
+                                                    }}
+                                                    onBlurCapture={(e) => {
+                                                        if (!e.currentTarget.contains(e.relatedTarget)) {
+                                                            setMobileLibraryRowActiveId((id) =>
+                                                                id === category.id ? null : id
+                                                            )
+                                                        }
+                                                    }}
                                                 >
-                                                    <CategoryIcon iconId={category.icon || 'folder'} className="mr-3 h-5 w-5 opacity-80" style={{ color: isSelected ? activeTextColor : textColor }} />
-                                                    <span className="flex-1">{category.name}</span>
-                                                    {typeof category.asset_count === 'number' && category.asset_count > 0 && (
-                                                        <span className="text-xs opacity-80">{category.asset_count}</span>
-                                                    )}
-                                                </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            handleCategorySelect(category)
+                                                            setMobileCategoriesOpen(false)
+                                                        }}
+                                                        className="flex min-w-0 flex-1 items-center rounded-l-lg px-3 py-2.5 text-left text-sm font-medium"
+                                                        style={{
+                                                            backgroundColor: 'transparent',
+                                                            color: rowFg,
+                                                        }}
+                                                    >
+                                                        <CategoryIcon
+                                                            iconId={category.icon || 'folder'}
+                                                            className="mr-3 h-5 w-5 shrink-0 opacity-80"
+                                                            style={{ color: rowFg }}
+                                                        />
+                                                        <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                                                        {typeof category.asset_count === 'number' && category.asset_count > 0 && (
+                                                            <span className="shrink-0 text-xs opacity-80">{category.asset_count}</span>
+                                                        )}
+                                                    </button>
+                                                    {canViewFolderSchema && category?.id ? (
+                                                        <div
+                                                            className="flex shrink-0 items-stretch opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                                                            style={{ color: rowFg }}
+                                                        >
+                                                            <FolderSchemaHelp
+                                                                category={category}
+                                                                triggerClassName={folderSchemaTriggerMobile}
+                                                            />
+                                                        </div>
+                                                    ) : null}
+                                                </div>
                                             )
                                         })}
                                         {canViewSystemFolders && (

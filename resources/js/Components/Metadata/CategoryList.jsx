@@ -30,6 +30,7 @@ import {
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { CategoryIcon } from '../../Helpers/categoryIcons'
 import { productButtonPrimary, productFocusInput } from '../../components/brand-workspace/brandWorkspaceTokens'
+import FolderSchemaHelp from './FolderSchemaHelp'
 
 function sortCategoriesStable(list) {
     return [...list].sort((a, b) => {
@@ -56,10 +57,12 @@ function mergeWithRenumberedSortOrder(visible, hidden) {
 const CATALOG_COMPACT_THRESHOLD = 5
 
 const CATALOG_HELP =
-    'Catalog: add a ready-made folder type from the platform to this brand. That creates a real folder here (some templates start hidden until you show them). Hidden folders are different—those are folders you already have on this brand, turned off from the sidebar and uploader.'
+    'Catalog: platform templates you add to this brand become real folders (some start hidden until you show them). Hidden folders above are different—folders you already have, turned off from the library and uploader.'
 const CATALOG_HELP_VIEW_ONLY = ' View only — adding folders requires folder management permission.'
 const HIDDEN_SECTION_HELP =
-    'Hidden folders already belong to this brand but are not shown in the library sidebar, uploader, or default grid. Unhide with the eye icon on a visible folder, or show them from this list. This is not the catalog—catalog entries are templates you can add.'
+    'Hidden folders already belong to this brand but are not shown in the library sidebar, uploader, or default grid. Use the control here to show one again. To hide a folder from those places, use the eye next to the folder in Manage → Folders & fields. This is not the catalog—catalog entries are templates you can add.'
+/** One line under “From catalog”; details stay on the (i) tooltip. */
+const CATALOG_INLINE_SUMMARY = 'Add a platform template as a folder on this brand.'
 
 async function persistCategoryReorder(brandId, assetType, mergedList, getCsrfToken) {
     const payload = {
@@ -102,6 +105,8 @@ function SortableCategoryRow({
     onSaveRename,
     onCancelRename,
     hubCategoryNav = false,
+    showFolderSchemaHelp = false,
+    showFolderLibraryHideToggle = true,
 }) {
     const {
         attributes,
@@ -186,20 +191,27 @@ function SortableCategoryRow({
                     </>
                 )}
             </button>
+            {showFolderSchemaHelp && !isEditing ? (
+                <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+                    <FolderSchemaHelp category={category} />
+                </div>
+            ) : null}
             {canManageVisibility && (
                 <div className="flex items-center gap-0.5 flex-shrink-0 text-gray-400">
-                    <button
-                        type="button"
-                        className="p-1 -m-1 rounded hover:text-gray-700 hover:bg-gray-100 flex-shrink-0"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            onToggleHidden(category)
-                        }}
-                        title="Hide from library sidebars, uploader, and default grid"
-                        aria-label="Hide folder from library"
-                    >
-                        <EyeIcon className="h-4 w-4" />
-                    </button>
+                    {showFolderLibraryHideToggle && (
+                        <button
+                            type="button"
+                            className="p-1 -m-1 rounded hover:text-gray-700 hover:bg-gray-100 flex-shrink-0"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                onToggleHidden(category)
+                            }}
+                            title="Hide from library sidebars, uploader, and default grid"
+                            aria-label="Hide folder from library"
+                        >
+                            <EyeIcon className="h-4 w-4" />
+                        </button>
+                    )}
                     {!category.is_system && (onCategorySettingsClick || onRename) && (
                         <button
                             type="button"
@@ -280,6 +292,7 @@ function HiddenCategoryRow({
     onSaveRename,
     onCancelRename,
     hubCategoryNav = false,
+    showFolderSchemaHelp = false,
 }) {
     const selectedHub =
         'relative z-[1] -mr-px border-r border-white bg-white font-semibold text-slate-800 shadow-[inset_3px_0_0_0_var(--wb-accent),0_1px_2px_rgb(0_0_0_/_0.04)] rounded-l-md rounded-r-none ring-1 ring-inset ring-slate-200/70'
@@ -331,6 +344,11 @@ function HiddenCategoryRow({
                     </>
                 )}
             </button>
+            {showFolderSchemaHelp && !isEditing ? (
+                <div className="flex shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
+                    <FolderSchemaHelp category={category} />
+                </div>
+            ) : null}
             {canManageVisibility && (
                 <div className="flex items-center gap-0.5 flex-shrink-0 text-gray-400">
                     <button
@@ -430,7 +448,11 @@ export default function CategoryList({
     onSaveRename,
     onCancelRename,
     hubCategoryNav = false,
+    showFolderSchemaHelp: showFolderSchemaHelpProp,
+    showFolderLibraryHideToggle = true,
 }) {
+    const showFolderSchemaHelp = showFolderSchemaHelpProp ?? !!brandId
+
     const [reorderLoading, setReorderLoading] = useState(false)
     const [toggleLoading, setToggleLoading] = useState(new Set())
     const [hiddenExpanded, setHiddenExpanded] = useState({ asset: false, deliverable: false })
@@ -658,6 +680,7 @@ export default function CategoryList({
         onSaveRename,
         onCancelRename,
         hubCategoryNav,
+        showFolderSchemaHelp,
     }
 
     /** Hidden folders + “available from catalog” in one dashed card (catalog always below hidden header). */
@@ -693,9 +716,7 @@ export default function CategoryList({
                     const limits = visibleCategoryLimits?.[assetTypeKey]
                     const slotsLine =
                         limits != null
-                            ? `Shown in the library: ${limits.visible} of ${limits.max} for this brand’s ${
-                                  assetTypeKey === 'deliverable' ? 'executions' : 'asset library'
-                              }. Only visible folders use a slot; folders you’ve hidden on this brand do not.`
+                            ? `${limits.visible}/${limits.max} visible folders — hidden don’t use a slot`
                             : null
                     const useCompact = templates.length >= CATALOG_COMPACT_THRESHOLD
                     const q = (catalogFilter[assetTypeKey] || '').trim().toLowerCase()
@@ -723,9 +744,10 @@ export default function CategoryList({
                                     <div className="min-w-0">
                                         <p className="text-xs font-semibold text-slate-900">From catalog</p>
                                         <p className="mt-0.5 text-[11px] leading-snug text-slate-600">
-                                            Add a ready-made folder from the platform. Catalog items are templates until
-                                            you add them—unlike hidden folders, which you already have and only turned
-                                            off from the library.
+                                            {CATALOG_INLINE_SUMMARY}
+                                            {slotsLine ? (
+                                                <span className="text-slate-500"> · {slotsLine}</span>
+                                            ) : null}
                                         </p>
                                     </div>
                                     <button
@@ -737,9 +759,6 @@ export default function CategoryList({
                                         <InformationCircleIcon className="h-4 w-4" aria-hidden />
                                     </button>
                                 </div>
-                                {slotsLine ? (
-                                    <p className="mt-2 text-[11px] leading-snug text-slate-600">{slotsLine}</p>
-                                ) : null}
                                 {useCompact ? (
                                     <div className="mt-2 space-y-2">
                                         <input
@@ -922,7 +941,7 @@ export default function CategoryList({
                     <>
                         {visible.length === 0 ? (
                             <p className="py-2 text-sm text-amber-800/90 bg-amber-50/80 rounded-lg px-2 mt-1">
-                                All folders are hidden for this brand. Expand &quot;Hidden&quot; below to select one and manage fields, or show a folder with the eye icon.
+                                All folders are hidden for this brand. Expand &quot;Hidden&quot; below to unhide one or manage fields.
                             </p>
                         ) : (
                             <DndContext
@@ -940,6 +959,7 @@ export default function CategoryList({
                                                 isEditing={editingCategoryId === category.id}
                                                 editName={editingCategoryName}
                                                 onEditNameChange={onEditingCategoryNameChange}
+                                                showFolderLibraryHideToggle={showFolderLibraryHideToggle}
                                                 {...rowProps}
                                             />
                                         ))}

@@ -675,6 +675,44 @@ class AssetMetadataController extends Controller
     }
 
     /**
+     * Tooltip / helper text for the asset drawer: prefer resolved schema, then the live metadata_fields row.
+     * Schema is cached forever; descriptions updated in Manage → Fields must still appear without a manual cache flush.
+     *
+     * @param  array<string, mixed>|null  $schemaField
+     */
+    protected function resolveEditableFieldDescription(?array $schemaField, ?object $fieldDef): ?string
+    {
+        if (is_array($schemaField)) {
+            $fromSchema = isset($schemaField['description']) ? trim((string) $schemaField['description']) : '';
+            if ($fromSchema !== '') {
+                return $fromSchema;
+            }
+        }
+        if ($fieldDef !== null && isset($fieldDef->description)) {
+            $fromDb = trim((string) $fieldDef->description);
+            if ($fromDb !== '') {
+                return $fromDb;
+            }
+        }
+
+        $key = null;
+        if (is_array($schemaField) && ! empty($schemaField['key'])) {
+            $key = (string) $schemaField['key'];
+        } elseif ($fieldDef !== null && ! empty($fieldDef->key)) {
+            $key = (string) $fieldDef->key;
+        }
+        if ($key !== null && $key !== '') {
+            $defaults = config('metadata_field_tooltips.descriptions', []);
+            $fallback = isset($defaults[$key]) ? trim((string) $defaults[$key]) : '';
+            if ($fallback !== '') {
+                return $fallback;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Get editable metadata for an asset.
      *
      * GET /assets/{asset}/metadata/editable
@@ -1021,7 +1059,7 @@ class AssetMetadataController extends Controller
                 'field_key' => $field['key'],
                 'key' => $field['key'], // Also include as 'key' for consistency
                 'display_label' => $displayLabel,
-                'description' => $field['description'] ?? null,
+                'description' => $this->resolveEditableFieldDescription($field, $fieldDef),
                 'type' => $field['type'],
                 'options' => $field['options'] ?? [],
                 'is_user_editable' => ! $isReadonly && $canEdit, // Only editable if not readonly AND has permission
@@ -1080,7 +1118,7 @@ class AssetMetadataController extends Controller
                 'field_key' => $systemKey,
                 'key' => $systemKey,
                 'display_label' => $fieldDef->system_label ?? $systemKey,
-                'description' => $fieldDef->description ?? null,
+                'description' => $this->resolveEditableFieldDescription(null, $fieldDef),
                 'type' => $fieldDef->type ?? 'text',
                 'options' => $options,
                 'is_user_editable' => false,

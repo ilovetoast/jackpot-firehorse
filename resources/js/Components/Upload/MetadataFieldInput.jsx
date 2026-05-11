@@ -873,9 +873,12 @@ const MetadataFieldInputInner = forwardRef(function MetadataFieldInputInner(
 })
 
 const MetadataFieldInput = forwardRef(function MetadataFieldInput(props, ref) {
+    const { showDescriptionHint = true, ...innerProps } = props
     const desc =
-        typeof props.field?.description === 'string' ? props.field.description.trim() : ''
-    const inner = <MetadataFieldInputInner {...props} ref={ref} />
+        showDescriptionHint && typeof innerProps.field?.description === 'string'
+            ? innerProps.field.description.trim()
+            : ''
+    const inner = <MetadataFieldInputInner {...innerProps} ref={ref} />
     if (!desc) {
         return inner
     }
@@ -883,7 +886,7 @@ const MetadataFieldInput = forwardRef(function MetadataFieldInput(props, ref) {
         <div className="min-w-0 w-full space-y-1">
             <p
                 className="text-xs text-gray-500 leading-snug"
-                id={props.field?.key ? `${props.field.key}-field-description` : undefined}
+                id={innerProps.field?.key ? `${innerProps.field.key}-field-description` : undefined}
             >
                 {desc}
             </p>

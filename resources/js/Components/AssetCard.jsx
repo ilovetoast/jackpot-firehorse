@@ -19,6 +19,7 @@ import { TrashIcon } from '@heroicons/react/24/outline'
 import { StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
+import AudioCardVisual from './Audio/AudioCardVisual'
 import { isImageLikeForAssetCard } from '../utils/damFileTypes'
 import { getThumbnailVersion, getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import {
@@ -173,6 +174,12 @@ export default function AssetCard({
     // Phase V-1: Detect if asset is a video
     const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
     const isVideo = Boolean(asset?.mime_type?.startsWith('video/') || videoExtensions.includes(extLower))
+
+    // Audio: separate visual track (waveform PNG + duration overlay) — see
+    // AudioCardVisual. Mirrors the video branch but does not need hover
+    // preview / poster frame plumbing because audio has no still frames.
+    const audioExtensions = ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba']
+    const isAudio = Boolean(asset?.mime_type?.startsWith('audio/') || audioExtensions.includes(extLower))
     /** Poster or preview frame — when absent, ThumbnailPreview shows the frosted play placeholder (no double overlay). */
     const videoHasPosterFrame = Boolean(asset?.final_thumbnail_url || asset?.preview_thumbnail_url)
 
@@ -348,8 +355,11 @@ export default function AssetCard({
     const hasRasterThumbnailUrl =
         Boolean(thumbnailState.thumbnailUrl) || Boolean(ephemeralLocalPreviewUrl)
     const isExecutionThumbVisual = showExecutionDualThumb || showExecutionSingleThumb
+    // Audio cards are fully painted by AudioCardVisual (gradient + waveform +
+    // chrome) — they do not want the generic "no thumbnail yet" full-bleed
+    // placeholder, badge, or processing pill stacked on top.
     const useFullBleedPlaceholder =
-        !showFontSwatch && !isExecutionThumbVisual && !hasRasterThumbnailUrl
+        !showFontSwatch && !isExecutionThumbVisual && !hasRasterThumbnailUrl && !isAudio
     const suppressPlaceholderDuplicateBadge =
         useFullBleedPlaceholder && supportsThumbnail(asset?.mime_type, extLower)
 
@@ -719,7 +729,13 @@ export default function AssetCard({
                             </div>
                         )}
 
-                        {showExecutionDualThumb || showExecutionSingleThumb ? (
+                        {isAudio ? (
+                            <AudioCardVisual
+                                asset={asset}
+                                primaryColor={primaryColor}
+                                className={isMasonry ? 'w-full max-h-full min-h-0' : 'w-full h-full'}
+                            />
+                        ) : showExecutionDualThumb || showExecutionSingleThumb ? (
                             executionUsePresentationCss && executionPresentationPreset ? (
                                 <div
                                     className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl ${

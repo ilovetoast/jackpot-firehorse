@@ -322,6 +322,25 @@ export function getWorkspaceSidebarForegroundHex(sidebarColorHex) {
 }
 
 /**
+ * Text/icons on the selected or hover row pill (darkened accent) in the Assets / Collections / Deliverables rail.
+ *
+ * When the rail uses light copy on the brand surface, **do not** run binary contrast on the pill — that often
+ * flips labels to black on saturated oranges while the rest of the rail stays white. Only the background
+ * should deepen; keep `#ffffff` for hover/active. Light paper rails still use strict contrast on the pill.
+ *
+ * @param {string|null|undefined} highlightBgHex — `getWorkspaceContextualTone` fill for the row
+ * @param {'#ffffff'|'#000000'} sidebarRailTextHex — resolved rail body text from {@link getWorkspaceSidebarForegroundHex} or cinematic `#ffffff`
+ * @returns {'#ffffff'|'#000000'}
+ */
+export function getWorkspaceSidebarActiveRowForegroundHex(highlightBgHex, sidebarRailTextHex) {
+    if (sidebarRailTextHex === '#ffffff') {
+        return '#ffffff'
+    }
+    if (!highlightBgHex) return '#000000'
+    return getContrastTextColor(normalizeHexColor(highlightBgHex))
+}
+
+/**
  * Brand settings tile / selector (same logic as BrandIconUnified).
  * @param {'gradient'|'solid'|'subtle'} style
  * @param {string|null|undefined} primary

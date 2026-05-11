@@ -4,6 +4,14 @@
  *
  * Synced from BrandThemeProvider on each page load so plain JS helpers (thumbnailUtils, etc.)
  * stay aligned with the backend without duplicating extension/MIME lists.
+ *
+ * IMPORTANT — fail closed:
+ *   This module DOES NOT carry hardcoded fallback lists of allowed types. If
+ *   the Inertia prop is missing the helpers below return empty arrays, which
+ *   causes the upload UI to refuse every type until the registry arrives.
+ *   This is intentional: a fail-open fallback is what created the historical
+ *   drift between front and back end and is the wrong posture for an
+ *   enterprise DAM. Always rely on `dam_file_types` from the server.
  */
 
 /**
@@ -13,89 +21,31 @@
  *   upload_mime_types: string[],
  *   upload_extensions: string[],
  *   upload_accept: string,
- *   thumbnail_accept: string
+ *   thumbnail_accept: string,
+ *   blocked_extensions?: string[],
+ *   blocked_mime_types?: string[],
+ *   blocked_groups?: Record<string, { extensions: string[], mime_types: string[], message: string, code_suffix: string }>,
+ *   coming_soon?: Record<string, { name: string, message: string, extensions: string[] }>
  * }} DamFileTypesPayload
  */
 
 /** @type {DamFileTypesPayload | null} */
 let cached = null
 
-const FALLBACK_THUMB_MIMES = [
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/tiff',
-    'image/tif',
-    'image/x-canon-cr2',
-    'image/avif',
-    'image/heic',
-    'image/heif',
-    'image/vnd.adobe.photoshop',
-    'image/svg+xml',
-    'application/pdf',
-    'application/postscript',
-    'application/vnd.adobe.illustrator',
-    'application/illustrator',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'application/msword',
-    'application/vnd.ms-excel',
-    'application/vnd.ms-powerpoint',
-    'video/mp4',
-    'video/quicktime',
-    'video/x-msvideo',
-    'video/x-matroska',
-    'video/webm',
-    'video/x-m4v',
-]
-
-const FALLBACK_THUMB_EXTS = [
-    'jpg',
-    'jpeg',
-    'png',
-    'gif',
-    'webp',
-    'tiff',
-    'tif',
-    'cr2',
-    'avif',
-    'heic',
-    'heif',
-    'psd',
-    'psb',
-    'svg',
-    'pdf',
-    'ai',
-    'eps',
-    'doc',
-    'docx',
-    'xls',
-    'xlsx',
-    'ppt',
-    'pptx',
-    'mp4',
-    'mov',
-    'avi',
-    'mkv',
-    'webm',
-    'm4v',
-]
-
-function fallbackPayload() {
-    const uploadMimes = [...FALLBACK_THUMB_MIMES]
-    const uploadExts = [...FALLBACK_THUMB_EXTS]
-    const mimePart = uploadMimes.join(',')
-    const extPart = uploadExts.map((e) => `.${e}`).join(',')
+/** Empty (fail-closed) payload. */
+function emptyPayload() {
     return {
-        thumbnail_mime_types: [...FALLBACK_THUMB_MIMES],
-        thumbnail_extensions: [...FALLBACK_THUMB_EXTS],
-        upload_mime_types: uploadMimes,
-        upload_extensions: uploadExts,
-        upload_accept: `${mimePart},${extPart}`,
-        thumbnail_accept: `${mimePart},${extPart}`,
+        thumbnail_mime_types: [],
+        thumbnail_extensions: [],
+        upload_mime_types: [],
+        upload_extensions: [],
+        upload_accept: '',
+        thumbnail_accept: '',
+        blocked_extensions: [],
+        blocked_mime_types: [],
+        blocked_groups: {},
+        coming_soon: {},
+        types_for_help: [],
     }
 }
 
@@ -105,16 +55,19 @@ function fallbackPayload() {
 export function syncDamFileTypesFromPage(initialPage) {
     const next = initialPage?.props?.dam_file_types
     if (next && typeof next === 'object' && Array.isArray(next.thumbnail_mime_types)) {
-        cached = next
+        cached = {
+            ...emptyPayload(),
+            ...next,
+        }
         return
     }
     if (!cached) {
-        cached = fallbackPayload()
+        cached = emptyPayload()
     }
 }
 
 export function getDamFileTypes() {
-    return cached ?? fallbackPayload()
+    return cached ?? emptyPayload()
 }
 
 export function getThumbnailMimeTypes() {
@@ -134,6 +87,34 @@ export function getThumbnailAcceptAttribute() {
 }
 
 /**
+ * Per-type summary suitable for help / settings UI: name, description,
+ * extensions, status, capabilities, max size. Driven entirely by the
+ * server registry — no hardcoded list here, so adding a type to
+ * config/file_types.php automatically surfaces it in the help panel.
+ *
+ * @returns {Array<{
+ *   key: string,
+ *   name: string,
+ *   description: string,
+ *   extensions: string[],
+ *   status: 'enabled' | 'coming_soon' | 'disabled' | string,
+ *   enabled: boolean,
+ *   disabled_message: string | null,
+ *   max_size_bytes: number | null,
+ *   capabilities: {
+ *     preview: boolean,
+ *     thumbnail: boolean,
+ *     ai_analysis: boolean,
+ *     download_only: boolean,
+ *   },
+ * }>}
+ */
+export function getRegisteredTypesForHelp() {
+    const cfg = getDamFileTypes()
+    return Array.isArray(cfg.types_for_help) ? cfg.types_for_help : []
+}
+
+/**
  * Whether MIME or extension matches a DAM-registered upload type (full registry).
  */
 export function isDamRegisteredUploadType(mimeType, fileExtension) {
@@ -147,6 +128,87 @@ export function isDamRegisteredUploadType(mimeType, fileExtension) {
         return true
     }
     return false
+}
+
+/**
+ * Whether MIME or extension is on the explicit `blocked` server list (executable,
+ * server_script, archive, web). Returns the matching group + message, or null.
+ *
+ * @param {string|null|undefined} mimeType
+ * @param {string|null|undefined} fileExtension
+ * @returns {{group: string, message: string, code: string}|null}
+ */
+export function isExplicitlyBlocked(mimeType, fileExtension) {
+    const cfg = getDamFileTypes()
+    const groups = cfg.blocked_groups || {}
+    const m = mimeType ? String(mimeType).toLowerCase() : ''
+    const e = fileExtension ? String(fileExtension).toLowerCase().replace(/^\./, '') : ''
+    if (!m && !e) return null
+    for (const [group, def] of Object.entries(groups)) {
+        const exts = (def.extensions || []).map((x) => String(x).toLowerCase())
+        const mimes = (def.mime_types || []).map((x) => String(x).toLowerCase())
+        if ((e && exts.includes(e)) || (m && mimes.includes(m))) {
+            return {
+                group,
+                message: def.message || 'This file type cannot be uploaded for security reasons.',
+                code: 'blocked_' + (def.code_suffix || group),
+            }
+        }
+    }
+    return null
+}
+
+/**
+ * Whether a known-but-not-yet-enabled type matched the file (e.g. an
+ * extension whose pipeline ships in a later release). Returns the
+ * coming_soon entry or null.
+ *
+ * @param {string|null|undefined} fileExtension
+ * @returns {{key: string, name: string, message: string}|null}
+ */
+export function isComingSoonType(fileExtension) {
+    const cfg = getDamFileTypes()
+    const cs = cfg.coming_soon || {}
+    const e = fileExtension ? String(fileExtension).toLowerCase().replace(/^\./, '') : ''
+    if (!e) return null
+    for (const [key, def] of Object.entries(cs)) {
+        const exts = (def.extensions || []).map((x) => String(x).toLowerCase())
+        if (exts.includes(e)) {
+            return {
+                key,
+                name: def.name || key,
+                message: def.message || 'This file type is coming soon.',
+            }
+        }
+    }
+    return null
+}
+
+/**
+ * Single client-side decision: can this file be enqueued for upload?
+ * Mirrors backend FileTypeService::isUploadAllowed but operates only on the
+ * payload Inertia ships, so it is purely advisory — the server still has
+ * final say. Used in handleFileSelect to give the user instant feedback.
+ *
+ * @returns {{ allowed: true } | { allowed: false, code: string, message: string }}
+ */
+export function decideClientUpload(mimeType, fileExtension) {
+    const blocked = isExplicitlyBlocked(mimeType, fileExtension)
+    if (blocked) {
+        return { allowed: false, code: blocked.code, message: blocked.message }
+    }
+    const comingSoon = isComingSoonType(fileExtension)
+    if (comingSoon) {
+        return { allowed: false, code: 'coming_soon', message: comingSoon.message }
+    }
+    if (!isDamRegisteredUploadType(mimeType, fileExtension)) {
+        return {
+            allowed: false,
+            code: 'unsupported_type',
+            message: 'This file type is not supported for upload.',
+        }
+    }
+    return { allowed: true }
 }
 
 /** Extensions that are not raster/inline images (for logo / image cropper pickers). */
@@ -168,12 +230,16 @@ const NON_INLINE_IMAGE_EXTENSIONS = new Set([
     'mkv',
     'webm',
     'm4v',
+    'mp3',
+    'wav',
+    'aac',
+    'm4a',
+    'ogg',
+    'flac',
+    'weba',
 ])
 
-/**
- * `accept` string for pickers that should only offer images (not PDF/video/office), still driven by the DAM registry.
- */
-/** Document / video / vector upload types — not “image tile” in grid chrome (see AssetCard). */
+/** Document / video / vector / audio upload types — not "image tile" in grid chrome (see AssetCard). */
 const ASSET_CARD_NON_IMAGE_EXTENSIONS = new Set([
     'pdf',
     'ai',
@@ -190,10 +256,17 @@ const ASSET_CARD_NON_IMAGE_EXTENSIONS = new Set([
     'mkv',
     'webm',
     'm4v',
+    'mp3',
+    'wav',
+    'aac',
+    'm4a',
+    'ogg',
+    'flac',
+    'weba',
 ])
 
 /**
- * Grid/card “image” styling: true for raster/image pipeline types, false for PDF/office/video even if thumbnailed.
+ * Grid/card "image" styling: true for raster/image pipeline types, false for PDF/office/video/audio even if thumbnailed.
  */
 export function isImageLikeForAssetCard(mimeType, fileExtension) {
     const m = mimeType ? String(mimeType).toLowerCase() : ''

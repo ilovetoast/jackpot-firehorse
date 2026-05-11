@@ -526,4 +526,426 @@ class FileTypeService
 
         return implode(',', $parts);
     }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Upload Allowlist Decision API (single source of truth)
+    |--------------------------------------------------------------------------
+    |
+    | Every upload gate (preflight, initiate-batch, finalize content-sniff)
+    | calls isUploadAllowed() and acts on the same decision.
+    |
+    | Decision codes returned:
+    |   ok                       - allowed
+    |   blocked_executable       - matched config/file_types.blocked.executable
+    |   blocked_server_script    - matched config/file_types.blocked.server_script
+    |   blocked_archive          - matched config/file_types.blocked.archive
+    |   blocked_web              - matched config/file_types.blocked.web
+    |   coming_soon              - registered type, but upload.status === 'coming_soon'
+    |   unsupported_type         - not in registry at all
+    |   type_disabled            - registered type, but upload.enabled === false
+    |
+    */
+
+    /**
+     * Single decision for "can this MIME/extension pair be uploaded?".
+     *
+     * @return array{
+     *     allowed: bool,
+     *     code: string,
+     *     message: string|null,
+     *     log_severity: string,
+     *     file_type: string|null,
+     *     blocked_group: string|null
+     * }
+     */
+    public function isUploadAllowed(?string $mimeType = null, ?string $extension = null): array
+    {
+        $mime = $mimeType !== null && $mimeType !== '' ? strtolower(trim($mimeType)) : null;
+        $ext = $extension !== null && $extension !== '' ? strtolower(ltrim(trim($extension), '.')) : null;
+
+        // 1. Hard security block — always wins, even if also in `types`.
+        $blocked = $this->isExplicitlyBlocked($mime, $ext);
+        if ($blocked !== null) {
+            return [
+                'allowed' => false,
+                'code' => 'blocked_'.$blocked['code_suffix'],
+                'message' => $blocked['message'],
+                'log_severity' => $blocked['log_severity'],
+                'file_type' => null,
+                'blocked_group' => $blocked['group'],
+            ];
+        }
+
+        // 2. Must be in the registry (allowlist).
+        $fileType = $this->detectFileType($mime, $ext);
+        if ($fileType === null) {
+            return [
+                'allowed' => false,
+                'code' => 'unsupported_type',
+                'message' => 'This file type is not supported for upload.',
+                'log_severity' => 'info',
+                'file_type' => null,
+                'blocked_group' => null,
+            ];
+        }
+
+        $typeConfig = config("file_types.types.{$fileType}", []);
+        $upload = $typeConfig['upload'] ?? [];
+        $status = (string) ($upload['status'] ?? 'enabled');
+        $enabled = (bool) ($upload['enabled'] ?? true);
+
+        // 3. "Coming soon" — registered but not yet processable; reject with friendly message.
+        if ($status === 'coming_soon' || $enabled === false && $status === 'coming_soon') {
+            $msg = (string) ($upload['disabled_message'] ?? sprintf(
+                '%s upload support is coming soon. Please try again later.',
+                $typeConfig['name'] ?? ucfirst($fileType)
+            ));
+
+            return [
+                'allowed' => false,
+                'code' => 'coming_soon',
+                'message' => $msg,
+                'log_severity' => 'info',
+                'file_type' => $fileType,
+                'blocked_group' => null,
+            ];
+        }
+
+        // 4. Hard-disabled.
+        if (! $enabled) {
+            $msg = (string) ($upload['disabled_message'] ?? sprintf(
+                'Uploads of %s files are currently disabled.',
+                $typeConfig['name'] ?? ucfirst($fileType)
+            ));
+
+            return [
+                'allowed' => false,
+                'code' => 'type_disabled',
+                'message' => $msg,
+                'log_severity' => 'info',
+                'file_type' => $fileType,
+                'blocked_group' => null,
+            ];
+        }
+
+        return [
+            'allowed' => true,
+            'code' => 'ok',
+            'message' => null,
+            'log_severity' => 'info',
+            'file_type' => $fileType,
+            'blocked_group' => null,
+        ];
+    }
+
+    /**
+     * Inspect config/file_types.blocked groups; returns the matching group + metadata
+     * if the MIME or extension is on a blocked list, null otherwise.
+     *
+     * @return array{group: string, code_suffix: string, message: string, log_severity: string}|null
+     */
+    public function isExplicitlyBlocked(?string $mimeType = null, ?string $extension = null): ?array
+    {
+        $blocked = config('file_types.blocked', []);
+        $mime = $mimeType !== null && $mimeType !== '' ? strtolower(trim($mimeType)) : null;
+        $ext = $extension !== null && $extension !== '' ? strtolower(ltrim(trim($extension), '.')) : null;
+
+        if ($mime === null && $ext === null) {
+            return null;
+        }
+
+        foreach ($blocked as $group => $groupConfig) {
+            $exts = array_map('strtolower', $groupConfig['extensions'] ?? []);
+            $mimes = array_map('strtolower', $groupConfig['mime_types'] ?? []);
+
+            $hit = ($ext !== null && in_array($ext, $exts, true))
+                || ($mime !== null && in_array($mime, $mimes, true));
+
+            if ($hit) {
+                return [
+                    'group' => (string) $group,
+                    'code_suffix' => (string) ($groupConfig['code_suffix'] ?? $group),
+                    'message' => (string) ($groupConfig['message'] ?? 'This file type cannot be uploaded for security reasons.'),
+                    'log_severity' => (string) ($groupConfig['log_severity'] ?? 'warning'),
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Build the payload that Inertia ships to the frontend as `dam_file_types`.
+     * Exposes ONLY allowlist information (extensions + MIMEs) and the blocked
+     * extension list for client-side error messaging — never the registry's
+     * private internals.
+     *
+     * @return array{
+     *   thumbnail_mime_types: list<string>,
+     *   thumbnail_extensions: list<string>,
+     *   upload_mime_types: list<string>,
+     *   upload_extensions: list<string>,
+     *   upload_accept: string,
+     *   thumbnail_accept: string,
+     *   blocked_extensions: list<string>,
+     *   blocked_mime_types: list<string>,
+     *   blocked_groups: array<string, array{extensions: list<string>, mime_types: list<string>, message: string, code_suffix: string}>,
+     *   coming_soon: array<string, array{name: string, message: string, extensions: list<string>}>,
+     * }
+     */
+    public function getUploadRegistryForFrontend(): array
+    {
+        $thumbMimes = $this->getThumbnailCapabilityMimeTypes();
+        $thumbExts = $this->getThumbnailCapabilityExtensions();
+        $uploadMimes = $this->getEnabledUploadMimeTypes();
+        $uploadExts = $this->getEnabledUploadExtensions();
+
+        $blocked = config('file_types.blocked', []);
+        $blockedExts = [];
+        $blockedMimes = [];
+        $blockedGroups = [];
+        foreach ($blocked as $group => $cfg) {
+            $exts = array_values(array_unique(array_map('strtolower', $cfg['extensions'] ?? [])));
+            $mimes = array_values(array_unique(array_map('strtolower', $cfg['mime_types'] ?? [])));
+            $blockedExts = array_merge($blockedExts, $exts);
+            $blockedMimes = array_merge($blockedMimes, $mimes);
+            $blockedGroups[(string) $group] = [
+                'extensions' => $exts,
+                'mime_types' => $mimes,
+                'message' => (string) ($cfg['message'] ?? ''),
+                'code_suffix' => (string) ($cfg['code_suffix'] ?? $group),
+            ];
+        }
+
+        $comingSoon = [];
+        $typesForHelp = [];
+        foreach (config('file_types.types', []) as $key => $typeConfig) {
+            $upload = $typeConfig['upload'] ?? [];
+            $status = (string) ($upload['status'] ?? 'enabled');
+            $enabled = (bool) ($upload['enabled'] ?? true);
+
+            $extensions = array_values(array_unique(array_map('strtolower', $typeConfig['extensions'] ?? [])));
+            sort($extensions);
+
+            if ($status === 'coming_soon') {
+                $comingSoon[(string) $key] = [
+                    'name' => (string) ($typeConfig['name'] ?? $key),
+                    'message' => (string) ($upload['disabled_message'] ?? 'This file type is coming soon.'),
+                    'extensions' => $extensions,
+                ];
+            }
+
+            // Help-panel-friendly summary: per-type record with everything a user
+            // needs to know about whether they can upload it. Sorted by name for
+            // a stable display order in HelpSupportedFileTypes.
+            $maxBytes = $upload['max_size_bytes'] ?? null;
+            $typesForHelp[] = [
+                'key' => (string) $key,
+                'name' => (string) ($typeConfig['name'] ?? ucfirst((string) $key)),
+                'description' => (string) ($typeConfig['description'] ?? ''),
+                'extensions' => $extensions,
+                'status' => $status,
+                'enabled' => $enabled,
+                'disabled_message' => $upload['disabled_message'] ?? null,
+                'max_size_bytes' => is_numeric($maxBytes) ? (int) $maxBytes : null,
+                'capabilities' => [
+                    'preview' => (bool) ($typeConfig['capabilities']['preview'] ?? false),
+                    'thumbnail' => (bool) ($typeConfig['capabilities']['thumbnail'] ?? false),
+                    'ai_analysis' => (bool) ($typeConfig['capabilities']['ai_analysis'] ?? false),
+                    'download_only' => (bool) ($typeConfig['capabilities']['download_only'] ?? false),
+                ],
+            ];
+        }
+
+        usort($typesForHelp, fn ($a, $b) => strcmp($a['name'], $b['name']));
+
+        return [
+            'thumbnail_mime_types' => $thumbMimes,
+            'thumbnail_extensions' => $thumbExts,
+            'upload_mime_types' => $uploadMimes,
+            'upload_extensions' => $uploadExts,
+            'upload_accept' => $this->buildHtmlAcceptAttribute($uploadMimes, $uploadExts),
+            'thumbnail_accept' => $this->buildHtmlAcceptAttribute($thumbMimes, $thumbExts),
+            'blocked_extensions' => array_values(array_unique($blockedExts)),
+            'blocked_mime_types' => array_values(array_unique($blockedMimes)),
+            'blocked_groups' => $blockedGroups,
+            'coming_soon' => $comingSoon,
+            'types_for_help' => $typesForHelp,
+        ];
+    }
+
+    /**
+     * MIME types from registry where upload.enabled === true AND status === 'enabled'.
+     *
+     * @return list<string>
+     */
+    public function getEnabledUploadMimeTypes(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            $upload = $typeConfig['upload'] ?? [];
+            if (($upload['enabled'] ?? true) !== true) {
+                continue;
+            }
+            if (($upload['status'] ?? 'enabled') !== 'enabled') {
+                continue;
+            }
+            foreach ($typeConfig['mime_types'] ?? [] as $m) {
+                $seen[strtolower((string) $m)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * Extensions from registry where upload.enabled === true AND status === 'enabled'.
+     *
+     * @return list<string>
+     */
+    public function getEnabledUploadExtensions(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $typeConfig) {
+            $upload = $typeConfig['upload'] ?? [];
+            if (($upload['enabled'] ?? true) !== true) {
+                continue;
+            }
+            if (($upload['status'] ?? 'enabled') !== 'enabled') {
+                continue;
+            }
+            foreach ($typeConfig['extensions'] ?? [] as $e) {
+                $seen[strtolower((string) $e)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Filename hardening
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Sanitize a user-supplied filename:
+     *   - Unicode NFC normalization (matches what most filesystems store).
+     *   - Strip control chars (\x00-\x1F, \x7F) including NUL byte (path-traversal vector).
+     *   - Strip directory separators and traversal segments.
+     *   - Reject Windows reserved basenames (CON, PRN, NUL, COM1-9, LPT1-9, AUX).
+     *   - Cap visible length to 200 chars (DB column is 255; leaves room for suffixes).
+     *
+     * Returns the sanitized name, or empty string if the input was rejected.
+     */
+    public function sanitizeFilename(string $name): string
+    {
+        if ($name === '') {
+            return '';
+        }
+
+        if (class_exists(\Normalizer::class)) {
+            $normalized = \Normalizer::normalize($name, \Normalizer::FORM_C);
+            if (is_string($normalized)) {
+                $name = $normalized;
+            }
+        }
+
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
+        $name = str_replace(["\\", '/'], '', $name);
+        $name = preg_replace('/\.\.+/', '.', $name) ?? '';
+        $name = trim($name, " \t.");
+
+        if ($name === '') {
+            return '';
+        }
+
+        $base = pathinfo($name, PATHINFO_FILENAME);
+        if (preg_match('/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i', (string) $base)) {
+            return '';
+        }
+
+        if (mb_strlen($name) > 200) {
+            $ext = pathinfo($name, PATHINFO_EXTENSION);
+            $stem = pathinfo($name, PATHINFO_FILENAME);
+            $maxStem = max(1, 200 - (strlen($ext) > 0 ? strlen($ext) + 1 : 0));
+            $name = mb_substr($stem, 0, $maxStem).($ext !== '' ? '.'.$ext : '');
+        }
+
+        return $name;
+    }
+
+    /**
+     * Detect double-extension attacks: any non-final segment of the filename
+     * that resolves to a `blocked` extension. e.g. "evil.php.jpg" -> 'php' hit.
+     *
+     * @return array{group: string, hit_extension: string, message: string}|null
+     */
+    public function detectDoubleExtensionAttack(string $name): ?array
+    {
+        if ($name === '' || strpos($name, '.') === false) {
+            return null;
+        }
+
+        $parts = explode('.', strtolower($name));
+        if (count($parts) < 3) {
+            return null;
+        }
+
+        $segments = array_slice($parts, 1, -1);
+
+        $blocked = config('file_types.blocked', []);
+        foreach ($segments as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
+                continue;
+            }
+            foreach ($blocked as $group => $cfg) {
+                $exts = array_map('strtolower', $cfg['extensions'] ?? []);
+                if (in_array($segment, $exts, true)) {
+                    return [
+                        'group' => (string) $group,
+                        'hit_extension' => $segment,
+                        'message' => sprintf(
+                            'Filename contains a disallowed extension (.%s). Rename the file and try again.',
+                            $segment
+                        ),
+                    ];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Map a "real" content-sniffed MIME (from libmagic/finfo) to its canonical
+     * registry MIME via `upload.sniff_mime_aliases`. Returns the canonical MIME
+     * if an alias matches, or the original mime unchanged.
+     */
+    public function canonicalizeSniffedMime(?string $sniffedMime, ?string $extension = null): ?string
+    {
+        if ($sniffedMime === null || $sniffedMime === '') {
+            return $sniffedMime;
+        }
+        $sniffedMime = strtolower(trim($sniffedMime));
+
+        foreach (config('file_types.types', []) as $typeConfig) {
+            $aliases = $typeConfig['upload']['sniff_mime_aliases'] ?? [];
+            if (isset($aliases[$sniffedMime])) {
+                return strtolower((string) $aliases[$sniffedMime]);
+            }
+        }
+
+        return $sniffedMime;
+    }
+
+    /**
+     * Returns true if a registered type requires SVG-style sanitization at finalize.
+     */
+    public function requiresSanitization(string $fileType): bool
+    {
+        return (bool) config("file_types.types.{$fileType}.upload.requires_sanitization", false);
+    }
 }

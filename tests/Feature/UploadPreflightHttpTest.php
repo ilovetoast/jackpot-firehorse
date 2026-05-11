@@ -85,7 +85,9 @@ class UploadPreflightHttpTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('batch_summary.accepted_count', 1);
         $response->assertJsonPath('batch_summary.rejected_count', 1);
-        $response->assertJsonPath('batch_summary.rejected_counts_by_code.dangerous_file_type', 1);
+        // FileTypeService::isUploadAllowed now emits structured codes like
+        // `blocked_executable` (was `dangerous_file_type`) — see config/file_types.php → blocked.executable.code_suffix
+        $response->assertJsonPath('batch_summary.rejected_counts_by_code.blocked_executable', 1);
         $this->assertNotEmpty($response->json('preflight_id'));
 
         $payload = app(UploadPreflightService::class)->getCachedPayload($response->json('preflight_id'));

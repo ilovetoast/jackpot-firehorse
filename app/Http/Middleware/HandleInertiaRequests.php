@@ -16,6 +16,7 @@ use App\Services\ImpersonationService;
 use App\Services\PlanService;
 use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
+use App\Support\JackpotConsoleRelease;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Middleware;
@@ -420,6 +421,10 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
+            /** Commit timestamp for authenticated console banner (UTC compact stamp + styled log). */
+            'jackpotConsole' => [
+                'commitIso8601' => JackpotConsoleRelease::committedAtIso8601(),
+            ],
             'privacy' => $this->buildPrivacySharedProps($request),
             'currentWorkspace' => $tenant ? [
                 'id' => (int) $tenant->id,
@@ -439,23 +444,15 @@ class HandleInertiaRequests extends Middleware
             ],
             'dam_file_types' => (function () {
                 $svc = app(FileTypeService::class);
-                $thumbMimes = $svc->getThumbnailCapabilityMimeTypes();
-                $thumbExts = $svc->getThumbnailCapabilityExtensions();
-                $uploadMimes = $svc->getAllRegisteredMimeTypes();
-                $uploadExts = $svc->getAllRegisteredExtensions();
-                sort($thumbMimes);
-                sort($thumbExts);
-                sort($uploadMimes);
-                sort($uploadExts);
+                $payload = $svc->getUploadRegistryForFrontend();
+                sort($payload['thumbnail_mime_types']);
+                sort($payload['thumbnail_extensions']);
+                sort($payload['upload_mime_types']);
+                sort($payload['upload_extensions']);
+                sort($payload['blocked_extensions']);
+                sort($payload['blocked_mime_types']);
 
-                return [
-                    'thumbnail_mime_types' => $thumbMimes,
-                    'thumbnail_extensions' => $thumbExts,
-                    'upload_mime_types' => $uploadMimes,
-                    'upload_extensions' => $uploadExts,
-                    'upload_accept' => $svc->buildHtmlAcceptAttribute($uploadMimes, $uploadExts),
-                    'thumbnail_accept' => $svc->buildHtmlAcceptAttribute($thumbMimes, $thumbExts),
-                ];
+                return $payload;
             })(),
             'video_ai' => [
                 'show_cost_in_drawer' => (bool) config('assets.video_ai.show_cost_in_drawer', false),

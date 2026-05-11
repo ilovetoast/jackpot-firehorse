@@ -8,6 +8,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
+        "start": "vite",
         "test:js": "node --test resources/js/utils/thumbnailModes.test.mjs resources/js/utils/executionThumbnailDisplay.test.mjs resources/js/utils/enhancedPreviewComparisonStorage.test.mjs resources/js/utils/assetCardEnhancedExecutionChrome.test.mjs resources/js/utils/executionEnhancedGridContainerClass.test.mjs resources/js/utils/studioCreativeSetAxisQuickTarget.test.mjs resources/js/utils/studioVersionRailHelpers.test.mjs resources/js/utils/studioVersionsReviewFlow.test.mjs resources/js/utils/studioVersionsHandoffHelpers.test.mjs resources/js/utils/studioVersionsExportNaming.test.mjs resources/js/utils/studioVersionsGenerationCartesian.test.mjs resources/js/utils/studioVersionFormatPresetGroups.test.mjs resources/js/utils/compositionExportInventory.test.mjs resources/js/utils/uploadQueueProgress.test.mjs resources/js/utils/assetCardVisualState.test.mjs resources/js/utils/getAssetPlaceholderTheme.test.mjs resources/js/utils/getAssetProcessingPlaceholderCopy.test.mjs resources/js/utils/uploadPreviewRegistry.test.mjs scripts/studio-canvas-export.test.mjs",
         "test:e2e": "playwright test"
     },

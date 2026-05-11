@@ -60,7 +60,7 @@ import {
     clearAllPendingFinalize,
 } from '../utils/uploadPreviewRegistry'
 import { shouldRegisterGridBlobPreview } from '../utils/browserGridBlobPreview'
-import { getUploadAcceptAttribute } from '../utils/damFileTypes'
+import { getUploadAcceptAttribute, decideClientUpload } from '../utils/damFileTypes'
 import BatchNamingBar from './Upload/BatchNamingBar'
 import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
@@ -1358,6 +1358,12 @@ export default function UploadAssetDialog({
         }
 
         // Create clean file entries for v2Files state
+        // Client-side allowlist gate: drag-and-drop bypasses the OS picker `accept`
+        // filter, so we re-run the registry-driven decision here against the same
+        // FileTypeService::isUploadAllowed table the server uses (synced via the
+        // dam_file_types Inertia prop). Blocked / coming-soon / unregistered files
+        // land as 'failed' immediately so the user sees a queue row with a clear
+        // reason — no network round-trip required.
         const newV2FileEntries = toAddFiles.map((file) => {
             // Generate UUID - crypto.randomUUID needs to be called with proper context
             let clientId
@@ -1375,21 +1381,38 @@ export default function UploadAssetDialog({
             // Windows: drag from an unextracted ZIP often yields a 0-byte or unreadable File
             const unreadableFromZip = file.size === 0
 
+            // Derive extension from the filename for the registry decision.
+            const lastDotIdx = file.name ? file.name.lastIndexOf('.') : -1
+            const ext = lastDotIdx > 0 ? file.name.slice(lastDotIdx + 1).toLowerCase() : ''
+            const decision = unreadableFromZip
+                ? { allowed: true } // empty-file branch already fails below
+                : decideClientUpload(file.type || null, ext)
+
+            const clientRejected = !decision.allowed
+
             return {
                 clientId,
                 file,
-                status: unreadableFromZip ? 'failed' : 'pending_preflight', // preflight → 'selected' | then upload lifecycle
-                progress: 0, // 0-100
-                uploadKey: null, // Set when upload completes
-                title: null, // Will be derived from filename, can be edited
-                resolvedFilename: null, // Will be derived initially, can be edited directly
-                metadataDraft: {}, // Per-file metadata overrides (empty = inherit global)
+                status: unreadableFromZip || clientRejected ? 'failed' : 'pending_preflight',
+                progress: 0,
+                uploadKey: null,
+                title: null,
+                resolvedFilename: null,
+                metadataDraft: {},
                 error: unreadableFromZip
                     ? {
-                        message:
-                            'This file is empty or could not be read. If it came from a ZIP archive, extract it to your computer first, then add the file again.',
-                        stage: 'upload',
-                    }
+                          message:
+                              'This file is empty or could not be read. If it came from a ZIP archive, extract it to your computer first, then add the file again.',
+                          stage: 'upload',
+                      }
+                    : clientRejected
+                    ? {
+                          message: decision.message,
+                          code: decision.code,
+                          // Stage 'preflight' so the queue row and Dev: Upload Diagnostics
+                          // panel group it with other allowlist rejections.
+                          stage: 'preflight',
+                      }
                     : null,
             }
         })
@@ -2058,26 +2081,40 @@ export default function UploadAssetDialog({
      */
     
     /**
-     * CLEAN UPLOADER V2 — Retry Upload (for stage === 'upload' failures)
-     * 
-     * Resets file to 'selected' status so coordinator can pick it up.
-     * Upload will restart automatically.
+     * CLEAN UPLOADER V2 — Retry Upload
+     *
+     * Resets the file to 'pending_preflight' (NOT 'selected') and re-runs
+     * runUploadPreflight on it. This guarantees that every retry walks the
+     * same gate ladder (client validate → preflight → initiate-batch →
+     * finalize content-sniff) as the original attempt.
+     *
+     * Why this matters: an earlier version reset directly to 'selected', which
+     * caused the queue worker to re-POST to /uploads/initiate-batch without a
+     * preflight_id. Combined with the historical lack of a server-side
+     * allowlist on initiate-batch, that was the documented "Retry bypasses
+     * preflight" exploit. The server gate now also rejects, but defense-in-
+     * depth keeps the client honest.
      */
     const retryUpload = useCallback((clientId) => {
         console.log('[RETRY_UPLOAD] Retrying upload', { clientId })
+        let entryToRetry = null
         setV2Files((prevFiles) =>
-            prevFiles.map((f) =>
-                f.clientId === clientId
-                    ? {
-                          ...f,
-                          status: 'selected',
-                          progress: 0,
-                          error: null,
-                      }
-                    : f
-            )
+            prevFiles.map((f) => {
+                if (f.clientId !== clientId) return f
+                const reset = {
+                    ...f,
+                    status: 'pending_preflight',
+                    progress: 0,
+                    error: null,
+                }
+                entryToRetry = reset
+                return reset
+            })
         )
-    }, [])
+        if (entryToRetry) {
+            void runUploadPreflight([entryToRetry])
+        }
+    }, [runUploadPreflight])
 
     /**
      * CLEAN UPLOADER V2 — Retry Finalize (for stage === 'finalize' failures)

@@ -25,6 +25,8 @@
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="DB_DATABASE" value="testing"/>
+        <!-- OpenAIProvider throws if empty; unit tests mock AI — value is not used for real API calls -->
+        <env name="OPENAI_API_KEY" value="phpunit-placeholder-not-a-real-key"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="MAIL_AUTOMATIONS_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

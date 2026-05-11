@@ -28,6 +28,26 @@ use Illuminate\Support\Facades\Log;
  */
 class AiMetadataGenerationService
 {
+    /** Max words per AI vision tag after canonicalization (server-side). */
+    protected const VISION_TAG_MAX_WORDS = 3;
+
+    /**
+     * Optional model output: silent classification before tagging. Parsed for sanitation only — not persisted.
+     *
+     * @var list<string>
+     */
+    protected const VISION_DETECTED_ASSET_TYPES = [
+        'ui_screenshot',
+        'document',
+        'product_photo',
+        'lifestyle_photo',
+        'packaging',
+        'logo_graphic',
+        'illustration',
+        'printed_layout',
+        'unknown',
+    ];
+
     protected AIProviderInterface $provider;
 
     protected string $defaultModel;
@@ -634,29 +654,34 @@ class AiMetadataGenerationService
         $prompt .= json_encode($fieldsJson, JSON_PRETTY_PRINT)."\n\n";
 
         $prompt .= "GENERAL TAGS (for search & discovery):\n";
-        $prompt .= "Provide concise tags (1–3 words each) that help users find this asset in the library.\n";
-        $prompt .= "Prefer concrete, searchable terms: visible products, packaging, beverages, printed copy, logos, props, location type, and composition when clear.\n";
-        $prompt .= "Do not use the tag \"photo shoot\" or \"photoshoot\" — category already covers photography; tag specific subjects, people, objects, and visible settings instead.\n";
-        $prompt .= "Do NOT use the tag \"model\" for illustrations, historical figures, silhouettes on labels, mannequins, or background artwork — only when a clearly identifiable live person is a deliberate photographic subject.\n";
-        $prompt .= "Do NOT use \"fashion\" unless clothing, footwear, or wearable apparel is clearly the main subject (not merely a premium layout, spirits, cosmetics, or packaging).\n";
-        $prompt .= "For sell sheets, one-sheets, shelf talkers, case cards, and product hero shots: tag the product type (e.g. bourbon, whiskey, bottle), layout role (sell sheet, product photography), and readable brand or product names — not genre guesses.\n";
-        $prompt .= "Use lowercase; use short phrases where helpful (e.g. \"on location\", \"product bottle\", \"sell sheet\"); avoid punctuation.\n";
-        $prompt .= "Do not repeat the category name unless it adds specificity.\n\n";
+        $prompt .= $this->promptSilentClassificationBlock();
+        $prompt .= "Tag only what the pixels support. First classify the asset silently, then choose tags that match that type.\n";
+        $prompt .= "- For UI screenshots, software screens, forms, dashboards, web pages, modals, settings, or app interfaces: tag the interface (e.g. screenshot, user interface, form, input field, button, table, navigation, modal, settings panel, dashboard, editor). Do NOT invent a physical photo shoot, studio, lighting, or location.\n";
+        $prompt .= "- For documents or scans: tag layout elements and document type when clear (e.g. document, text, table, heading).\n";
+        $prompt .= "- For real photographs or packaging/print graphics: tag visible subjects, objects, materials, and composition only when visually evident — not marketing guesses.\n";
+        $prompt .= "- Never use \"photo shoot\" or \"photoshoot\" as a tag.\n";
+        $prompt .= "- Do NOT use the tag \"model\" for illustrations, label art, silhouettes, mannequins, or UI avatars — only for a clearly identifiable live person as a photographic subject.\n";
+        $prompt .= "- Do NOT use \"fashion\" unless wearable apparel is clearly the main subject.\n";
+        $prompt .= "- Visible on-screen labels may be used as tags only when they name a real control, screen, or feature (not instruction echo).\n";
+        $prompt .= "- Use lowercase; short phrases (spaces allowed); avoid punctuation.\n";
+        $prompt .= "- Aim for 3–8 high-confidence tags when the image is rich; for simple UI screenshots or plain documents, 2–4 accurate tags is better than many guesses.\n";
+        $prompt .= "- Do not repeat the category name unless it adds specificity.\n\n";
 
         $prompt .= "REQUIREMENTS:\n";
         $prompt .= "- Only return fields/tags where confidence is >= {$minStr} ({$minStr} = 0–1 scale)\n";
         $prompt .= "- Include confidence score for each value/tag\n";
         $prompt .= "- If confidence is below {$minStr}, omit that field/tag\n";
         $prompt .= "- Field values must exactly match one of the allowed_values\n";
-        $prompt .= "- Tags must be lowercase; short phrases (spaces allowed) are OK\n";
-        $prompt .= "- Return JSON format with both 'fields' and 'tags' sections:\n";
+        $prompt .= "- Tags must be lowercase; at most three words per tag; short phrases (spaces allowed) are OK\n";
+        $prompt .= "- Return JSON with 'fields', optional 'detected_asset_type' (classification only — see SILENT CLASSIFICATION), and 'tags':\n";
         $prompt .= "{\n";
+        $prompt .= "  \"detected_asset_type\": \"product_photo\",\n";
         $prompt .= "  \"fields\": {\n";
-        $prompt .= "    \"photo_type\": {\"value\": \"lifestyle\", \"confidence\": 0.94}\n";
+        $prompt .= "    \"FIELD_KEY\": {\"value\": \"OPTION_FROM_ALLOWED_LIST\", \"confidence\": 0.94}\n";
         $prompt .= "  },\n";
-        $prompt .= "  \"tags\": []\n";
+        $prompt .= "  \"tags\": [{\"value\": \"example tag\", \"confidence\": 0.94}]\n";
         $prompt .= "}\n";
-        $prompt .= "(Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}. Use [] only when the image truly has no concrete searchable subjects. If people, products, locations, or objects are clearly visible, include several specific tags rather than leaving \"tags\" empty.)\n\n";
+        $prompt .= "(Omit \"detected_asset_type\" if unsure — then use \"unknown\". Populate \"tags\" with objects {\"value\": string, \"confidence\": number} only for terms at or above {$minStr}. Prefer fewer precise tags over many weak ones.)\n\n";
         $prompt .= 'Response:';
 
         return $prompt;
@@ -678,31 +703,35 @@ class AiMetadataGenerationService
             $prompt .= $libraryAddendum;
         }
 
+        $prompt .= $this->promptSilentClassificationBlock();
         $prompt .= "TAGGING RULES (STRICT):\n";
-        $prompt .= "- Never use \"photo shoot\" or \"photoshoot\" as a tag — redundant in photography libraries; use specific visible subjects instead\n";
-        $prompt .= "- Only include VISUALLY VERIFIABLE elements present in the image\n";
-        $prompt .= "- Do NOT infer intent, meaning, or marketing context\n";
-        $prompt .= "- Avoid abstract terms (e.g. \"modern\", \"professional\", \"aesthetic\", \"branding\")\n";
-        $prompt .= "- Avoid subjective descriptors (e.g. \"beautiful\", \"clean\", \"bold\")\n";
-        $prompt .= "- Prefer concrete nouns and simple descriptors\n";
-        $prompt .= "- Tags should help someone FIND this exact image\n";
-        $prompt .= "- Never use \"model\" for label art, engravings, historical portraits in graphics, or packaging silhouettes — only for an obvious live human subject in the photograph\n";
-        $prompt .= "- Never use \"fashion\" unless wearable apparel is clearly dominant; premium packaging, spirits, or beauty products are not \"fashion\" by default\n";
-        $prompt .= "- For printed marketing and product layouts (sell sheets, case cards, posters): name visible product categories (e.g. spirits, bourbon) and objects (bottle, label) instead of vague lifestyle genres\n\n";
+        $prompt .= "- First determine the visual asset type (silent classification), then output tags that fit that type only.\n";
+        $prompt .= "- Never use \"photo shoot\" or \"photoshoot\" as a tag.\n";
+        $prompt .= "- Only include VISUALLY VERIFIABLE elements present in the image.\n";
+        $prompt .= "- Do NOT infer intent, meaning, or marketing context.\n";
+        $prompt .= "- Avoid abstract or subjective terms (e.g. \"modern\", \"professional\", \"aesthetic\", \"beautiful\", \"branding\").\n";
+        $prompt .= "- Prefer concrete nouns and simple descriptors that help someone FIND this exact image.\n";
+        $prompt .= "- For UI screenshots, software screens, forms, dashboards, web pages, modals, settings, or app interfaces: tag the screen and controls (screenshot, user interface, form, input field, button, settings panel, dashboard, table, navigation, modal, editor, etc. when visible). Do NOT tag studio, lighting setup, studio background, product photography, lifestyle, indoor/outdoor, model, fashion, or physical setting unless the image is clearly a photograph of a real scene — not a picture of a screen.\n";
+        $prompt .= "- For documents or scans: tag document structure and visible content type, not imagined photo-studio context.\n";
+        $prompt .= "- For real photographs, packaging, logos, illustrations, or printed layouts: tag visible subjects and materials only when evident from pixels.\n";
+        $prompt .= "- Never use \"model\" for label art, engravings, graphics, or packaging silhouettes — only for an obvious live human subject in a photograph.\n";
+        $prompt .= "- Never use \"fashion\" unless wearable apparel is clearly dominant.\n";
+        $prompt .= "- Visible UI text may be a tag only when it names a real on-screen control or feature (not words copied from these instructions).\n\n";
 
-        $prompt .= "TAG COVERAGE (describe only what is visible—do not copy hypothetical examples from instructions):\n";
-        $prompt .= "- Objects and props actually in frame\n";
-        $prompt .= "- People when clear (e.g. solo vs group; avoid vague labels unless obvious)\n";
-        $prompt .= "- Setting or location type only when the environment is evident (indoor/outdoor, studio, office, gym, etc.)\n";
-        $prompt .= "- Activity only when unambiguous from pixels (do not guess)\n";
-        $prompt .= "- Asset type when obvious (logo, product, screenshot, document, etc.)\n";
-        $prompt .= "- Composition when clear (close-up, wide shot, etc.)\n\n";
+        $prompt .= "TAG COVERAGE (only what is visible — do not copy examples from this prompt as tags):\n";
+        $prompt .= "- Primary asset kind (interface, document, photograph, packaging, logo mark, illustration, printed piece) when obvious.\n";
+        $prompt .= "- Dominant objects, text blocks, UI controls, people, or environmental cues only when clearly shown.\n";
+        $prompt .= "- Activity or setting only when unambiguous (do not guess).\n\n";
 
         $prompt .= "NORMALIZATION RULES:\n";
         $prompt .= "- Use lowercase\n";
-        $prompt .= "- 1–3 words max per tag\n";
-        $prompt .= "- Do NOT include synonyms or duplicates (e.g. choose \"man\" OR \"person\", not both)\n";
+        $prompt .= "- At most three words per tag\n";
+        $prompt .= "- Do NOT include synonyms or duplicates\n";
         $prompt .= "- Do NOT repeat the category unless it adds specificity\n\n";
+
+        $prompt .= "TAG COUNT:\n";
+        $prompt .= "- Aim for 3–8 high-confidence tags when the image is visually rich.\n";
+        $prompt .= "- For simple UI screenshots or documents, 2–4 accurate tags is better than many uncertain tags.\n\n";
 
         $prompt .= "CONFIDENCE:\n";
         $prompt .= "- Confidence represents visual certainty (not guess or interpretation)\n";
@@ -711,15 +740,34 @@ class AiMetadataGenerationService
 
         $prompt .= "OUTPUT FORMAT:\n";
         $prompt .= "{\n";
+        $prompt .= "  \"detected_asset_type\": \"ui_screenshot\",\n";
         $prompt .= "  \"fields\": {},\n";
         $prompt .= "  \"tags\": []\n";
         $prompt .= "}\n";
-        $prompt .= "Populate \"tags\" with objects {\"value\": string, \"confidence\": number} derived only from the image—never placeholder or illustrative strings from this prompt.\n\n";
+        $prompt .= "Populate \"tags\" with objects {\"value\": string, \"confidence\": number} derived only from the image—never placeholder strings from this prompt.\n";
+        $prompt .= "Use \"detected_asset_type\" exactly as in SILENT CLASSIFICATION, or omit it / use \"unknown\" if uncertain.\n\n";
 
-        $prompt .= "If the image clearly shows concrete subjects, include multiple specific tags (not an empty array) whenever they meet the confidence rule.\n";
         $prompt .= "Return ONLY valid JSON. No explanation.\n";
 
         return $prompt;
+    }
+
+    /**
+     * Shared instruction: silent asset classification (not stored as a tag; used to keep tagging consistent).
+     */
+    protected function promptSilentClassificationBlock(): string
+    {
+        return "SILENT CLASSIFICATION (required before choosing tags — internal only, not a tag):\n"
+            ."First, pick exactly one value for \"detected_asset_type\" in the JSON (you may omit the key only if truly uncertain, then use \"unknown\"):\n"
+            ."- ui_screenshot — software UI, form, dashboard, web/app screen, modal, settings page\n"
+            ."- document — scan, PDF page, letter, memo, text-heavy page\n"
+            ."- product_photo — physical product as the main photographic subject\n"
+            ."- lifestyle_photo — people/scene as the main photographic subject\n"
+            ."- packaging — product packaging, labels, structural pack shots\n"
+            ."- logo_graphic — logo, mark, iconography as the main subject\n"
+            ."- illustration — drawn/vector artwork as the main subject\n"
+            ."- printed_layout — poster, flyer, ad layout, sell sheet (printed marketing piece)\n"
+            ."- unknown — cannot determine reliably\n\n";
     }
 
     /**
@@ -783,7 +831,7 @@ class AiMetadataGenerationService
             return 'For free-form tags, emphasize visible product, packaging, beverage type, print format (sell sheet, poster, case card), and readable brand cues — avoid vague lifestyle labels unless clearly shown.';
         }
 
-        return 'Include terms users might search for: subject, setting, and notable objects or people when clearly visible; avoid vague genre labels unless they match what is plainly in the image.';
+        return 'For free-form tags in product, marketing, graphic, or print categories, prefer what is visibly on the asset (product, packaging, format, readable type) rather than vague genre labels unless plainly shown.';
     }
 
     /**
@@ -806,6 +854,8 @@ class AiMetadataGenerationService
             'passed_confidence_count' => 0,
             'rejected_low_confidence_count' => 0,
             'rejected_blocklist_count' => 0,
+            'rejected_sanitizer_count' => 0,
+            'rejected_duplicate_count' => 0,
         ];
 
         try {
@@ -818,6 +868,9 @@ class AiMetadataGenerationService
 
                 return ['candidates' => [], 'tags' => [], 'tag_parse_stats' => $tagParseStats];
             }
+
+            $detectedAssetType = $this->parseDetectedAssetTypeFromVisionJson($data);
+            $seenCanonicalTags = [];
 
             // Parse structured fields
             $fieldsData = $data['fields'] ?? [];
@@ -890,13 +943,30 @@ class AiMetadataGenerationService
                         continue;
                     }
 
-                    $this->acceptVisionTagCandidate($asset->id, $tagValue, $confidence, $minConf, $tags, $tagParseStats);
+                    $this->acceptVisionTagCandidate(
+                        $asset->id,
+                        $tagValue,
+                        $confidence,
+                        $minConf,
+                        $tags,
+                        $tagParseStats,
+                        $detectedAssetType,
+                        $seenCanonicalTags
+                    );
                 }
             }
 
             // Models often return [] or omit tags under strict confidence rules, or use alternate JSON keys / a map.
             if (($tagParseStats['raw_tag_count'] ?? 0) === 0) {
-                $this->parseTagsFromAlternateVisionJsonShapes($data, $minConf, $asset->id, $tags, $tagParseStats);
+                $this->parseTagsFromAlternateVisionJsonShapes(
+                    $data,
+                    $minConf,
+                    $asset->id,
+                    $tags,
+                    $tagParseStats,
+                    $detectedAssetType,
+                    $seenCanonicalTags
+                );
             }
         } catch (\Exception $e) {
             Log::error('[AiMetadataGenerationService] Failed to parse response', [
@@ -914,7 +984,159 @@ class AiMetadataGenerationService
     }
 
     /**
+     * Optional vision JSON key: silent asset classification (not persisted).
+     */
+    protected function parseDetectedAssetTypeFromVisionJson(array $data): ?string
+    {
+        if (! array_key_exists('detected_asset_type', $data)) {
+            return null;
+        }
+        $v = $data['detected_asset_type'];
+        if (! is_string($v)) {
+            return null;
+        }
+        $v = strtolower(trim($v));
+        if ($v === '' || $v === 'unknown') {
+            return null;
+        }
+
+        return in_array($v, self::VISION_DETECTED_ASSET_TYPES, true) ? $v : null;
+    }
+
+    /**
+     * Canonical form for vision tag comparison and storage (hyphens/underscores → spaces, punctuation stripped).
+     */
+    protected function canonicalizeAiVisionTagString(string $tag): string
+    {
+        $tag = strtolower(trim($tag));
+        $tag = str_replace(['_', '-'], ' ', $tag);
+        $tag = preg_replace('/[^a-z0-9\s]+/', '', $tag);
+        $tag = preg_replace('/\s+/', ' ', $tag);
+        $tag = trim((string) $tag);
+        if (strlen($tag) > 1 && substr($tag, -1) === 's' && substr($tag, -2, 1) !== 's') {
+            $tag = substr($tag, 0, -1);
+        }
+        $tag = preg_replace('/\s+/', ' ', trim($tag));
+
+        return $tag;
+    }
+
+    protected function visionTagWordCount(string $canonicalLower): int
+    {
+        if ($canonicalLower === '') {
+            return 0;
+        }
+
+        return count(preg_split('/\s+/', $canonicalLower, -1, PREG_SPLIT_NO_EMPTY));
+    }
+
+    /**
+     * Instruction-like strings echoed as tags.
+     */
+    protected function visionTagLooksLikePromptLeakage(string $canonicalLower): bool
+    {
+        $fragments = [
+            'allowed_values',
+            'allowed values',
+            'peer examples',
+            'vocabulary hints',
+            'anti-overfit',
+            'detected_asset_type',
+            'silent classification',
+            'structured fields',
+            'illustrative string',
+            'option from allowed list',
+            'field key',
+            'example tag',
+            'populate tags',
+            'json format',
+            'requirement',
+        ];
+        foreach ($fragments as $f) {
+            if (str_contains($canonicalLower, $f)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Photo-world tags inappropriate for flat UI or document captures.
+     */
+    protected function isPhotoWorldSubjectTagForUiDocumentScreenshot(string $c): bool
+    {
+        foreach (['lighting setup', 'studio lighting', 'product photography', 'photo shoot'] as $p) {
+            if (str_contains($c, $p)) {
+                return true;
+            }
+        }
+        if (str_contains($c, 'photoshoot')) {
+            return true;
+        }
+        if (str_contains($c, 'studio')) {
+            return true;
+        }
+        if (preg_match('/\bmodel\b/u', $c) === 1) {
+            return true;
+        }
+        if (preg_match('/\bfashion\b/u', $c) === 1) {
+            return true;
+        }
+        if (preg_match('/\blifestyle\b/u', $c) === 1) {
+            return true;
+        }
+        if (preg_match('/\bindoor\b/u', $c) === 1) {
+            return true;
+        }
+        if (preg_match('/\boutdoor\b/u', $c) === 1) {
+            return true;
+        }
+        if (str_contains($c, 'close up') || str_contains($c, 'closeup')) {
+            return true;
+        }
+        if (preg_match('/\bbackground\b/u', $c) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function shouldRejectPhotoWorldTagForUiOrDocument(?string $detectedAssetType, string $canonicalLower): bool
+    {
+        if (! in_array($detectedAssetType, ['ui_screenshot', 'document'], true)) {
+            return false;
+        }
+
+        return $this->isPhotoWorldSubjectTagForUiDocumentScreenshot($canonicalLower);
+    }
+
+    /**
+     * @return string|null rejection reason code, or null if passed sanitizer gates (blocklist handled separately)
+     */
+    protected function getVisionTagSanitizerRejectionReason(
+        string $canonicalLower,
+        ?string $detectedAssetType
+    ): ?string {
+        if ($canonicalLower === '') {
+            return 'empty_after_normalize';
+        }
+        if ($this->visionTagWordCount($canonicalLower) > self::VISION_TAG_MAX_WORDS) {
+            return 'too_many_words';
+        }
+        if ($this->visionTagLooksLikePromptLeakage($canonicalLower)) {
+            return 'prompt_leakage';
+        }
+        if ($this->shouldRejectPhotoWorldTagForUiOrDocument($detectedAssetType, $canonicalLower)) {
+            return 'photo_world_tag_for_ui_or_document';
+        }
+
+        return null;
+    }
+
+    /**
      * @param  array<string, int|float>  $tagParseStats
+     * @param  array<string, true>  $seenCanonicalTags
      * @param  list<array{value: string, confidence: float}>  $tags
      */
     protected function acceptVisionTagCandidate(
@@ -923,7 +1145,9 @@ class AiMetadataGenerationService
         mixed $confidence,
         float $minConf,
         array &$tags,
-        array &$tagParseStats
+        array &$tagParseStats,
+        ?string $detectedAssetType,
+        array &$seenCanonicalTags
     ): void {
         $tagParseStats['raw_tag_count']++;
 
@@ -945,35 +1169,71 @@ class AiMetadataGenerationService
             return;
         }
 
-        $normalizedTag = $this->normalizeTag($tagValue);
-        if ($normalizedTag === '') {
-            $tagParseStats['rejected_low_confidence_count']++;
+        $canonicalTag = $this->canonicalizeAiVisionTagString($tagValue);
+        $sanitizerReason = $this->getVisionTagSanitizerRejectionReason($canonicalTag, $detectedAssetType);
+        if ($sanitizerReason !== null) {
+            $tagParseStats['rejected_sanitizer_count'] = (int) ($tagParseStats['rejected_sanitizer_count'] ?? 0) + 1;
+            Log::debug('[AiMetadataGenerationService] Vision tag sanitizer rejected', [
+                'asset_id' => $assetId,
+                'reason' => $sanitizerReason,
+                'original' => $tagValue,
+                'normalized' => $canonicalTag,
+                'detected_asset_type' => $detectedAssetType,
+            ]);
 
             return;
         }
 
-        if ($this->isVisionTagBlocklisted($normalizedTag)) {
+        if ($this->isVisionTagBlocklisted($canonicalTag)) {
             $tagParseStats['rejected_blocklist_count'] = (int) ($tagParseStats['rejected_blocklist_count'] ?? 0) + 1;
-            Log::debug('[AiMetadataGenerationService] Blocklisted vision tag skipped', [
+            Log::debug('[AiMetadataGenerationService] Vision tag sanitizer rejected', [
                 'asset_id' => $assetId,
-                'tag' => $normalizedTag,
+                'reason' => 'blocklist',
+                'original' => $tagValue,
+                'normalized' => $canonicalTag,
+                'detected_asset_type' => $detectedAssetType,
             ]);
 
             return;
         }
 
-        if ($this->isRedundantTag($normalizedTag)) {
-            Log::debug('[AiMetadataGenerationService] Redundant tag skipped', [
+        if ($this->isRedundantTag($canonicalTag)) {
+            Log::debug('[AiMetadataGenerationService] Vision tag sanitizer rejected', [
                 'asset_id' => $assetId,
-                'tag' => $normalizedTag,
+                'reason' => 'redundant_photoshoot',
+                'original' => $tagValue,
+                'normalized' => $canonicalTag,
+                'detected_asset_type' => $detectedAssetType,
             ]);
 
             return;
         }
+
+        if (isset($seenCanonicalTags[$canonicalTag])) {
+            $tagParseStats['rejected_duplicate_count'] = (int) ($tagParseStats['rejected_duplicate_count'] ?? 0) + 1;
+            Log::debug('[AiMetadataGenerationService] Vision tag sanitizer rejected', [
+                'asset_id' => $assetId,
+                'reason' => 'duplicate',
+                'original' => $tagValue,
+                'normalized' => $canonicalTag,
+                'detected_asset_type' => $detectedAssetType,
+            ]);
+
+            return;
+        }
+
+        Log::debug('[AiMetadataGenerationService] Vision tag sanitizer accepted', [
+            'asset_id' => $assetId,
+            'original' => $tagValue,
+            'normalized' => $canonicalTag,
+            'confidence' => (float) $confidence,
+            'detected_asset_type' => $detectedAssetType,
+        ]);
 
         $tagParseStats['passed_confidence_count']++;
+        $seenCanonicalTags[$canonicalTag] = true;
         $tags[] = [
-            'value' => $normalizedTag,
+            'value' => $canonicalTag,
             'confidence' => (float) $confidence,
         ];
     }
@@ -983,6 +1243,7 @@ class AiMetadataGenerationService
      *
      * @param  array<string, mixed>  $data
      * @param  array<string, int|float>  $tagParseStats
+     * @param  array<string, true>  $seenCanonicalTags
      * @param  list<array{value: string, confidence: float}>  $tags
      */
     protected function parseTagsFromAlternateVisionJsonShapes(
@@ -990,7 +1251,9 @@ class AiMetadataGenerationService
         float $minConf,
         string $assetId,
         array &$tags,
-        array &$tagParseStats
+        array &$tagParseStats,
+        ?string $detectedAssetType,
+        array &$seenCanonicalTags
     ): void {
         $rows = [];
 
@@ -1029,7 +1292,16 @@ class AiMetadataGenerationService
         }
 
         foreach ($rows as $row) {
-            $this->acceptVisionTagCandidate($assetId, $row['value'], $row['confidence'], $minConf, $tags, $tagParseStats);
+            $this->acceptVisionTagCandidate(
+                $assetId,
+                $row['value'],
+                $row['confidence'],
+                $minConf,
+                $tags,
+                $tagParseStats,
+                $detectedAssetType,
+                $seenCanonicalTags
+            );
         }
     }
 
@@ -1043,29 +1315,13 @@ class AiMetadataGenerationService
     }
 
     /**
-     * Normalize tag: lowercase, singular, no punctuation.
+     * Legacy alias for vision-tag canonicalization ({@see canonicalizeAiVisionTagString}).
      *
      * @return string Normalized tag
      */
     protected function normalizeTag(string $tag): string
     {
-        // Convert to lowercase
-        $tag = strtolower(trim($tag));
-
-        // Remove punctuation (keep alphanumeric and spaces)
-        $tag = preg_replace('/[^a-z0-9\s]/', '', $tag);
-
-        // Convert to singular (basic plural removal - could be enhanced)
-        // Remove trailing 's' if word is plural (simple heuristic)
-        if (strlen($tag) > 1 && substr($tag, -1) === 's' && substr($tag, -2, 1) !== 's') {
-            $tag = substr($tag, 0, -1);
-        }
-
-        // Remove extra spaces and trim
-        $tag = preg_replace('/\s+/', ' ', $tag);
-        $tag = trim($tag);
-
-        return $tag;
+        return $this->canonicalizeAiVisionTagString($tag);
     }
 
     /**

@@ -295,7 +295,7 @@ export default function ManageStructureWorkspace({
                         </h2>
                         <p className="mt-1 text-sm leading-snug text-slate-600">
                             {hubLayout
-                                ? 'Choose a folder. Drag to reorder.'
+                                ? 'Choose a folder. Drag to reorder. Use the eye to hide a folder from library sidebars; use the (i) for a quick field schema.'
                                 : 'Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden folders are below.'}
                         </p>
                     </div>

@@ -1,97 +1,147 @@
 /**
- * 90s BBS / ANSI-art style console welcome — fires once per login session (see maybeLogJackpotConsoleBanner).
+ * Jackpot console banner: slot-machine ASCII + deploy stamp.
+ *
+ * Stamp uses the latest git commit time (ISO-8601) when Laravel shares it:
+ * `.release-info.json`, `APP_BUILD_TIME` (see config/jackpot_console.php), or `git log -1`
+ * on local/staging when `.git` exists. Otherwise falls back to this browser’s local clock
+ * and prefixes `local ·` in the badge.
+ *
+ * The version line is printed with %c (black background, white monospace text).
  */
 
-const SESSION_KEY = 'jackpot_console_logged_uid'
-
-/** Fallback when sessionStorage is blocked (private mode). */
-let memoryLoggedUid = null
-
-const BANNER_LINES = [
-    '░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░',
-    '░░                                                                ░░',
-    '░░  ███████╗ █████╗  ██████╗██╗  ██╗██████╗  ██████╗ ████████╗  ░░',
-    '░░  ██╔════╝██╔══██╗██╔════╝██║ ██╔╝██╔══██╗██╔═══██╗╚══██╔══╝  ░░',
-    '░░  ███████╗███████║██║     █████╔╝ ██████╔╝██║   ██║   ██║     ░░',
-    '░░  ╚════██║██╔══██║██║     ██╔═██╗ ██╔═══╝ ██║   ██║   ██║     ░░',
-    '░░  ███████║██║  ██║╚██████╗██║  ██╗██║     ╚██████╔╝   ██║     ░░',
-    '░░  ╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝      ╚═════╝    ╚═╝     ░░',
-    '░░                                                                ░░',
-    '░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░',
-]
-
-const TAGLINE = '  · · ·  WELCOME TO JACKPOT  · · ·  '
-
-const STYLES = {
-    frame:
-        'color: #9333ea; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.12; font-weight: bold;',
-    logo: 'color: #22d3ee; font-weight: bold; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.12; text-shadow: 0 0 8px #06b6d4, 0 0 2px #f0abfc;',
-    logoHot:
-        'color: #f472b6; font-weight: bold; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.12; text-shadow: 0 0 6px #db2777;',
-    tagline:
-        'color: #fde047; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: bold; letter-spacing: 0.12em; text-shadow: 1px 1px 0 #ca8a04;',
-    sub:
-        'color: #4ade80; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; font-style: italic;',
+function pad2(n) {
+    return String(n).padStart(2, '0')
 }
 
-export function logJackpotConsoleBanner() {
+/** @deprecated Use {@link formatJackpotConsoleVersionLocal} — kept for any external imports. */
+export function formatJackpotConsoleVersion(date = new Date()) {
+    return formatJackpotConsoleVersionLocal(date)
+}
+
+/** Compact UTC stamp from an ISO-8601 instant (git %cI, release manifest, APP_BUILD_TIME). */
+export function formatJackpotConsoleVersionUtc(date) {
+    const mm = pad2(date.getUTCMonth() + 1)
+    const dd = pad2(date.getUTCDate())
+    const yyyy = String(date.getUTCFullYear())
+    const hh = pad2(date.getUTCHours())
+    const min = pad2(date.getUTCMinutes())
+    return `v:${mm}${dd}${yyyy}:${hh}${min}`
+}
+
+/** Local wall-clock compact stamp (dev fallback when no deploy metadata). */
+export function formatJackpotConsoleVersionLocal(date = new Date()) {
+    const mm = pad2(date.getMonth() + 1)
+    const dd = pad2(date.getDate())
+    const yyyy = String(date.getFullYear())
+    const hh = pad2(date.getHours())
+    const min = pad2(date.getMinutes())
+    return `v:${mm}${dd}${yyyy}:${hh}${min}`
+}
+
+export function formatVersionLabelFromCommitIso(iso) {
+    if (!iso || typeof iso !== 'string') {
+        return null
+    }
+    const d = new Date(iso.trim())
+    if (Number.isNaN(d.getTime())) {
+        return null
+    }
+    return formatJackpotConsoleVersionUtc(d)
+}
+
+const VERSION_BADGE_STYLE =
+    'background:#000;color:#fff;font-weight:700;padding:4px 12px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:11px;letter-spacing:0.03em'
+
+const LOCAL_HINT_STYLE = 'color:#6b7280;font-size:10px;margin-top:2px'
+
+/**
+ * Four “reels” like the JACKPOT wordmark: top J A C K, bottom P O T, last cell = cherry (@@).
+ * Monospace only — tuned for ~62–72 column devtools.
+ */
+const BANNER_LINES = [
+    '',
+    '                         *  J A C K  ·  P O T  *',
+    '                 77777777777777777777777777777777777777777777777',
+    '                 +---------+ +---------+ +---------+ +---------+',
+    '                 |    J    | |    A    | |    C    | |    K    |',
+    '                 |    P    | |    O    | |    T    | |   @@    |',
+    '                 +---------+ +---------+ +---------+ +---------+',
+    '                 77777777777777777777777777777777777777777777777',
+    '                            @ @   777   @ @',
+    '',
+]
+
+let cachedCommitIso = null
+
+function resolveVersionBadge(sharedPayload) {
+    const iso = sharedPayload?.commitIso8601 ?? cachedCommitIso
+    if (iso) {
+        cachedCommitIso = iso
+        const label = formatVersionLabelFromCommitIso(iso)
+        if (label) {
+            return { badgeText: `  ${label} UTC  `, hint: null }
+        }
+    }
+    const local = formatJackpotConsoleVersionLocal()
+    return {
+        badgeText: `  local · ${local}  `,
+        hint: 'No commit time from the server — using your computer’s clock. Set APP_BUILD_TIME or .release-info.json on deploy.',
+    }
+}
+
+function getJpReleaseString() {
+    if (cachedCommitIso) {
+        const label = formatVersionLabelFromCommitIso(cachedCommitIso)
+        if (label) {
+            return `${label} UTC`
+        }
+    }
+    return `local · ${formatJackpotConsoleVersionLocal()}`
+}
+
+if (typeof window !== 'undefined') {
+    try {
+        Object.defineProperty(window, '__jp_release', {
+            get: () => getJpReleaseString(),
+            enumerable: true,
+            configurable: true,
+        })
+    } catch {
+        window.__jp_release = getJpReleaseString()
+    }
+}
+
+export function logJackpotConsoleBanner(sharedPayload = null) {
     if (typeof console === 'undefined' || typeof window === 'undefined') {
         return
     }
 
-    let glyphRow = 0
     for (const line of BANNER_LINES) {
-        if (!line.includes('█')) {
-            console.log(`%c${line}`, STYLES.frame)
-            continue
-        }
-        console.log(`%c${line}`, glyphRow % 2 === 0 ? STYLES.logo : STYLES.logoHot)
-        glyphRow += 1
+        console.log(line)
     }
-    console.log(`%c${TAGLINE}`, STYLES.tagline)
-    console.log('%c  // *** SESSION OK ***  zmodem not required  ·  56k certified', STYLES.sub)
+
+    const { badgeText, hint } = resolveVersionBadge(sharedPayload)
+    console.log('%c' + badgeText, VERSION_BADGE_STYLE)
+    if (hint) {
+        console.log('%c' + hint, LOCAL_HINT_STYLE)
+    }
 }
 
 /**
- * Show banner when user is authenticated; clear session marker when logged out.
- * Same browser tab: once per login (cleared on logout so re-login shows again).
+ * While logged in: print banner on every Inertia navigation (every “page”).
  */
 export function maybeLogJackpotConsoleBanner(pageProps) {
     if (typeof window === 'undefined' || !pageProps || typeof pageProps !== 'object') {
         return
     }
-    // Avoid clearing session when finish fires before props are available (no shared `auth` yet).
     if (!('auth' in pageProps)) {
         return
     }
 
     const user = pageProps.auth?.user
     if (!user) {
-        memoryLoggedUid = null
-        try {
-            sessionStorage.removeItem(SESSION_KEY)
-        } catch {
-            /* private mode / blocked storage */
-        }
         return
     }
 
-    const uid = String(user.id)
-    let stored = null
-    try {
-        stored = sessionStorage.getItem(SESSION_KEY)
-    } catch {
-        /* ignore */
-    }
-    if (stored === uid || memoryLoggedUid === uid) {
-        return
-    }
-    try {
-        sessionStorage.setItem(SESSION_KEY, uid)
-    } catch {
-        /* ignore */
-    }
-    memoryLoggedUid = uid
-
-    logJackpotConsoleBanner()
+    logJackpotConsoleBanner(pageProps.jackpotConsole ?? null)
 }

@@ -1,6 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react'
 import { router, Link } from '@inertiajs/react'
-import { ArrowPathIcon, ChevronDownIcon, FolderIcon, LockClosedIcon, PlusIcon } from '@heroicons/react/24/outline'
+import {
+    ArrowPathIcon,
+    ChevronDownIcon,
+    Cog6ToothIcon,
+    FolderIcon,
+    LockClosedIcon,
+    PhotoIcon,
+    PlusIcon,
+} from '@heroicons/react/24/outline'
 import ConfirmDialog from '../ConfirmDialog'
 import MetadataFieldModal from '../MetadataFieldModal'
 import { productButtonPrimary } from '../../components/brand-workspace/brandWorkspaceTokens'
@@ -33,11 +41,410 @@ function fieldTitle(field, primaryTypeFieldKey = null) {
     return field.label || field.system_label || k || 'Unnamed Field'
 }
 
+function normalizeFieldLabelCompare(s) {
+    return String(s || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+}
+
+/** True if this folder’s field list already includes a match (by row title or snake_case key). */
+function quickSuggestionIsTaken(suggestionLabel, rows, primaryTypeKey) {
+    const target = normalizeFieldLabelCompare(suggestionLabel)
+    if (!target) return false
+    const keyGuess = target.replace(/ /g, '_')
+    for (const row of rows) {
+        const f = row.field
+        const k = String(f.key || f.field_key || '').toLowerCase()
+        if (k && k === keyGuess) return true
+        if (normalizeFieldLabelCompare(fieldTitle(f, primaryTypeKey)) === target) return true
+    }
+    return false
+}
+
 function sortRowsByFieldName(rows, primaryTypeKey) {
     return [...rows].sort((a, b) =>
         fieldTitle(a.field, primaryTypeKey).localeCompare(fieldTitle(b.field, primaryTypeKey), undefined, {
             sensitivity: 'base',
         })
+    )
+}
+
+/** Collapsible field list — parent should set `key={...}` when the folder changes so defaults reapply. */
+function FieldAccordion({ panelId, title, count, defaultExpanded, subtle, children }) {
+    const [open, setOpen] = useState(defaultExpanded)
+    return (
+        <div
+            className={`overflow-hidden rounded-xl border ${subtle ? 'border-slate-200/80 bg-slate-50/25' : 'border-slate-200/90 bg-white shadow-sm'}`}
+        >
+            <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={panelId}
+                onClick={() => setOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 sm:px-4"
+            >
+                <span className="min-w-0 text-sm font-semibold text-slate-900">
+                    {title}
+                    <span className="font-normal text-slate-500"> · {count}</span>
+                </span>
+                <ChevronDownIcon
+                    className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${
+                        open ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden
+                />
+            </button>
+            <div
+                id={panelId}
+                role="region"
+                className={open ? 'border-t border-slate-200/80 px-3 pb-3 pt-2 sm:px-4' : 'hidden'}
+            >
+                {children}
+            </div>
+        </div>
+    )
+}
+
+/** Preset starters: label + default list type (dropdown can be changed per row before click). */
+const QUICK_FIELD_EXAMPLES = [
+    { label: 'SKU', defaultType: 'select' },
+    { label: 'Product', defaultType: 'multiselect', hint: 'Multi-select · channels, markets, regions' },
+    { label: 'Department', defaultType: 'select' },
+    { label: 'Usage Rights', defaultType: 'select' },
+    { label: 'Expiration Date', defaultType: 'select' },
+    { label: 'Subject', defaultType: 'select' },
+]
+
+const QUICK_TYPE_OPTIONS = [
+    { value: 'select', short: 'Single-select' },
+    { value: 'multiselect', short: 'Multi-select' },
+]
+
+const QUICK_GUIDE_PANEL_ID = 'manage-fields-quick-guide-panel'
+
+/** Collapsible 1-2-3 for Manage → Fields; starts closed with a short “learn more” invite. */
+function ManageFieldsQuickGuide() {
+    const [expanded, setExpanded] = useState(false)
+
+    const steps = [
+        {
+            n: 1,
+            Icon: FolderIcon,
+            title: 'Folder first',
+            body: (
+                <>
+                    Fields belong to one folder. Add or rename folders in{' '}
+                    <Link
+                        href={MANAGE_CATEGORIES_URL}
+                        className="font-medium text-[var(--wb-link)] underline decoration-[color:color-mix(in_srgb,var(--wb-accent)_45%,transparent)] underline-offset-2 hover:opacity-90"
+                    >
+                        Manage → Categories
+                    </Link>
+                    , then pick it in this hub.
+                </>
+            ),
+        },
+        {
+            n: 2,
+            Icon: PhotoIcon,
+            title: 'Create fields',
+            body: (
+                <>
+                    <span className="font-medium text-slate-800">Create field</span> or{' '}
+                    <span className="font-medium text-slate-800">Add field</span>, then pick types in the editor (text,
+                    lists, dates, yes/no, …). Metadata describes assets; thumbnails come from the file.
+                </>
+            ),
+        },
+        {
+            n: 3,
+            Icon: Cog6ToothIcon,
+            title: 'Turn on & configure',
+            body: (
+                <>
+                    Set each row <span className="font-medium text-slate-800">On</span> so it shows on upload, in the
+                    asset drawer, and in filters where supported. <span className="font-medium text-slate-800">Configure</span>{' '}
+                    edits list values, descriptions, and visibility.
+                </>
+            ),
+        },
+    ]
+
+    return (
+        <section
+            className="overflow-hidden rounded-xl border border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)] bg-gradient-to-br from-[color:color-mix(in_srgb,var(--wb-accent)_7%,white)] via-white to-slate-50/90 shadow-sm ring-1 ring-black/[0.02]"
+            aria-label="Quick guide: folders and fields"
+        >
+            <button
+                type="button"
+                id="manage-fields-quick-guide-trigger"
+                aria-expanded={expanded}
+                aria-controls={QUICK_GUIDE_PANEL_ID}
+                onClick={() => setExpanded((v) => !v)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-[color:color-mix(in_srgb,var(--wb-accent)_4%,white)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 sm:px-4 sm:py-3.5"
+            >
+                <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--wb-accent)]">
+                        Quick guide
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-900 sm:text-base">
+                        How folders &amp; fields work
+                    </p>
+                    <p className="mt-0.5 text-xs leading-snug text-slate-600">
+                        {expanded
+                            ? 'Three short steps below — click to collapse anytime.'
+                            : 'New here? Expand for a 3-step walkthrough (folder → create → turn on).'}
+                    </p>
+                </div>
+                <ChevronDownIcon
+                    className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${
+                        expanded ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden
+                />
+            </button>
+
+            <div
+                id={QUICK_GUIDE_PANEL_ID}
+                role="region"
+                aria-labelledby="manage-fields-quick-guide-trigger"
+                className={expanded ? 'border-t border-slate-200/80 px-3 pb-3 pt-1 sm:px-4 sm:pb-4' : 'hidden'}
+            >
+                <h4 className="sr-only" id="manage-fields-quick-guide-title">
+                    Folders and fields in three steps
+                </h4>
+                <ol className="mt-2 grid list-none gap-2.5 p-0 sm:grid-cols-3 sm:gap-3">
+                    {steps.map(({ n, Icon, title, body }) => (
+                        <li
+                            key={n}
+                            className="flex gap-2.5 rounded-lg border border-slate-200/80 bg-white/95 p-2.5 shadow-sm sm:flex-col sm:gap-2 sm:p-3"
+                        >
+                            <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-start">
+                                <span
+                                    className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--wb-accent)] text-[11px] font-bold text-[var(--wb-on-accent)] shadow-sm sm:h-7 sm:w-7 sm:text-xs"
+                                    aria-hidden
+                                >
+                                    {n}
+                                </span>
+                                <span
+                                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:color-mix(in_srgb,var(--wb-accent)_14%,white)] text-[var(--wb-accent)] sm:h-9 sm:w-9"
+                                    aria-hidden
+                                >
+                                    <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+                                </span>
+                            </div>
+                            <div className="min-w-0 flex-1 pt-0.5 sm:pt-0">
+                                <p className="text-sm font-semibold leading-tight text-slate-900">{title}</p>
+                                <p className="mt-1 text-[11px] leading-snug text-slate-600 sm:text-xs">{body}</p>
+                            </div>
+                        </li>
+                    ))}
+                </ol>
+            </div>
+        </section>
+    )
+}
+
+function QuickFieldTypeSelect({ id, value, onChange, disabled, compact }) {
+    return (
+        <select
+            id={id}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            aria-label="Field list type"
+            className={`shrink-0 rounded-lg border border-slate-200/90 bg-white font-medium text-slate-700 shadow-sm focus:border-[color:color-mix(in_srgb,var(--wb-accent)_40%,#cbd5e1)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--wb-accent)_30%,transparent)] disabled:cursor-not-allowed disabled:opacity-50 ${
+                compact ? 'py-1 pl-2 pr-7 text-[11px]' : 'py-2 pl-2.5 pr-8 text-xs'
+            }`}
+        >
+            {QUICK_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                    {o.short}
+                </option>
+            ))}
+        </select>
+    )
+}
+
+function QuickFieldExampleRow({ example, disabled, compact, onPick }) {
+    const [rowType, setRowType] = useState(example.defaultType)
+    return (
+        <div
+            className={`flex flex-col gap-0.5 ${compact ? '' : 'sm:flex-row sm:items-center sm:gap-2'}`}
+        >
+            <div className="flex flex-wrap items-center gap-1.5">
+                <QuickFieldTypeSelect
+                    id={`manage-quick-type-${example.label.replace(/\s+/g, '-')}`}
+                    value={rowType}
+                    onChange={setRowType}
+                    disabled={disabled}
+                    compact={compact}
+                />
+                <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onPick(example.label, rowType)}
+                    className={`rounded-full border border-slate-200/90 bg-white font-medium text-slate-700 shadow-sm transition hover:border-[color:color-mix(in_srgb,var(--wb-accent)_35%,#e2e8f0)] hover:bg-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] disabled:cursor-not-allowed disabled:opacity-50 ${
+                        compact ? 'px-2.5 py-0.5 text-[11px]' : 'px-2.5 py-1 text-[11px]'
+                    }`}
+                >
+                    {example.label}
+                </button>
+            </div>
+            {example.hint ? (
+                <span className={`text-slate-500 ${compact ? 'text-[10px] pl-0.5' : 'text-[11px] sm:pl-0'}`}>
+                    {example.hint}
+                </span>
+            ) : null}
+        </div>
+    )
+}
+
+/** When true, no outer card — use inside {@link ManageFieldsNewFieldSection}. */
+function QuickFieldStarter({
+    value,
+    onChange,
+    onSubmit,
+    disabled,
+    compact,
+    showLabel = true,
+    embedded = false,
+    examples = QUICK_FIELD_EXAMPLES,
+    draftFieldType,
+    onDraftFieldTypeChange,
+    onPickExample,
+}) {
+    const canSubmit = value.trim().length > 0 && !disabled
+    const shellClass = embedded
+        ? 'space-y-3'
+        : compact
+          ? 'rounded-xl border border-[color:color-mix(in_srgb,var(--wb-accent)_20%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_5%,white)] p-3 sm:p-4'
+          : 'rounded-2xl border border-[color:color-mix(in_srgb,var(--wb-accent)_24%,#e2e8f0)] bg-gradient-to-br from-[color:color-mix(in_srgb,var(--wb-accent)_8%,white)] to-slate-50/80 p-4 shadow-sm sm:p-5'
+
+    return (
+        <div className={shellClass}>
+            {showLabel && !embedded ? (
+                <p className="text-sm font-semibold text-slate-900">New field</p>
+            ) : null}
+            <p className={`text-xs text-slate-600 ${showLabel && !embedded ? 'mt-0.5' : ''}`}>
+                {embedded
+                    ? 'Choose list type, name the field, then Create — example starters are below.'
+                    : compact
+                      ? 'Pick list type, then name — we’ll jump you to answer choices when it’s a list.'
+                      : 'Choose single- or multi-select for lists; we’ll highlight where to add options.'}
+            </p>
+            <div
+                className={`flex flex-col gap-2 ${showLabel && !embedded ? 'mt-3' : embedded ? 'mt-2' : 'mt-2'} sm:flex-row sm:items-stretch`}
+            >
+                <label htmlFor="manage-quick-field-input" className="sr-only">
+                    Field name
+                </label>
+                <input
+                    id="manage-quick-field-input"
+                    type="text"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault()
+                            if (canSubmit) onSubmit()
+                        }
+                    }}
+                    placeholder="e.g. SKU, Department"
+                    autoComplete="off"
+                    disabled={disabled}
+                    className="min-h-[2.75rem] w-full min-w-0 flex-1 rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner placeholder:text-slate-400 focus:border-[color:color-mix(in_srgb,var(--wb-accent)_45%,#cbd5e1)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--wb-accent)_35%,transparent)] disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                    <QuickFieldTypeSelect
+                        id="manage-quick-draft-type"
+                        value={draftFieldType}
+                        onChange={onDraftFieldTypeChange}
+                        disabled={disabled}
+                        compact={compact}
+                    />
+                    <button
+                        type="button"
+                        disabled={!canSubmit}
+                        onClick={() => {
+                            if (canSubmit) onSubmit()
+                        }}
+                        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50 ${productButtonPrimary}`}
+                    >
+                        <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
+                        Create field
+                    </button>
+                </div>
+            </div>
+            {examples.length > 0 ? (
+                <div className="mt-4 border-t border-[color:color-mix(in_srgb,var(--wb-accent)_12%,#e2e8f0)] pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Example starters</p>
+                    <p className="mt-1 text-xs leading-snug text-slate-600">
+                        These rows are <span className="font-medium text-slate-800">illustrations only</span> — they are
+                        not saved fields. Click a pill to pre-fill the name and list type, or type your own above.
+                    </p>
+                    <div className="mt-2 space-y-2" aria-label="Example field name starters">
+                        {examples.map((ex) => (
+                            <QuickFieldExampleRow
+                                key={ex.label}
+                                example={ex}
+                                disabled={disabled}
+                                compact={compact}
+                                onPick={onPickExample}
+                            />
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+const NEW_FIELD_SECTION_PANEL_ID = 'manage-fields-new-field-section-panel'
+
+/** Collapsible quick-create + examples — keeps “On for this folder” above the fold when collapsed. */
+function ManageFieldsNewFieldSection({ expanded, onToggle, children }) {
+    return (
+        <section
+            className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm"
+            aria-label="Create a new custom field"
+        >
+            <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={NEW_FIELD_SECTION_PANEL_ID}
+                onClick={onToggle}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-slate-50/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 sm:px-4 sm:py-3"
+            >
+                <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--wb-accent)]">
+                        New field
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">Create a custom field</p>
+                    <p className="mt-0.5 text-xs leading-snug text-slate-600">
+                        {expanded
+                            ? 'Name, list type, Create field, and example starters below — collapse when finished.'
+                            : 'Expand for quick create and illustrated example starters (or use Add field in the header).'}
+                    </p>
+                </div>
+                <ChevronDownIcon
+                    className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${
+                        expanded ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden
+                />
+            </button>
+            <div
+                id={NEW_FIELD_SECTION_PANEL_ID}
+                role="region"
+                className={
+                    expanded ? 'border-t border-slate-200/90 bg-slate-50/50 px-3 py-3 sm:px-4 sm:py-4' : 'hidden'
+                }
+            >
+                {children}
+            </div>
+        </section>
     )
 }
 
@@ -339,6 +746,10 @@ export default function ManageFieldsWorkspace({
     const [pendingDisable, setPendingDisable] = useState(null)
     const [ebiToggleLoading, setEbiToggleLoading] = useState(false)
     const [aiLibRefToggleLoading, setAiLibRefToggleLoading] = useState(false)
+    const [quickFieldName, setQuickFieldName] = useState('')
+    const [quickFieldDraftType, setQuickFieldDraftType] = useState('select')
+    const [newFieldSectionExpanded, setNewFieldSectionExpanded] = useState(false)
+    const [createFieldPrefill, setCreateFieldPrefill] = useState(null)
 
     const noticeTimerRef = useRef(null)
     useEffect(() => {
@@ -702,11 +1113,28 @@ export default function ManageFieldsWorkspace({
         [rowsAfterFilter, tenantFieldIdSet]
     )
 
-    const advancedPanelId = useId()
-    const [advancedFieldsOpen, setAdvancedFieldsOpen] = useState(false)
+    const quickFieldExamplesFiltered = useMemo(
+        () =>
+            QUICK_FIELD_EXAMPLES.filter(
+                (ex) => !quickSuggestionIsTaken(ex.label, rowsAfterFilter, primaryTypeKeyForSort),
+            ),
+        [rowsAfterFilter, primaryTypeKeyForSort]
+    )
+
+    const onPanelId = useId()
+    const availPanelId = useId()
+    const builtinPanelId = useId()
+
     useEffect(() => {
-        setAdvancedFieldsOpen(false)
+        setQuickFieldName('')
+        setQuickFieldDraftType('select')
     }, [selectedCategoryId])
+
+    /** Collapse quick-create when this folder already has field rows (list first); expand when empty so first field is obvious. */
+    useEffect(() => {
+        if (!selectedCategoryId || isFieldRegistryLoading) return
+        setNewFieldSectionExpanded(rowsAfterFilter.length === 0 && canManageFields)
+    }, [selectedCategoryId, isFieldRegistryLoading, rowsAfterFilter.length, canManageFields])
 
     const showAllFieldsOffBanner = useMemo(() => {
         if (!selectedCategoryId || isFieldRegistryLoading || fieldFilter === 'low_coverage') return false
@@ -824,6 +1252,7 @@ export default function ManageFieldsWorkspace({
     )
 
     const openDefinitionModal = async (field) => {
+        setCreateFieldPrefill(null)
         try {
             const isCustom = !systemFields.some((sf) => sf.id === field.id)
             const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
@@ -853,9 +1282,64 @@ export default function ManageFieldsWorkspace({
     const handleModalSuccess = () => {
         setModalOpen(false)
         setEditingField(null)
+        setCreateFieldPrefill(null)
         setFieldCategoryData({})
         router.reload({ only: ['registry', 'customFieldsLimit'] })
     }
+
+    const openBlankCreateModal = useCallback(() => {
+        setCreateFieldPrefill(null)
+        setEditingField(null)
+        setModalOpen(true)
+    }, [])
+
+    /** Folder schema flyout: `?new_field=1` expands the quick “new field” strip (or opens the create modal if that strip is not shown). */
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        if (!selectedCategoryId || !canManageFields) return
+        const params = new URLSearchParams(window.location.search)
+        if (params.get('new_field') !== '1') return
+
+        setNewFieldSectionExpanded(true)
+        params.delete('new_field')
+        const qs = params.toString()
+        const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash || ''}`
+        window.history.replaceState(window.history.state, '', nextUrl)
+
+        const t = window.setTimeout(() => {
+            const el = document.getElementById(NEW_FIELD_SECTION_PANEL_ID)
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+            } else {
+                openBlankCreateModal()
+            }
+        }, 120)
+        return () => clearTimeout(t)
+    }, [selectedCategoryId, canManageFields, openBlankCreateModal])
+
+    const openQuickCreateModal = useCallback(() => {
+        const name = quickFieldName.trim()
+        if (!name) return
+        if (customFieldsLimit && !customFieldsLimit.can_create) return
+        const ft = quickFieldDraftType === 'multiselect' ? 'multiselect' : 'select'
+        setCreateFieldPrefill({
+            systemLabel: name,
+            fieldType: ft,
+            highlightValues: true,
+        })
+        setEditingField(null)
+        setModalOpen(true)
+    }, [quickFieldName, quickFieldDraftType, customFieldsLimit])
+
+    const onQuickPickExample = useCallback((label, fieldType) => {
+        setQuickFieldName(label)
+        setQuickFieldDraftType(fieldType === 'multiselect' ? 'multiselect' : 'select')
+    }, [])
+
+    const focusQuickFieldInput = useCallback(() => {
+        if (typeof document === 'undefined') return
+        document.getElementById('manage-quick-field-input')?.focus()
+    }, [])
 
     const switchClass = (on) =>
         `relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 ${
@@ -943,6 +1427,11 @@ export default function ManageFieldsWorkspace({
                     </div>
                 ) : (
                     <>
+                        {selectedCategory ? (
+                            <div className="border-b border-slate-200/90 px-4 pb-4 pt-4 sm:px-5 sm:pb-5 sm:pt-5">
+                                <ManageFieldsQuickGuide />
+                            </div>
+                        ) : null}
                         <header
                             className="border-b border-slate-200/90 border-l-4 bg-[color:color-mix(in_srgb,var(--wb-accent)_7%,white)] px-4 py-3 sm:px-5 sm:py-4"
                             style={{ borderLeftColor: 'var(--wb-accent)' }}
@@ -961,10 +1450,7 @@ export default function ManageFieldsWorkspace({
                                 {canManageFields && selectedCategory ? (
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setEditingField(null)
-                                            setModalOpen(true)
-                                        }}
+                                        onClick={openBlankCreateModal}
                                         disabled={customFieldsLimit && !customFieldsLimit.can_create}
                                         title="Add field"
                                         aria-label={`Add field to ${selectedCategory.name}`}
@@ -978,11 +1464,114 @@ export default function ManageFieldsWorkspace({
                         </header>
 
                         <div className="space-y-5 px-4 py-5 sm:px-5 sm:py-6">
+                            {canManageFields &&
+                            selectedCategoryId &&
+                            !isFieldRegistryLoading &&
+                            rowsAfterFilter.length > 0 ? (
+                                <ManageFieldsNewFieldSection
+                                    expanded={newFieldSectionExpanded}
+                                    onToggle={() => setNewFieldSectionExpanded((v) => !v)}
+                                >
+                                    <QuickFieldStarter
+                                        embedded
+                                        showLabel={false}
+                                        value={quickFieldName}
+                                        onChange={setQuickFieldName}
+                                        onSubmit={openQuickCreateModal}
+                                        disabled={Boolean(customFieldsLimit && !customFieldsLimit.can_create)}
+                                        compact={false}
+                                        examples={quickFieldExamplesFiltered}
+                                        draftFieldType={quickFieldDraftType}
+                                        onDraftFieldTypeChange={setQuickFieldDraftType}
+                                        onPickExample={onQuickPickExample}
+                                    />
+                                </ManageFieldsNewFieldSection>
+                            ) : null}
+
+                            {selectedCategory && (canToggleEbi || canToggleAiLibRef) ? (
+                                <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 px-3 py-3 sm:px-4">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                        Folder options
+                                    </p>
+                                    {canToggleEbi ? (
+                                        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-semibold text-slate-900">Brand Intelligence</p>
+                                                <p className="mt-0.5 text-xs leading-snug text-slate-600">
+                                                    Score assets in this folder against your brand (e.g. photography,
+                                                    video, campaigns).
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={selectedCategory.ebi_enabled === true}
+                                                aria-label={`Brand Intelligence for ${selectedCategory.name}: ${selectedCategory.ebi_enabled === true ? 'enabled' : 'disabled'}. Toggle to change.`}
+                                                disabled={ebiToggleLoading}
+                                                onClick={toggleEbiEnabled}
+                                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-slate-300/80 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                    selectedCategory.ebi_enabled === true
+                                                        ? 'bg-[var(--wb-accent)]'
+                                                        : 'bg-slate-200'
+                                                }`}
+                                            >
+                                                <span
+                                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
+                                                        selectedCategory.ebi_enabled === true
+                                                            ? 'translate-x-4'
+                                                            : 'translate-x-0'
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                    {canToggleAiLibRef ? (
+                                        <div
+                                            className={`flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
+                                                canToggleEbi ? 'mt-3 border-t border-slate-200/80 pt-3' : 'mt-2'
+                                            }`}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p className="text-sm font-semibold text-slate-900">AI library context</p>
+                                                <p className="mt-0.5 text-xs leading-snug text-slate-600">
+                                                    Optional hints for vision tagging using this folder.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={selectedCategory.ai_use_library_references === true}
+                                                aria-label={`AI library context for ${selectedCategory.name}: ${selectedCategory.ai_use_library_references === true ? 'enabled' : 'disabled'}. Toggle to change.`}
+                                                disabled={aiLibRefToggleLoading}
+                                                onClick={toggleAiLibraryReferences}
+                                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-slate-300/80 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                                    selectedCategory.ai_use_library_references === true
+                                                        ? 'bg-[var(--wb-accent)]'
+                                                        : 'bg-slate-200'
+                                                }`}
+                                            >
+                                                <span
+                                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                        selectedCategory.ai_use_library_references === true
+                                                            ? 'translate-x-4'
+                                                            : 'translate-x-0'
+                                                    }`}
+                                                />
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
+
                             <div
-                                className="field-rows space-y-8"
+                                className="field-rows space-y-4"
                                 role="region"
                                 aria-labelledby="manage-fields-on-heading"
                             >
+                                <h4 id="manage-fields-on-heading" className="sr-only">
+                                    Fields for this folder
+                                </h4>
+
                                 {showAllFieldsOffBanner && selectedCategory ? (
                                     <div className="rounded-lg border border-amber-200/90 bg-amber-50/60 px-3 py-3 text-sm text-amber-950">
                                         <p className="font-medium">All fields are off</p>
@@ -1008,6 +1597,20 @@ export default function ManageFieldsWorkspace({
                                             <p className="text-sm text-slate-600">No folders for this brand.</p>
                                         ) : isFieldRegistryLoading ? (
                                             <p className="text-sm text-slate-600">Loading fields…</p>
+                                        ) : canManageFields && selectedCategory ? (
+                                            <div className="mx-auto max-w-lg text-left">
+                                                <QuickFieldStarter
+                                                    value={quickFieldName}
+                                                    onChange={setQuickFieldName}
+                                                    onSubmit={openQuickCreateModal}
+                                                    disabled={Boolean(customFieldsLimit && !customFieldsLimit.can_create)}
+                                                    compact
+                                                    examples={quickFieldExamplesFiltered}
+                                                    draftFieldType={quickFieldDraftType}
+                                                    onDraftFieldTypeChange={setQuickFieldDraftType}
+                                                    onPickExample={onQuickPickExample}
+                                                />
+                                            </div>
                                         ) : (
                                             <>
                                                 <h4 className="text-base font-semibold text-slate-900">No fields yet</h4>
@@ -1018,53 +1621,28 @@ export default function ManageFieldsWorkspace({
                                                     className="mt-4 flex flex-wrap justify-center gap-2"
                                                     aria-label="Example fields"
                                                 >
-                                                    {['Usage Rights', 'Expiration Date', 'Subject'].map((label) => (
+                                                    {quickFieldExamplesFiltered.map((ex) => (
                                                         <li
-                                                            key={label}
+                                                            key={ex.label}
                                                             className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
                                                         >
-                                                            {label}
+                                                            {ex.label}
                                                         </li>
                                                     ))}
                                                 </ul>
-                                                {canManageFields ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setEditingField(null)
-                                                            setModalOpen(true)
-                                                        }}
-                                                        disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                                        aria-label={
-                                                            selectedCategory
-                                                                ? `Add field to ${selectedCategory.name}`
-                                                                : 'Add field'
-                                                        }
-                                                        className={`mt-5 inline-flex items-center gap-2 ${productButtonPrimary} px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50`}
-                                                    >
-                                                        <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
-                                                        Add field
-                                                    </button>
-                                                ) : null}
                                             </>
                                         )}
                                     </div>
                                 ) : (
                                     <>
-                                        <section aria-labelledby="manage-fields-on-heading">
-                                            <div className="mb-3">
-                                                <h4
-                                                    id="manage-fields-on-heading"
-                                                    className="text-base font-semibold text-slate-900"
-                                                >
-                                                    On for this folder
-                                                </h4>
-                                                <p className="mt-0.5 text-sm text-slate-600">
-                                                    {onRows.length === 0
-                                                        ? 'Nothing active yet — turn on fields below.'
-                                                        : `${onRows.length} ${onRows.length === 1 ? 'field' : 'fields'} on (custom and built-in).`}
-                                                </p>
-                                            </div>
+                                        <FieldAccordion
+                                            key={`manage-on-${selectedCategoryId}`}
+                                            panelId={onPanelId}
+                                            title="On for this folder"
+                                            count={onRows.length}
+                                            defaultExpanded
+                                            subtle={false}
+                                        >
                                             {onRows.length > 0 ? (
                                                 <ul className="space-y-2" aria-label="Fields enabled for this folder">
                                                     {onRows.map((row) => (
@@ -1089,24 +1667,24 @@ export default function ManageFieldsWorkspace({
                                                         </li>
                                                     ))}
                                                 </ul>
-                                            ) : null}
-                                        </section>
-
-                                        <section
-                                            className="border-t border-slate-200/80 pt-6"
-                                            aria-labelledby="manage-fields-available-heading"
-                                        >
-                                            <div className="mb-3">
-                                                <h4
-                                                    id="manage-fields-available-heading"
-                                                    className="text-base font-semibold text-slate-900"
-                                                >
-                                                    Available
-                                                </h4>
-                                                <p className="mt-0.5 text-sm text-slate-600">
-                                                    Custom fields that are off (or still loading) for this folder.
+                                            ) : (
+                                                <p className="py-1 text-sm text-slate-500">
+                                                    Nothing on yet — turn on fields in Available or Built-in.
                                                 </p>
-                                            </div>
+                                            )}
+                                        </FieldAccordion>
+
+                                        <FieldAccordion
+                                            key={`manage-avail-${selectedCategoryId}`}
+                                            panelId={availPanelId}
+                                            title="Available"
+                                            count={availableCustomRows.length}
+                                            defaultExpanded={
+                                                onRows.length === 0 &&
+                                                (availableCustomRows.length > 0 || !hasAnyCustomFieldDefinitions)
+                                            }
+                                            subtle
+                                        >
                                             {availableCustomRows.length > 0 ? (
                                                 <ul className="space-y-2" aria-label="Custom fields not enabled">
                                                     {availableCustomRows.map((row) => (
@@ -1132,212 +1710,81 @@ export default function ManageFieldsWorkspace({
                                                     ))}
                                                 </ul>
                                             ) : hasAnyCustomFieldDefinitions ? (
-                                                <p className="text-sm text-slate-600">
-                                                    All custom fields are already on for this folder.
-                                                </p>
+                                                <p className="text-sm text-slate-600">All custom fields are on.</p>
                                             ) : (
-                                                <div className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/40 px-3 py-4 sm:px-4">
-                                                    <h5 className="text-sm font-semibold text-slate-900">
-                                                        No custom fields yet
-                                                    </h5>
-                                                    <p className="mt-1 text-xs text-slate-600">
-                                                        Add fields for details your team wants to track.
+                                                <div className="rounded-lg border border-dashed border-slate-200/90 bg-slate-50/50 px-3 py-3 sm:px-4">
+                                                    <p className="text-sm text-slate-600">
+                                                        Expand <span className="font-medium text-slate-800">Create a custom field</span>{' '}
+                                                        at the top (above the lists), then pick a starter or type a name.
                                                     </p>
-                                                    <ul
-                                                        className="mt-3 flex flex-wrap gap-1.5"
-                                                        aria-label="Example custom fields"
-                                                    >
-                                                        {['Usage Rights', 'Expiration Date', 'Subject'].map((label) => (
-                                                            <li
-                                                                key={label}
-                                                                className="rounded-full border border-slate-200/90 bg-white px-2.5 py-0.5 text-[11px] font-medium text-slate-700"
-                                                            >
-                                                                {label}
-                                                            </li>
+                                                    <div className="mt-2 flex flex-col gap-2">
+                                                        {quickFieldExamplesFiltered.map((ex) => (
+                                                            <QuickFieldExampleRow
+                                                                key={ex.label}
+                                                                example={ex}
+                                                                compact
+                                                                disabled={Boolean(
+                                                                    customFieldsLimit && !customFieldsLimit.can_create
+                                                                )}
+                                                                onPick={(label, fieldType) => {
+                                                                    setNewFieldSectionExpanded(true)
+                                                                    setQuickFieldName(label)
+                                                                    setQuickFieldDraftType(
+                                                                        fieldType === 'multiselect'
+                                                                            ? 'multiselect'
+                                                                            : 'select'
+                                                                    )
+                                                                    setTimeout(() => focusQuickFieldInput(), 0)
+                                                                }}
+                                                            />
                                                         ))}
-                                                    </ul>
-                                                    {canManageFields ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setEditingField(null)
-                                                                setModalOpen(true)
-                                                            }}
-                                                            disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                                            aria-label={
-                                                                selectedCategory
-                                                                    ? `Add field to ${selectedCategory.name}`
-                                                                    : 'Add field'
-                                                            }
-                                                            className={`mt-3 inline-flex items-center gap-2 ${productButtonPrimary} px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50`}
-                                                        >
-                                                            <PlusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                                            Add field
-                                                        </button>
-                                                    ) : null}
+                                                    </div>
                                                 </div>
                                             )}
-                                        </section>
+                                        </FieldAccordion>
 
                                         {offSystemRows.length > 0 ? (
-                                            <section
-                                                className="border-t border-slate-200/80 pt-6"
-                                                aria-labelledby="manage-advanced-fields-title"
+                                            <FieldAccordion
+                                                key={`manage-builtin-${selectedCategoryId}`}
+                                                panelId={builtinPanelId}
+                                                title="Built-in (off)"
+                                                count={offSystemRows.length}
+                                                defaultExpanded={false}
+                                                subtle
                                             >
-                                                <div className="rounded-lg border border-slate-200/90 bg-slate-50/30">
-                                                    <div className="border-b border-slate-200/80 px-3 py-2.5 sm:px-4">
-                                                        <h4
-                                                            id="manage-advanced-fields-title"
-                                                            className="text-sm font-semibold text-slate-900"
-                                                        >
-                                                            Built-in fields (off)
-                                                        </h4>
-                                                        <p className="mt-0.5 text-xs text-slate-600">
-                                                            System fields you can enable for this folder.
-                                                        </p>
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        aria-expanded={advancedFieldsOpen}
-                                                        aria-controls={advancedPanelId}
-                                                        onClick={() => setAdvancedFieldsOpen((open) => !open)}
-                                                        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 sm:px-4"
-                                                    >
-                                                        <span>
-                                                            {advancedFieldsOpen
-                                                                ? `Hide built-in fields (${offSystemRows.length} off)`
-                                                                : `Show ${offSystemRows.length} built-in fields (off)`}
-                                                        </span>
-                                                        <ChevronDownIcon
-                                                            className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${
-                                                                advancedFieldsOpen ? 'rotate-180' : ''
-                                                            }`}
-                                                            aria-hidden
-                                                        />
-                                                    </button>
-                                                    <div
-                                                        id={advancedPanelId}
-                                                        role="region"
-                                                        aria-labelledby="manage-advanced-fields-title"
-                                                        className={
-                                                            advancedFieldsOpen
-                                                                ? 'border-t border-slate-200/80 px-3 pb-3 pt-2 sm:px-4'
-                                                                : 'hidden'
-                                                        }
-                                                    >
-                                                        <ul
-                                                            className="space-y-2"
-                                                            aria-label="Built-in fields not enabled for this folder"
-                                                        >
-                                                            {offSystemRows.map((row) => (
-                                                                <li key={row.key} id={`manage-field-row-${row.key}`}>
-                                                                    <FieldListRow
-                                                                        field={row.field}
-                                                                        isAutomated={row.isAutomated}
-                                                                        isEnabled={row.isEnabled}
-                                                                        visibilityLoading={row.visibilityLoading}
-                                                                        selectedCategoryId={selectedCategoryId}
-                                                                        selectedCategory={selectedCategory}
-                                                                        categoryData={fieldCategoryData[row.field.id]}
-                                                                        canManageVisibility={canManageVisibility}
-                                                                        primaryTypeKey={
-                                                                            selectedCategory?.type_field?.field_key ??
-                                                                            null
-                                                                        }
-                                                                        onToggle={wrapToggle(
-                                                                            row.field,
-                                                                            selectedCategoryId
-                                                                        )}
-                                                                        onConfigure={openDefinitionModal}
-                                                                        switchClass={switchClass}
-                                                                        isTenantCreated={tenantFieldIdSet.has(
-                                                                            row.field.id
-                                                                        )}
-                                                                    />
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    </div>
-                                                </div>
-                                            </section>
+                                                <ul
+                                                    className="space-y-2"
+                                                    aria-label="Built-in fields not enabled for this folder"
+                                                >
+                                                    {offSystemRows.map((row) => (
+                                                        <li key={row.key} id={`manage-field-row-${row.key}`}>
+                                                            <FieldListRow
+                                                                field={row.field}
+                                                                isAutomated={row.isAutomated}
+                                                                isEnabled={row.isEnabled}
+                                                                visibilityLoading={row.visibilityLoading}
+                                                                selectedCategoryId={selectedCategoryId}
+                                                                selectedCategory={selectedCategory}
+                                                                categoryData={fieldCategoryData[row.field.id]}
+                                                                canManageVisibility={canManageVisibility}
+                                                                primaryTypeKey={
+                                                                    selectedCategory?.type_field?.field_key ?? null
+                                                                }
+                                                                onToggle={wrapToggle(row.field, selectedCategoryId)}
+                                                                onConfigure={openDefinitionModal}
+                                                                switchClass={switchClass}
+                                                                isTenantCreated={tenantFieldIdSet.has(row.field.id)}
+                                                            />
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </FieldAccordion>
                                         ) : hasSystemRowsInView ? (
-                                            <p className="border-t border-slate-200/80 pt-6 text-xs text-slate-500">
-                                                All built-in fields are on for this folder.
-                                            </p>
+                                            <p className="text-xs text-slate-500">All built-in fields are on.</p>
                                         ) : null}
                                     </>
                                 )}
                             </div>
-
-                            {selectedCategory && (canToggleEbi || canToggleAiLibRef) ? (
-                                <div className="space-y-3 rounded-xl border border-[color:color-mix(in_srgb,var(--wb-accent)_26%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] p-4 shadow-sm sm:p-5">
-                                    {canToggleEbi ? (
-                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                            <div className="min-w-0 flex-1">
-                                                <p className="text-base font-semibold text-slate-900">Brand Intelligence</p>
-                                                <p className="mt-0.5 text-sm text-slate-700">
-                                                    Score assets in this folder against your brand.
-                                                </p>
-                                                <p className="mt-1 text-xs text-slate-600">
-                                                    Useful for folders like photography, video, campaigns, and executions.
-                                                </p>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                role="switch"
-                                                aria-checked={selectedCategory.ebi_enabled === true}
-                                                aria-label={`Brand Intelligence for ${selectedCategory.name}: ${selectedCategory.ebi_enabled === true ? 'enabled' : 'disabled'}. Toggle to change.`}
-                                                disabled={ebiToggleLoading}
-                                                onClick={toggleEbiEnabled}
-                                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-[color:color-mix(in_srgb,var(--wb-accent)_25%,transparent)] transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                    selectedCategory.ebi_enabled === true
-                                                        ? 'bg-[var(--wb-accent)]'
-                                                        : 'bg-slate-200'
-                                                }`}
-                                            >
-                                                <span
-                                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out ${
-                                                        selectedCategory.ebi_enabled === true
-                                                            ? 'translate-x-4'
-                                                            : 'translate-x-0'
-                                                    }`}
-                                                />
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                    {canToggleAiLibRef ? (
-                                        <div className="flex flex-col gap-3 border-t border-[color:color-mix(in_srgb,var(--wb-accent)_18%,#e2e8f0)] pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                                            <div className="min-w-0 flex-1">
-                                                <p className="text-sm font-semibold text-slate-900">AI library context</p>
-                                                <p className="mt-0.5 text-xs text-slate-600">
-                                                    Optional hints for vision tagging using this folder.
-                                                </p>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                role="switch"
-                                                aria-checked={selectedCategory.ai_use_library_references === true}
-                                                aria-label={`AI library context for ${selectedCategory.name}: ${selectedCategory.ai_use_library_references === true ? 'enabled' : 'disabled'}. Toggle to change.`}
-                                                disabled={aiLibRefToggleLoading}
-                                                onClick={toggleAiLibraryReferences}
-                                                className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                                    selectedCategory.ai_use_library_references === true
-                                                        ? 'bg-[var(--wb-accent)]'
-                                                        : 'bg-slate-200'
-                                                }`}
-                                            >
-                                                <span
-                                                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                        selectedCategory.ai_use_library_references === true
-                                                            ? 'translate-x-4'
-                                                            : 'translate-x-0'
-                                                    }`}
-                                                />
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
                         </div>
                     </>
                 )}
@@ -1372,8 +1819,10 @@ export default function ManageFieldsWorkspace({
                 onClose={() => {
                     setModalOpen(false)
                     setEditingField(null)
+                    setCreateFieldPrefill(null)
                 }}
                 field={editingField}
+                createPrefill={createFieldPrefill}
                 preselectedCategoryId={selectedCategoryId}
                 categories={categories}
                 canManageFields={canManageFields}

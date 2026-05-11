@@ -31,8 +31,8 @@ import { DELIVERABLES_ITEM_LABEL, DELIVERABLES_ITEM_LABEL_PLURAL } from '../../u
 import {
     getWorkspaceButtonColor,
     getWorkspaceContextualTone,
-    getContrastTextColor,
     getWorkspaceSidebarForegroundHex,
+    getWorkspaceSidebarActiveRowForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
 import {
@@ -74,7 +74,9 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     const { thumbnailViewMode, setThumbnailViewMode } = useDeliverablesThumbnailMode()
     const { can } = usePermission()
     const canUpload = can('asset.upload')
-    
+    const canViewFolderSchema =
+        can('metadata.registry.view') || can('metadata.tenant.visibility.manage')
+
     const [selectedCategoryId, setSelectedCategoryId] = useState(selected_category ? parseInt(selected_category) : null)
     const [tooltipVisible, setTooltipVisible] = useState(null)
 
@@ -415,7 +417,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
     // Match Add Execution button: selected/hover use dark hue (same as button hover state)
     const contextualDarkColor = getWorkspaceContextualTone(workspaceAccentColor)
     const activeBgColor = contextualDarkColor
-    const activeTextColor = getContrastTextColor(contextualDarkColor)
+    const activeTextColor = getWorkspaceSidebarActiveRowForegroundHex(contextualDarkColor, textColor)
     const hoverBgColor = contextualDarkColor
     // Unselected: reduced opacity for visual hierarchy (matches icon treatment)
     const unselectedTextColor = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.65)'
@@ -749,6 +751,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                         canManageCategoriesAndFields={(can('metadata.registry.view') || can('metadata.tenant.visibility.manage')) || can('brand_categories.manage')}
                         activeBrandId={auth?.activeBrand?.id ?? null}
                         onAddCategoryClick={can('brand_categories.manage') ? () => setAddCategoryModalOpen(true) : undefined}
+                        showFolderSchemaHelp={canViewFolderSchema}
                     />
                 </div>
 

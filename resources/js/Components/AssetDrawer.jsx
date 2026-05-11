@@ -5639,7 +5639,12 @@ export default function AssetDrawer({
                 {/* Tags and Fields — virtual Google Fonts: read-only summary (no asset API id) */}
                 {displayAsset?.id && isVirtualGoogleFont && (
                     <div className="border-t border-gray-200">
-                        <CollapsibleSection contentInset="flush" title="Fields" defaultExpanded={false}>
+                        <CollapsibleSection
+                            contentInset="flush"
+                            title="Fields"
+                            defaultExpanded={false}
+                            focusRingColor={brandPrimaryOnWhite}
+                        >
                             <dl className="space-y-3 pl-2.5 text-sm text-gray-700">
                                 <div>
                                     <dt className="font-medium text-gray-900">Source</dt>
@@ -5703,6 +5708,7 @@ export default function AssetDrawer({
                                     contentInset="flush"
                                     title="Review"
                                     defaultExpanded={true}
+                                    focusRingColor={brandPrimaryOnWhite}
                                 >
                                     <div className="space-y-3 px-3 py-1.5">
                                         {isVideo &&
@@ -5852,7 +5858,12 @@ export default function AssetDrawer({
                                 </CollapsibleSection>
                             )}
 
-                        <CollapsibleSection contentInset="flush" title="Asset Data" defaultExpanded={true}>
+                        <CollapsibleSection
+                            contentInset="flush"
+                            title="Asset Data"
+                            defaultExpanded={true}
+                            focusRingColor={brandPrimaryOnWhite}
+                        >
                             <div className="pl-2.5">
                                 {/* Sub-tabs + inline "Edit asset" action. Tabs left, Edit right on the
                                     same baseline so the action lives with the fields it mutates. */}
@@ -6039,6 +6050,7 @@ export default function AssetDrawer({
                                 contentInset="flush"
                                 title="Preview & Styles"
                                 defaultExpanded={false}
+                                focusRingColor={brandPrimaryOnWhite}
                             >
                                 <div className="space-y-2">
                                     {canRotateDrawerRasterPreview ? (
@@ -6446,6 +6458,7 @@ export default function AssetDrawer({
                                     contentInset="flush"
                                     title="Processing & Automation"
                                     defaultExpanded={false}
+                                    focusRingColor={brandPrimaryOnWhite}
                                 >
                                     <div className="space-y-3">
                                         <div className="text-xs leading-snug text-gray-500">
@@ -6850,7 +6863,12 @@ export default function AssetDrawer({
                 {/* Phase AF-5: Only show approval history if approvals are enabled */}
                 {auth?.approval_features?.approvals_enabled && displayAsset?.id && (displayAsset.approval_status === 'pending' || displayAsset.approval_status === 'rejected' || displayAsset.approval_status === 'approved') && (
                     <div>
-                        <CollapsibleSection contentInset="flush" title="Approval History" defaultExpanded={false}>
+                        <CollapsibleSection
+                            contentInset="flush"
+                            title="Approval History"
+                            defaultExpanded={false}
+                            focusRingColor={brandPrimaryOnWhite}
+                        >
                             {/* Phase AF-6: Approval Summary (AI-generated) */}
                             {auth?.approval_features?.approval_summaries_enabled && displayAsset?.approval_summary && (
                                 <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -6887,7 +6905,12 @@ export default function AssetDrawer({
 
                 {/* File Information */}
                 <div>
-                    <CollapsibleSection contentInset="flush" title="File Information" defaultExpanded={false}>
+                    <CollapsibleSection
+                        contentInset="flush"
+                        title="File Information"
+                        defaultExpanded={false}
+                        focusRingColor={brandPrimaryOnWhite}
+                    >
                     
                     {/* Created By - moved below preview, at top of file info */}
                     {/* Use displayAsset (with live updates) instead of prop asset */}
@@ -7237,6 +7260,7 @@ export default function AssetDrawer({
                         contentInset="flush"
                         title="Reliability Timeline"
                         defaultExpanded={false}
+                        focusRingColor={brandPrimaryOnWhite}
                     >
                         <ul className="divide-y divide-gray-100">
                             {reliabilityTimeline.map((ev) => (
@@ -7273,7 +7297,12 @@ export default function AssetDrawer({
 
                 {/* Asset Timeline */}
                 <div>
-                    <CollapsibleSection contentInset="flush" title="Timeline" defaultExpanded={false}>
+                    <CollapsibleSection
+                        contentInset="flush"
+                        title="Timeline"
+                        defaultExpanded={false}
+                        focusRingColor={brandPrimaryOnWhite}
+                    >
                         <AssetTimeline 
                             events={activityEvents} 
                             loading={activityLoading}

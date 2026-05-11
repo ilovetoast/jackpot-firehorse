@@ -10,10 +10,15 @@ use App\Models\User;
 use App\Support\Billing\PlanLimitUpgradePayload;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Metadata-only upload preflight: plan, storage, MIME, dangerous types, collection gates.
+ * Metadata-only upload preflight (Gate 1 of the upload allowlist ladder).
+ *
+ * Decisions are made by FileTypeService::isUploadAllowed() reading
+ * config/file_types.php — there is NO local allow/deny list here.
+ *
  * Does not create assets, S3 sessions, or consume AI credits.
  */
 class UploadPreflightService
@@ -21,12 +26,6 @@ class UploadPreflightService
     public const CACHE_PREFIX = 'upload_preflight:';
 
     public const CACHE_TTL_SECONDS = 7200;
-
-    /** Blocked as potentially executable / installer payloads (DAM policy). */
-    private const DANGEROUS_EXTENSIONS = [
-        'exe', 'bat', 'cmd', 'com', 'pif', 'scr', 'vbs', 'msi', 'dll', 'app', 'reg',
-        'ps1', 'deb', 'rpm', 'sh', 'bash', 'cpl', 'lnk', 'gadget', 'msp', 'hta',
-    ];
 
     public function __construct(
         protected PlanService $planService,
@@ -148,25 +147,51 @@ class UploadPreflightService
                     ];
                 }
 
-                $danger = $ext !== '' && in_array($ext, self::DANGEROUS_EXTENSIONS, true);
-                if ($danger) {
+                // Gate 1: single decision, single source of truth (config/file_types.php).
+                // Catches blocked executables/scripts/archives, unsupported types, and coming_soon types.
+                $decision = $this->fileTypeService->isUploadAllowed($mime ?: null, $ext ?: null);
+                if (! $decision['allowed']) {
                     $reasons[] = [
-                        'code' => 'dangerous_file_type',
-                        'message' => 'This file type cannot be uploaded for security reasons.',
+                        'code' => $decision['code'],
+                        'message' => (string) ($decision['message'] ?? 'This file type is not supported for upload.'),
                     ];
+
+                    Log::log(
+                        $decision['log_severity'] === 'warning' ? 'warning' : 'info',
+                        'upload_blocked',
+                        [
+                            'gate' => 'preflight',
+                            'tenant_id' => $tenant->id,
+                            'user_id' => $user->id,
+                            'brand_id' => $brand->id,
+                            'name' => $name,
+                            'size' => $size,
+                            'mime_type' => $mime ?: null,
+                            'extension' => $ext ?: null,
+                            'code' => $decision['code'],
+                            'blocked_group' => $decision['blocked_group'],
+                            'file_type' => $decision['file_type'],
+                        ]
+                    );
                 }
 
-                $unsupported = $this->fileTypeService->getUnsupportedReason($mime ?: null, $ext ?: null);
-                if ($unsupported && ! empty($unsupported['disable_upload_reason'])) {
+                // Filename hardening — double-extension defense (e.g. evil.php.jpg).
+                $doubleExt = $this->fileTypeService->detectDoubleExtensionAttack($name);
+                if ($doubleExt !== null) {
                     $reasons[] = [
-                        'code' => 'unsupported_type',
-                        'message' => (string) $unsupported['disable_upload_reason'],
+                        'code' => 'blocked_double_extension',
+                        'message' => $doubleExt['message'],
                     ];
-                } elseif (! $this->fileTypeService->isSupported($mime ?: null, $ext ?: null)) {
-                    $reasons[] = [
-                        'code' => 'unsupported_type',
-                        'message' => 'This file type is not supported for upload.',
-                    ];
+                    Log::warning('upload_blocked', [
+                        'gate' => 'preflight',
+                        'reason' => 'double_extension',
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $user->id,
+                        'brand_id' => $brand->id,
+                        'name' => $name,
+                        'hit_extension' => $doubleExt['hit_extension'],
+                        'group' => $doubleExt['group'],
+                    ]);
                 }
 
                 $detected = $this->fileTypeService->detectFileType($mime ?: null, $ext ?: null);

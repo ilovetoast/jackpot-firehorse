@@ -5,9 +5,17 @@
  * Uses WidgetResolver for centralized widget rendering logic.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import MetadataAnalysisRunningBanner from './MetadataAnalysisRunningBanner'
-import { PencilIcon, LockClosedIcon, ArrowPathIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import {
+    PencilIcon,
+    LockClosedIcon,
+    ArrowPathIcon,
+    CheckIcon,
+    XMarkIcon,
+    InformationCircleIcon,
+} from '@heroicons/react/24/outline'
 import { usePage } from '@inertiajs/react'
 import AssetMetadataEditModal from './AssetMetadataEditModal'
 import AssetMetadataCollectionField from './AssetMetadataCollectionField'
@@ -47,6 +55,106 @@ const DRAWER_QUICK_EDIT_LAST_SET = new Set(DRAWER_QUICK_EDIT_LAST_KEYS)
 
 function metadataFieldKeyLo(f) {
     return String(f?.key || f?.field_key || '').toLowerCase()
+}
+
+/** Tooltip shows the field’s admin-written description only (Configure in Manage → Fields). */
+function metadataFieldDescriptionForTip(field) {
+    const t = String(field.description ?? '').trim()
+    return t || null
+}
+
+/**
+ * Hover or focus the label when a description exists — no generic “how to edit” copy.
+ * Renders the tooltip in a portal with position:fixed so it is not clipped by drawer overflow.
+ */
+function MetadataFieldLabelWithTip({ fieldLabel, field }) {
+    const tipId = useId()
+    const text = metadataFieldDescriptionForTip(field)
+    const anchorRef = useRef(null)
+    const tipRef = useRef(null)
+    const [open, setOpen] = useState(false)
+    const [tipBox, setTipBox] = useState({ top: 0, left: 0, opacity: 0 })
+
+    const measureAndPlace = () => {
+        const anchor = anchorRef.current
+        const tip = tipRef.current
+        if (!anchor || !tip) {
+            return
+        }
+        const r = anchor.getBoundingClientRect()
+        const pad = 8
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        const tr = tip.getBoundingClientRect()
+        const tipW = tr.width
+        const tipH = tr.height
+        let left = Math.max(pad, Math.min(r.left, vw - tipW - pad))
+        let top = r.bottom + 6
+        if (top + tipH > vh - pad && r.top - tipH - 6 >= pad) {
+            top = r.top - tipH - 6
+        }
+        top = Math.max(pad, Math.min(top, vh - tipH - pad))
+        setTipBox({ top, left, opacity: 1 })
+    }
+
+    useLayoutEffect(() => {
+        if (!open) {
+            setTipBox((b) => ({ ...b, opacity: 0 }))
+            return
+        }
+        measureAndPlace()
+        const onRelayout = () => measureAndPlace()
+        window.addEventListener('scroll', onRelayout, true)
+        window.addEventListener('resize', onRelayout)
+        return () => {
+            window.removeEventListener('scroll', onRelayout, true)
+            window.removeEventListener('resize', onRelayout)
+        }
+    }, [open, text, fieldLabel])
+
+    if (!text) {
+        return <span>{fieldLabel}</span>
+    }
+
+    const tipNode = (
+        <div
+            id={tipId}
+            ref={tipRef}
+            role="tooltip"
+            style={{
+                position: 'fixed',
+                top: tipBox.top,
+                left: tipBox.left,
+                opacity: tipBox.opacity,
+                zIndex: 100100,
+                transition: 'opacity 120ms ease-out',
+            }}
+            className="pointer-events-none w-[min(17rem,calc(100vw-1rem))] rounded-lg border border-gray-200/90 bg-white px-3 py-2.5 text-left text-xs font-normal leading-snug text-gray-600 shadow-lg shadow-gray-900/10 ring-1 ring-black/[0.04]"
+        >
+            <span className="flex items-start gap-2">
+                <InformationCircleIcon className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" aria-hidden />
+                <span>{text}</span>
+            </span>
+        </div>
+    )
+
+    return (
+        <>
+            <span
+                ref={anchorRef}
+                className="inline-block max-w-full cursor-help border-b border-dotted border-gray-400/45 align-top transition duration-150 hover:border-gray-500/80 focus-visible:border-gray-500/80 focus-visible:outline-none"
+                aria-describedby={tipId}
+                tabIndex={0}
+                onMouseEnter={() => setOpen(true)}
+                onMouseLeave={() => setOpen(false)}
+                onFocus={() => setOpen(true)}
+                onBlur={() => setOpen(false)}
+            >
+                {fieldLabel}
+            </span>
+            {open && typeof document !== 'undefined' ? createPortal(tipNode, document.body) : null}
+        </>
+    )
 }
 
 export default function AssetMetadataDisplay({
@@ -474,14 +582,10 @@ export default function AssetMetadataDisplay({
                                     <div className="flex flex-col md:flex-row md:items-start md:gap-4 md:flex-1 md:min-w-0 md:flex-wrap">
                                         {/* Mobile: label above, Desktop: fixed-width label column */}
                                         <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex flex-col md:items-start">
-                                            <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                                {field.display_label}
-                                            </span>
-                                            {field.description?.trim() ? (
-                                                <span className="mt-0.5 block text-xs font-normal leading-snug text-gray-400">
-                                                    {field.description.trim()}
-                                                </span>
-                                            ) : null}
+                                            <MetadataFieldLabelWithTip
+                                                fieldLabel={field.display_label}
+                                                field={field}
+                                            />
                                         </dt>
                                         {/* Show the value if there is one; system fields show label even when empty; workspace editable rows show a hint when empty */}
                                         {(displayValue ||

@@ -89,7 +89,8 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
     }
 
     const isMultiselectField = field?.type === 'multiselect'
-
+    const helpText =
+        typeof field?.description === 'string' ? field.description.trim() : ''
     return (
         <>
             {/* Backdrop */}
@@ -141,38 +142,53 @@ export default function AssetMetadataEditModal({ assetId, field, primaryColor, o
                             </div>
                         )}
 
-                        <div className={isMultiselectField ? 'flex min-h-0 flex-col' : 'space-y-4'}>
+                        <div className={isMultiselectField ? 'flex min-h-0 flex-col gap-3' : 'space-y-4'}>
                             {/* Boolean with display_widget=toggle (or starred): toggle in modal using brand primary color */}
                             {(field.type === 'boolean' && (field.display_widget === 'toggle' || field.key === 'starred' || field.field_key === 'starred')) ? (
-                                <label className="flex items-center justify-between gap-4 cursor-pointer">
-                                    <span className="text-sm font-medium text-gray-700">{field.display_label}</span>
-                                    <div className="relative inline-flex items-center flex-shrink-0">
-                                        <input
-                                            type="checkbox"
-                                            checked={value === true || value === 'true'}
-                                            onChange={(e) => setValue(e.target.checked)}
-                                            disabled={saving}
-                                            className="sr-only peer"
-                                        />
-                                        <div
-                                            className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed"
-                                            style={{
-                                                ['--tw-ring-color']: brandPrimary,
-                                                ...(value === true || value === 'true' ? { backgroundColor: brandPrimary } : {}),
-                                            }}
-                                        />
-                                    </div>
-                                </label>
+                                <div className="space-y-2">
+                                    <label className="flex items-center justify-between gap-4 cursor-pointer">
+                                        <span className="text-sm font-medium text-gray-700">{field.display_label}</span>
+                                        <div className="relative inline-flex items-center flex-shrink-0">
+                                            <input
+                                                type="checkbox"
+                                                checked={value === true || value === 'true'}
+                                                onChange={(e) => setValue(e.target.checked)}
+                                                disabled={saving}
+                                                className="sr-only peer"
+                                            />
+                                            <div
+                                                className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-focus:outline-none peer-focus:ring-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                style={{
+                                                    ['--tw-ring-color']: brandPrimary,
+                                                    ...(value === true || value === 'true' ? { backgroundColor: brandPrimary } : {}),
+                                                }}
+                                            />
+                                        </div>
+                                    </label>
+                                    {helpText ? (
+                                        <p className="text-xs text-gray-500 leading-snug">
+                                            {helpText}
+                                        </p>
+                                    ) : null}
+                                </div>
                             ) : (
-                                <MetadataFieldInput
-                                    field={field}
-                                    value={value}
-                                    onChange={setValue}
-                                    disabled={saving}
-                                    showError={false}
-                                    isUploadContext={false}
-                                    layout={isMultiselectField ? 'modal' : 'default'}
-                                />
+                                <>
+                                    <MetadataFieldInput
+                                        field={field}
+                                        value={value}
+                                        onChange={setValue}
+                                        disabled={saving}
+                                        showError={false}
+                                        isUploadContext={false}
+                                        layout={isMultiselectField ? 'modal' : 'default'}
+                                        showDescriptionHint={false}
+                                    />
+                                    {helpText ? (
+                                        <p className="text-xs text-gray-500 leading-snug">
+                                            {helpText}
+                                        </p>
+                                    ) : null}
+                                </>
                             )}
                         </div>
                     </div>

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AssetType;
 use App\Exceptions\CreatorModuleInactiveException;
+use App\Exceptions\UploadContentRejectedException;
 use App\Http\Responses\UploadErrorResponse;
 use App\Models\Asset;
 use App\Models\Brand;
@@ -16,6 +17,7 @@ use App\Services\AbandonedSessionService;
 use App\Services\ActivityRecorder;
 use App\Services\AssetEligibilityService;
 use App\Services\CollectionAssetService;
+use App\Services\FileTypeService;
 use App\Services\Metadata\AssetMetadataStateResolver;
 use App\Services\MetadataApprovalResolver;
 use App\Services\MetadataPersistenceService;
@@ -63,6 +65,7 @@ class UploadController extends Controller
         protected CollectionAssetService $collectionAssetService,
         protected AssetEligibilityService $assetEligibilityService,
         protected UploadPreflightService $uploadPreflightService,
+        protected FileTypeService $fileTypeService,
     ) {}
 
     /**
@@ -106,6 +109,71 @@ class UploadController extends Controller
             'builder_staged' => 'nullable|boolean',
             'builder_context' => 'nullable|string|max:64', // e.g. logo_primary, photo_reference, texture_reference
         ]);
+
+        // Filename hardening + Gate 2 (single-file path) — same allowlist decision
+        // as initiate-batch so this route can never be used to bypass the gate.
+        $sanitizedName = $this->fileTypeService->sanitizeFilename((string) $validated['file_name']);
+        if ($sanitizedName === '' || $sanitizedName !== $validated['file_name']) {
+            Log::warning('upload_blocked', [
+                'gate' => 'initiate',
+                'reason' => 'invalid_filename',
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'name' => $validated['file_name'],
+            ]);
+
+            return response()->json([
+                'error' => 'invalid_filename',
+                'code' => 'invalid_filename',
+                'message' => 'File name contains characters that are not allowed. Please rename the file and try again.',
+            ], 422);
+        }
+        $validated['file_name'] = $sanitizedName;
+
+        $double = $this->fileTypeService->detectDoubleExtensionAttack($validated['file_name']);
+        if ($double !== null) {
+            Log::warning('upload_blocked', [
+                'gate' => 'initiate',
+                'reason' => 'double_extension',
+                'tenant_id' => $tenant->id,
+                'user_id' => $user->id,
+                'name' => $validated['file_name'],
+                'hit_extension' => $double['hit_extension'],
+                'group' => $double['group'],
+            ]);
+
+            return response()->json([
+                'error' => 'upload_not_allowed',
+                'code' => 'blocked_double_extension',
+                'message' => $double['message'],
+            ], 422);
+        }
+
+        $extForGate = strtolower((string) pathinfo($validated['file_name'], PATHINFO_EXTENSION));
+        $decision = $this->fileTypeService->isUploadAllowed($validated['mime_type'] ?? null, $extForGate);
+        if (! $decision['allowed']) {
+            Log::log(
+                $decision['log_severity'] === 'warning' ? 'warning' : 'info',
+                'upload_blocked',
+                [
+                    'gate' => 'initiate',
+                    'tenant_id' => $tenant->id,
+                    'user_id' => $user->id,
+                    'name' => $validated['file_name'],
+                    'mime_type' => $validated['mime_type'] ?? null,
+                    'extension' => $extForGate,
+                    'code' => $decision['code'],
+                    'blocked_group' => $decision['blocked_group'],
+                    'file_type' => $decision['file_type'],
+                ]
+            );
+
+            return response()->json([
+                'error' => 'upload_not_allowed',
+                'code' => $decision['code'],
+                'message' => $decision['message'],
+            ], 422);
+        }
 
         // Verify brand belongs to tenant if provided
         $brand = null;
@@ -606,15 +674,97 @@ class UploadController extends Controller
         }
 
         try {
-            // Prepare files array for service
+            // Prepare files array for service — sanitize filename + harden against
+            // path-traversal, NUL bytes, Windows-reserved names, and excessive length.
             $files = array_map(function ($file) {
+                $name = $this->fileTypeService->sanitizeFilename((string) $file['file_name']);
+
                 return [
-                    'file_name' => $file['file_name'],
+                    'file_name' => $name !== '' ? $name : (string) $file['file_name'],
                     'file_size' => $file['file_size'],
                     'mime_type' => $file['mime_type'] ?? null,
                     'client_reference' => $file['client_reference'] ?? null,
                 ];
             }, $validated['files']);
+
+            // Gate 2: server-side allowlist enforcement at initiate-batch.
+            // Runs unconditionally — even when the client omits preflight_id (the
+            // historical Retry bypass). Any blocked / unsupported / coming-soon
+            // file fails the entire batch with a 422 + structured error code.
+            foreach ($files as $i => $f) {
+                $rawName = (string) $f['file_name'];
+                $ext = strtolower((string) pathinfo($rawName, PATHINFO_EXTENSION));
+
+                if ($rawName === '' || $rawName !== $this->fileTypeService->sanitizeFilename($rawName)) {
+                    Log::warning('upload_blocked', [
+                        'gate' => 'initiate_batch',
+                        'reason' => 'invalid_filename',
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $user->id,
+                        'brand_id' => $brand->id,
+                        'name' => $rawName,
+                        'index' => $i,
+                    ]);
+
+                    return response()->json([
+                        'error' => 'invalid_filename',
+                        'code' => 'invalid_filename',
+                        'message' => 'File name contains characters that are not allowed. Please rename the file and try again.',
+                        'index' => $i,
+                    ], 422);
+                }
+
+                $double = $this->fileTypeService->detectDoubleExtensionAttack($rawName);
+                if ($double !== null) {
+                    Log::warning('upload_blocked', [
+                        'gate' => 'initiate_batch',
+                        'reason' => 'double_extension',
+                        'tenant_id' => $tenant->id,
+                        'user_id' => $user->id,
+                        'brand_id' => $brand->id,
+                        'name' => $rawName,
+                        'hit_extension' => $double['hit_extension'],
+                        'group' => $double['group'],
+                        'index' => $i,
+                    ]);
+
+                    return response()->json([
+                        'error' => 'upload_not_allowed',
+                        'code' => 'blocked_double_extension',
+                        'message' => $double['message'],
+                        'index' => $i,
+                    ], 422);
+                }
+
+                $decision = $this->fileTypeService->isUploadAllowed($f['mime_type'] ?? null, $ext);
+                if (! $decision['allowed']) {
+                    Log::log(
+                        $decision['log_severity'] === 'warning' ? 'warning' : 'info',
+                        'upload_blocked',
+                        [
+                            'gate' => 'initiate_batch',
+                            'tenant_id' => $tenant->id,
+                            'user_id' => $user->id,
+                            'brand_id' => $brand->id,
+                            'name' => $rawName,
+                            'mime_type' => $f['mime_type'] ?? null,
+                            'extension' => $ext,
+                            'code' => $decision['code'],
+                            'blocked_group' => $decision['blocked_group'],
+                            'file_type' => $decision['file_type'],
+                            'index' => $i,
+                            'has_preflight' => ! empty($validated['preflight_id']),
+                        ]
+                    );
+
+                    return response()->json([
+                        'error' => 'upload_not_allowed',
+                        'code' => $decision['code'],
+                        'message' => $decision['message'],
+                        'index' => $i,
+                    ], 422);
+                }
+            }
 
             if (! empty($validated['preflight_id'])) {
                 $preflightPayload = $this->uploadPreflightService->getCachedPayload($validated['preflight_id']);
@@ -2550,6 +2700,49 @@ class UploadController extends Controller
                     ],
                     $e->clientPayload()
                 );
+            } catch (UploadContentRejectedException $e) {
+                // Gate 3 rejection (real-content sniff at finalize). The temp S3
+                // object has already been deleted and the UploadSession marked
+                // failed by UploadCompletionService. We just surface a clean
+                // structured error so the queue row shows the right message.
+                Log::warning('upload_blocked', [
+                    'gate' => 'finalize_response',
+                    'tenant_id' => $tenant->id,
+                    'user_id' => $user->id,
+                    'brand_id' => $uploadSession->brand_id ?? null,
+                    'upload_session_id' => $uploadSession->id ?? null,
+                    'upload_key' => $uploadKey,
+                    'code' => $e->errorCode,
+                    'blocked_group' => $e->blockedGroup,
+                    'declared_mime' => $e->declaredMime,
+                    'detected_mime' => $e->detectedMime,
+                    'extension' => $e->extension,
+                ]);
+
+                $errorRow = [
+                    'upload_key' => $uploadKey,
+                    'status' => 'failed',
+                    'error' => [
+                        'code' => UploadErrorResponse::CODE_VALIDATION_FAILED,
+                        'message' => $e->getMessage(),
+                        'error_code' => $e->errorCode,
+                        'category' => UploadErrorResponse::getCategoryFromErrorCode(
+                            UploadErrorResponse::CODE_VALIDATION_FAILED
+                        ),
+                        'context' => [
+                            'upload_session_id' => $uploadSession?->id,
+                            'pipeline_stage' => UploadErrorResponse::STAGE_FINALIZE,
+                            'detected_mime' => $e->detectedMime,
+                            'declared_mime' => $e->declaredMime,
+                            'extension' => $e->extension,
+                            'blocked_group' => $e->blockedGroup,
+                        ],
+                    ],
+                ];
+                if ($clientFileId !== null) {
+                    $errorRow['client_file_id'] = $clientFileId;
+                }
+                $results[] = $errorRow;
             } catch (\RuntimeException $e) {
                 // Phase 2.5 Step 2: Normalize error response for finalize failures
                 $errorMessage = $e->getMessage();

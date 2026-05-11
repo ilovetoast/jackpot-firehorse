@@ -602,6 +602,7 @@ class ProcessAssetJob implements ShouldQueue
             $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
             $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
             $isVideo = $fileType === 'video';
+            $isAudio = $fileType === 'audio';
 
             PipelineLogger::warning('PIPELINE: Dispatching GenerateThumbnailsJob in chain', [
                 'asset_id' => $asset->id,
@@ -620,6 +621,15 @@ class ProcessAssetJob implements ShouldQueue
             // Add video preview generation for video assets (after thumbnails)
             if ($isVideo) {
                 $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
+            }
+
+            // Audio assets: render waveform PNG and extract FFprobe metadata in
+            // the chain. AI analysis (transcript / mood) dispatches separately
+            // on the `ai` queue so it can run in parallel without blocking the
+            // grid from rendering the waveform thumbnail.
+            if ($isAudio) {
+                $chainJobs[] = new GenerateAudioWaveformJob($asset->id);
+                $chainJobs[] = new ExtractAudioMetadataJob($asset->id);
             }
 
             $chainJobs = array_merge($chainJobs, [
@@ -733,6 +743,21 @@ class ProcessAssetJob implements ShouldQueue
                     $mergedMeta = array_merge($assetMeta, ['ai_video_status' => 'queued']);
                     $asset->update(['metadata' => $mergedMeta]);
                     ProcessVideoInsightsBatchJob::dispatch([(string) $asset->id]);
+                }
+            }
+
+            // Audio AI analysis dispatches separately so it does not gate the
+            // waveform/metadata jobs in the main chain. Provider is optional
+            // for now (see AudioAiAnalysisService).
+            if ($isAudio && config('assets.audio_ai.enabled', true) && config('assets.audio_ai.auto_run_after_upload', true)) {
+                $asset->refresh();
+                $assetMeta = $asset->metadata ?? [];
+                $skipAudioAi = ! empty($assetMeta['_skip_ai_audio_analysis']);
+                if (! $skipAudioAi) {
+                    $mergedMeta = $assetMeta;
+                    $mergedMeta['audio'] = array_merge($mergedMeta['audio'] ?? [], ['ai_status' => 'queued']);
+                    $asset->update(['metadata' => $mergedMeta]);
+                    RunAudioAiAnalysisJob::dispatch((string) $asset->id);
                 }
             }
 

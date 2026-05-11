@@ -84,7 +84,7 @@ return [
             'max_reference_images' => 2,
         ],
         /**
-         * Normalized tags (whole string, after {@see AiMetadataGenerationService::normalizeTag}) that Vision
+         * Normalized tags (whole string, after {@see AiMetadataGenerationService::canonicalizeAiVisionTagString}) that Vision
          * often misassigns on packaging, sell sheets, and product hero art — dropped before candidates are stored.
          * Comma-separated env override replaces the default list (use empty string to allow all).
          */

@@ -3,20 +3,34 @@
 return [
     /*
     |--------------------------------------------------------------------------
-    | File Type Registry
+    | File Type Registry — SINGLE SOURCE OF TRUTH
     |--------------------------------------------------------------------------
     |
-    | Central registry for all supported file types in the DAM system.
-    | This is the SINGLE SOURCE OF TRUTH for file type support.
-    | All services must consult this configuration via FileTypeService.
+    | This file is the ONE place that decides what can be uploaded, what is
+    | explicitly blocked, what is "coming soon", and how each registered type
+    | is processed downstream.
     |
-    | Each file type defines:
-    |   - Detection: MIME types and extensions
-    |   - Capabilities: What operations are supported
-    |   - Handlers: Method names for processing
-    |   - Requirements: PHP extensions, packages, external tools
-    |   - Errors: Type-specific error messages
-    |   - Frontend hints: UI behavior hints (read-only)
+    | Both backend (FileTypeService, UploadPreflightService, UploadController,
+    | UploadCompletionService, processing jobs) AND frontend (Inertia
+    | `dam_file_types` shared prop, damFileTypes.js, UploadAssetDialog) read
+    | from this registry via FileTypeService.
+    |
+    | To add a new type:           add an entry under `types`.
+    | To block a new exploit:      add an entry under `blocked`.
+    | To temporarily soft-disable: set the type's `upload.status = 'coming_soon'`.
+    | To skip thumbnails only:     add to `thumbnail_skip`.
+    |
+    | DO NOT add another file with extension lists. DO NOT hardcode MIMEs in
+    | services or jobs. Always go through FileTypeService.
+    |
+    | Top-level keys:
+    |   - types               : allowed types, with capabilities/handlers/upload settings
+    |   - blocked             : security-blocked groups (executables, scripts, archives, ...)
+    |   - thumbnail_skip      : registered for thumbnail-skip messaging only (no upload effect)
+    |   - supported_thumbnail_extensions : reference list (kept for back-compat)
+    |   - global_errors       : generic error messages
+    |   - error_patterns      : regex -> message-key mappings for sanitizeErrorMessage()
+    |   - mime_to_extension   : output extension mapping for thumbnail writes
     |
     */
 
@@ -24,8 +38,7 @@ return [
         'image' => [
             'name' => 'Image',
             'description' => 'Standard image formats (JPEG, PNG, GIF, WebP)',
-            
-            // Detection criteria
+
             'mime_types' => [
                 'image/jpeg',
                 'image/jpg',
@@ -34,8 +47,18 @@ return [
                 'image/webp',
             ],
             'extensions' => ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-            
-            // Processing capabilities
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [
+                    'image/pjpeg' => 'image/jpeg',
+                    'image/x-png' => 'image/png',
+                ],
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
@@ -43,26 +66,22 @@ return [
                 'ai_analysis' => true,
                 'download_only' => false,
             ],
-            
-            // Handler configuration (method names in services)
+
             'handlers' => [
                 'thumbnail' => 'generateImageThumbnail',
                 'metadata' => 'extractImageMetadata',
             ],
-            
-            // Requirements
+
             'requirements' => [
                 'php_extensions' => ['gd'],
             ],
-            
-            // Error messages
+
             'errors' => [
                 'processing_failed' => 'Unable to process image. The file format may not be supported.',
                 'corrupted' => 'Unable to read image file. The file may be corrupted.',
                 'resize_failed' => 'Unable to resize image. Please try again.',
             ],
-            
-            // Frontend hints (read-only, for UI consumption)
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
@@ -74,10 +93,21 @@ return [
         'tiff' => [
             'name' => 'TIFF',
             'description' => 'TIFF image format (requires Imagick)',
-            
+
             'mime_types' => ['image/tiff', 'image/tif', 'image/x-tiff'],
             'extensions' => ['tiff', 'tif'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [
+                    'image/x-tiff' => 'image/tiff',
+                    'image/tif' => 'image/tiff',
+                ],
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
@@ -85,22 +115,22 @@ return [
                 'ai_analysis' => true,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateTiffThumbnail',
                 'metadata' => 'extractTiffMetadata',
             ],
-            
+
             'requirements' => [
                 'php_extensions' => ['imagick'],
             ],
-            
+
             'errors' => [
                 'processing_failed' => 'TIFF file processing requires Imagick PHP extension.',
                 'corrupted' => 'Downloaded file is not a valid TIFF image.',
                 'invalid_dimensions' => 'TIFF file has invalid dimensions.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
@@ -121,6 +151,14 @@ return [
                 'image/x-canon-cr2',
             ],
             'extensions' => ['cr2'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
 
             'capabilities' => [
                 'thumbnail' => true,
@@ -156,10 +194,18 @@ return [
         'avif' => [
             'name' => 'AVIF',
             'description' => 'AVIF image format (requires Imagick)',
-            
+
             'mime_types' => ['image/avif'],
             'extensions' => ['avif'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
@@ -167,22 +213,22 @@ return [
                 'ai_analysis' => true,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateAvifThumbnail',
                 'metadata' => 'extractAvifMetadata',
             ],
-            
+
             'requirements' => [
                 'php_extensions' => ['imagick'],
             ],
-            
+
             'errors' => [
                 'processing_failed' => 'AVIF file processing requires Imagick PHP extension.',
                 'corrupted' => 'Downloaded file is not a valid AVIF image.',
                 'invalid_dimensions' => 'AVIF file has invalid dimensions.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
@@ -197,6 +243,14 @@ return [
 
             'mime_types' => ['image/heic', 'image/heif'],
             'extensions' => ['heic', 'heif'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
 
             'capabilities' => [
                 'thumbnail' => true,
@@ -232,28 +286,38 @@ return [
         'pdf' => [
             'name' => 'PDF',
             'description' => 'PDF documents (first page thumbnail)',
-            
+
             'mime_types' => ['application/pdf'],
             'extensions' => ['pdf'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => 150 * 1024 * 1024,
+                'sniff_mime_aliases' => [
+                    'application/x-pdf' => 'application/pdf',
+                ],
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
                 'preview' => true,
-                'ai_analysis' => false, // PDFs may not support AI analysis yet
+                'ai_analysis' => false,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generatePdfThumbnail',
                 'metadata' => 'extractPdfMetadata',
             ],
-            
+
             'requirements' => [
                 'php_extensions' => ['imagick'],
                 'php_packages' => ['spatie/pdf-to-image'],
             ],
-            
+
             'errors' => [
                 'processing_failed' => 'PDF processing error. Please try again or contact support if the issue persists.',
                 'file_not_found' => 'The PDF file could not be found or accessed.',
@@ -261,17 +325,16 @@ return [
                 'generation_failed' => 'Unable to generate preview from PDF. The file may be corrupted or too large.',
                 'size_exceeded' => 'PDF file size exceeds maximum allowed size. Large PDFs may cause memory exhaustion.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'pdf',
                 'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
-            
-            // Type-specific configuration
+
             'config' => [
-                'max_size_bytes' => 150 * 1024 * 1024, // 150MB
+                'max_size_bytes' => 150 * 1024 * 1024,
                 'max_page' => 1,
                 'timeout_seconds' => 60,
             ],
@@ -280,32 +343,40 @@ return [
         'psd' => [
             'name' => 'Photoshop',
             'description' => 'Adobe Photoshop files (PSD/PSB)',
-            
+
             'mime_types' => ['image/vnd.adobe.photoshop'],
             'extensions' => ['psd', 'psb'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
             'capabilities' => [
-                'thumbnail' => true, // Enabled - uses Imagick to flatten and generate preview
+                'thumbnail' => true,
                 'metadata' => false,
                 'preview' => true,
                 'ai_analysis' => false,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generatePsdThumbnail',
             ],
-            
+
             'requirements' => [
                 'php_extensions' => ['imagick'],
             ],
-            
+
             'errors' => [
                 'processing_failed' => 'Unable to process PSD file. The file may be corrupted or require ImageMagick with PSD support.',
                 'imagick_not_found' => 'PSD processing requires Imagick PHP extension with ImageMagick.',
                 'corrupted' => 'Unable to read PSD file. The file may be corrupted.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
@@ -317,34 +388,42 @@ return [
         'ai' => [
             'name' => 'Illustrator',
             'description' => 'Adobe Illustrator and Encapsulated PostScript files',
-            
+
             'mime_types' => [
                 'application/postscript',
                 'application/vnd.adobe.illustrator',
                 'application/illustrator',
             ],
             'extensions' => ['ai', 'eps'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
             'capabilities' => [
-                'thumbnail' => true, // Via Imagick (PDF-compatible AI files)
+                'thumbnail' => true,
                 'metadata' => false,
                 'preview' => true,
                 'ai_analysis' => false,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateAiThumbnail',
             ],
-            
+
             'requirements' => [
                 'php_extensions' => ['imagick'],
             ],
-            
+
             'errors' => [
                 'not_implemented' => 'AI thumbnail generation is not yet implemented.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => false,
                 'preview_component' => 'placeholder',
@@ -356,7 +435,7 @@ return [
         'office' => [
             'name' => 'Office Documents',
             'description' => 'Microsoft Office files (Word, Excel, PowerPoint)',
-            
+
             'mime_types' => [
                 'application/msword',
                 'application/vnd.ms-excel',
@@ -366,27 +445,35 @@ return [
                 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             ],
             'extensions' => ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
             'capabilities' => [
-                'thumbnail' => false, // @todo Implement
+                'thumbnail' => false,
                 'metadata' => false,
                 'preview' => false,
                 'ai_analysis' => false,
                 'download_only' => true,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateOfficeThumbnail',
             ],
-            
+
             'requirements' => [
-                'external_tools' => ['libreoffice'], // Future requirement
+                'external_tools' => ['libreoffice'],
             ],
-            
+
             'errors' => [
                 'not_implemented' => 'Office document thumbnail generation is not yet implemented.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => false,
                 'preview_component' => 'placeholder',
@@ -397,11 +484,26 @@ return [
 
         'svg' => [
             'name' => 'SVG',
-            'description' => 'Scalable Vector Graphics (passthrough - original served as thumbnail)',
-            
+            'description' => 'Scalable Vector Graphics (sanitized at finalize)',
+
             'mime_types' => ['image/svg+xml'],
             'extensions' => ['svg'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => 10 * 1024 * 1024,
+                'sniff_mime_aliases' => [
+                    'text/xml' => 'image/svg+xml',
+                    'application/xml' => 'image/svg+xml',
+                    'text/plain' => 'image/svg+xml',
+                ],
+                // SVGs are sanitized at finalize (strip <script>, event handlers, foreignObject, ...)
+                // before bytes are committed to the asset version.
+                'requires_sanitization' => true,
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
@@ -409,18 +511,19 @@ return [
                 'ai_analysis' => false,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateSvgThumbnail',
             ],
-            
-            'requirements' => [], // No PHP extensions needed - passthrough uses original file
-            
+
+            'requirements' => [],
+
             'errors' => [
                 'processing_failed' => 'Unable to process SVG file. The file may be corrupted.',
                 'corrupted' => 'Unable to read SVG file. The file may be corrupted.',
+                'sanitization_failed' => 'Unable to sanitize SVG file. The file may contain unsupported content.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
@@ -432,7 +535,7 @@ return [
         'video' => [
             'name' => 'Video',
             'description' => 'Video files (MP4, MOV, AVI, etc.)',
-            
+
             'mime_types' => [
                 'video/mp4',
                 'video/quicktime',
@@ -442,7 +545,15 @@ return [
                 'video/x-m4v',
             ],
             'extensions' => ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'],
-            
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
             'capabilities' => [
                 'thumbnail' => true,
                 'metadata' => true,
@@ -450,26 +561,97 @@ return [
                 'ai_analysis' => false,
                 'download_only' => false,
             ],
-            
+
             'handlers' => [
                 'thumbnail' => 'generateVideoThumbnail',
                 'metadata' => 'extractVideoMetadata',
             ],
-            
+
             'requirements' => [
                 'external_tools' => ['ffmpeg'],
             ],
-            
+
             'errors' => [
                 'processing_failed' => 'Unable to process video. The file format may not be supported.',
                 'corrupted' => 'Unable to read video file. The file may be corrupted.',
                 'ffmpeg_not_found' => 'Video processing requires FFmpeg to be installed.',
                 'extraction_failed' => 'Unable to extract video frame. Please try again.',
             ],
-            
+
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'video',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'audio' => [
+            'name' => 'Audio',
+            'description' => 'Audio files (MP3, WAV, AAC, M4A, OGG, FLAC). Waveform thumbnail + AI transcript/mood.',
+
+            'mime_types' => [
+                'audio/mpeg',
+                'audio/mp3',
+                'audio/wav',
+                'audio/x-wav',
+                'audio/wave',
+                'audio/aac',
+                'audio/mp4',
+                'audio/x-m4a',
+                'audio/m4a',
+                'audio/ogg',
+                'audio/flac',
+                'audio/x-flac',
+                'audio/webm',
+            ],
+            'extensions' => ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [
+                    'audio/x-mpeg' => 'audio/mpeg',
+                    'audio/mp3' => 'audio/mpeg',
+                    'audio/x-wav' => 'audio/wav',
+                    'audio/wave' => 'audio/wav',
+                    'audio/x-flac' => 'audio/flac',
+                    'audio/x-m4a' => 'audio/mp4',
+                    'audio/m4a' => 'audio/mp4',
+                ],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => true,
+                'download_only' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateAudioWaveform',
+                'metadata' => 'extractAudioMetadata',
+                'ai_analysis' => 'runAudioAiAnalysis',
+            ],
+
+            'requirements' => [
+                'external_tools' => ['ffmpeg'],
+            ],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process audio. The file format may not be supported.',
+                'corrupted' => 'Unable to read audio file. The file may be corrupted.',
+                'ffmpeg_not_found' => 'Audio processing requires FFmpeg to be installed.',
+                'waveform_failed' => 'Unable to generate waveform image. Please try again.',
+                'transcription_failed' => 'Unable to generate transcript for this audio.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'audio',
                 'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
@@ -478,46 +660,165 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Unsupported Types
+    | Blocked Upload Types — Hard Security Block
     |--------------------------------------------------------------------------
     |
-    | File types that are explicitly NOT supported, with skip reasons.
-    | Used for UI messaging and error handling.
+    | Files matching these MIME types or extensions are REJECTED at every gate
+    | (preflight, initiate-batch, finalize content sniff). They never touch the
+    | DAM. Add new exploit formats here only.
+    |
+    | Each group has:
+    |   - extensions     : list of ext (no leading dot, lowercase)
+    |   - mime_types     : list of MIME types (lowercase) — checked in addition to ext
+    |   - message        : user-facing rejection text
+    |   - log_severity   : 'warning' (security-relevant) | 'info' (benign reject)
+    |   - code_suffix    : appended to 'blocked_' for the API error code
     |
     */
+    'blocked' => [
+        'executable' => [
+            'extensions' => [
+                'exe', 'bat', 'cmd', 'com', 'pif', 'scr', 'msi', 'msp', 'dll', 'app', 'reg',
+                'ps1', 'deb', 'rpm', 'sh', 'bash', 'zsh', 'fish', 'cpl', 'lnk', 'gadget',
+                'hta', 'vbs', 'vbe', 'wsf', 'wsh', 'jar', 'class', 'apk', 'dmg', 'iso',
+                'img', 'bin', 'run', 'pkg', 'mpkg', 'workflow', 'action', 'osx',
+            ],
+            'mime_types' => [
+                'application/x-msdownload',
+                'application/x-msi',
+                'application/x-msdos-program',
+                'application/x-sh',
+                'application/x-bash',
+                'application/x-executable',
+                'application/x-mach-binary',
+                'application/x-dosexec',
+                'application/vnd.microsoft.portable-executable',
+                'application/java-archive',
+                'application/x-java-archive',
+                'application/vnd.android.package-archive',
+                'application/x-apple-diskimage',
+                'application/x-iso9660-image',
+            ],
+            'message' => 'Executable files cannot be uploaded for security reasons.',
+            'log_severity' => 'warning',
+            'code_suffix' => 'executable',
+        ],
 
-    'unsupported' => [
+        'server_script' => [
+            'extensions' => [
+                'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phps', 'phtml', 'phar', 'pht',
+                'jsp', 'jspx', 'asp', 'aspx', 'cer', 'asa', 'cgi', 'pl', 'py', 'pyc', 'pyo',
+                'rb', 'erb', 'rhtml', 'lua', 'tcl', 'cfm', 'cfml',
+                'htaccess', 'htpasswd', 'ini', 'env',
+            ],
+            'mime_types' => [
+                'application/x-httpd-php',
+                'application/x-httpd-php-source',
+                'application/x-php',
+                'text/x-php',
+                'application/x-perl',
+                'text/x-perl',
+                'application/x-python',
+                'text/x-python',
+                'application/x-ruby',
+                'text/x-ruby',
+            ],
+            'message' => 'Server script files cannot be uploaded for security reasons.',
+            'log_severity' => 'warning',
+            'code_suffix' => 'server_script',
+        ],
+
+        'archive' => [
+            'extensions' => ['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'tbz', 'tbz2', 'xz', 'txz', 'z', 'lz', 'lzh', 'lha', 'cab', 'arj', 'ace', 'iso9660'],
+            'mime_types' => [
+                'application/zip',
+                'application/x-zip-compressed',
+                'application/x-zip',
+                'multipart/x-zip',
+                'application/x-tar',
+                'application/x-gtar',
+                'application/gzip',
+                'application/x-gzip',
+                'application/x-rar-compressed',
+                'application/vnd.rar',
+                'application/x-rar',
+                'application/x-7z-compressed',
+                'application/x-bzip',
+                'application/x-bzip2',
+                'application/x-xz',
+                'application/x-compressed',
+                'application/x-lzh-compressed',
+                'application/vnd.ms-cab-compressed',
+            ],
+            'message' => 'Archive files cannot be uploaded. Please extract and upload the contents individually.',
+            'log_severity' => 'info',
+            'code_suffix' => 'archive',
+        ],
+
+        'web' => [
+            // HTML pages and other browser-renderable content uploaded into a tenant
+            // workspace are an XSS vector when later served from the same origin.
+            'extensions' => ['html', 'htm', 'xhtml', 'mhtml', 'mht', 'shtml', 'xht', 'svgz'],
+            'mime_types' => [
+                'text/html',
+                'application/xhtml+xml',
+                'multipart/related',
+                'message/rfc822',
+            ],
+            'message' => 'HTML and web pages cannot be uploaded for security reasons.',
+            'log_severity' => 'warning',
+            'code_suffix' => 'web',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Thumbnail Skip Reasons (NOT an upload block)
+    |--------------------------------------------------------------------------
+    |
+    | These types CAN BE UPLOADED (if they happen to slip through the allowlist
+    | via, say, an admin override) but their thumbnails are skipped with a
+    | friendly placeholder reason. Distinct from `blocked` (hard security
+    | rejection) and from `types` (allowed for upload).
+    |
+    | Today this list is essentially "decorative" — nothing here also appears
+    | in `types`, so in practice these formats are rejected by the allowlist
+    | gate. Kept for backwards compatibility with thumbnail pipeline messaging.
+    |
+    */
+    'thumbnail_skip' => [
         'bmp' => [
-            'mime_types' => ['image/bmp'],
+            'mime_types' => ['image/bmp', 'image/x-bmp', 'image/x-ms-bmp'],
             'extensions' => ['bmp'],
             'skip_reason' => 'unsupported_format:bmp',
             'message' => 'Thumbnail generation is not supported for this file type.',
-            'disable_upload_reason' => 'BMP format is not supported for thumbnail generation.',
         ],
         'ico' => [
             'mime_types' => ['image/x-icon', 'image/vnd.microsoft.icon'],
             'extensions' => ['ico'],
             'skip_reason' => 'unsupported_format:ico',
             'message' => 'Thumbnail generation is not supported for this file type.',
-            'disable_upload_reason' => null,
         ],
-        'zip' => [
-            'mime_types' => ['application/zip', 'application/x-zip-compressed'],
-            'extensions' => ['zip'],
-            'skip_reason' => 'unsupported_format:zip',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Legacy alias — kept only for code paths still calling
+    | FileTypeService::getUnsupportedReason(). Resolves to `thumbnail_skip`.
+    |
+    */
+    'unsupported' => [
+        'bmp' => [
+            'mime_types' => ['image/bmp', 'image/x-bmp', 'image/x-ms-bmp'],
+            'extensions' => ['bmp'],
+            'skip_reason' => 'unsupported_format:bmp',
             'message' => 'Thumbnail generation is not supported for this file type.',
             'disable_upload_reason' => null,
         ],
-        'archive' => [
-            'mime_types' => [
-                'application/x-tar',
-                'application/gzip',
-                'application/x-gzip',
-                'application/x-rar-compressed',
-                'application/x-7z-compressed',
-            ],
-            'extensions' => ['tar', 'gz', 'rar', '7z'],
-            'skip_reason' => 'unsupported_format:archive',
+        'ico' => [
+            'mime_types' => ['image/x-icon', 'image/vnd.microsoft.icon'],
+            'extensions' => ['ico'],
+            'skip_reason' => 'unsupported_format:ico',
             'message' => 'Thumbnail generation is not supported for this file type.',
             'disable_upload_reason' => null,
         ],
@@ -533,19 +834,16 @@ return [
     |
     */
     'supported_thumbnail_extensions' => [
-        'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'cr2', 'avif', 'pdf',
-        'psd', 'psb', 'ai', 'eps', 'svg', 'doc', 'docx', 'xls', 'xlsx',
-        'ppt', 'pptx', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
+        'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'cr2', 'avif', 'heic', 'heif',
+        'pdf', 'psd', 'psb', 'ai', 'eps', 'svg',
+        'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
+        'mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba',
     ],
 
     /*
     |--------------------------------------------------------------------------
     | Global Error Messages
     |--------------------------------------------------------------------------
-    |
-    | Error messages that apply across all file types or are generic.
-    | Type-specific errors are defined in each type's 'errors' array.
-    |
     */
 
     'global_errors' => [
@@ -559,36 +857,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Error Pattern Mappings
+    | Error Pattern Mappings (regex -> message-key) for sanitizeErrorMessage()
     |--------------------------------------------------------------------------
-    |
-    | Regex patterns for matching technical error messages to user-friendly messages.
-    | Used by sanitizeErrorMessage() to convert technical errors to user-facing messages.
-    |
     */
 
     'error_patterns' => [
-        // PDF-related errors
         'Call to undefined method.*setPage' => 'global_errors.generic',
         'Call to undefined method.*selectPage' => 'global_errors.generic',
         'PDF file does not exist' => 'pdf.errors.file_not_found',
         'Invalid PDF format' => 'pdf.errors.invalid_format',
         'PDF thumbnail generation failed' => 'pdf.errors.generation_failed',
-        
-        // Image processing errors
+
         'getimagesize.*failed' => 'image.errors.corrupted',
         'imagecreatefrom.*failed' => 'image.errors.processing_failed',
         'imagecopyresampled.*failed' => 'image.errors.resize_failed',
-        
-        // Storage errors
+
         'S3.*error' => 'global_errors.storage_failed',
         'Storage.*failed' => 'global_errors.storage_config_error',
-        
-        // Timeout errors
+
         'timeout' => 'global_errors.timeout',
         'Maximum execution time' => 'global_errors.execution_timeout',
-        
-        // Generic technical errors
+
         'Error:' => 'global_errors.generic',
         'Exception:' => 'global_errors.generic',
         'Fatal error' => 'global_errors.generic',
@@ -596,12 +885,8 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | MIME Type to Extension Mapping
+    | MIME Type to Extension Mapping (for thumbnail output writes)
     |--------------------------------------------------------------------------
-    |
-    | Standard MIME type to file extension mapping for thumbnail output.
-    | Used when determining output file extensions.
-    |
     */
 
     'mime_to_extension' => [
