@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\Prostaff\EnsureCreatorModuleEnabled;
 use App\Services\Prostaff\RecordProstaffPerformanceIncrement;
 use App\Services\Prostaff\RecordProstaffUploadBatch;
+use App\Support\UploadAuditLogger;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
@@ -1416,9 +1417,8 @@ class UploadCompletionService
             $this->deleteTempUploadOnContentReject($uploadSession, $tempKey, $bucket);
             $this->markSessionFailedForContentReject($uploadSession, $decision['code']);
 
-            Log::log(
+            UploadAuditLogger::log(
                 $decision['log_severity'] === 'warning' ? 'warning' : 'info',
-                'upload_blocked',
                 [
                     'gate' => 'finalize_content_sniff',
                     'tenant_id' => $uploadSession->tenant_id,
@@ -1451,6 +1451,26 @@ class UploadCompletionService
             $fileInfo['mime_type'] = $canonicalMime;
         }
 
+        // Phase 6: Belt-and-suspenders — verify the first bytes of the file
+        // against an explicit accept-list for the canonical MIME. Catches
+        // pathological mismatches (PE/ELF signature on a file claiming to
+        // be image/jpeg, etc.) that libmagic might canonicalize away.
+        $this->enforceMagicByteVerification(
+            $uploadSession,
+            $tempKey,
+            $bucket,
+            $finalFilename,
+            $extension,
+            $canonicalMime,
+            $fileInfo,
+        );
+
+        // Phase 6: Scrub EXIF / IPTC / XMP metadata from raster images so
+        // GPS coordinates, camera serials, and user comments don't leak
+        // into externally distributed brand assets. Best-effort — failures
+        // here never block the upload.
+        $this->scrubImageExifIfNeeded($uploadSession, $tempKey, $bucket, $canonicalMime);
+
         // SVG sanitization (and any other registered type that opts in via
         // upload.requires_sanitization) — reads the temp object, sanitizes,
         // and re-PUTs the cleaned bytes to the SAME key.
@@ -1458,6 +1478,161 @@ class UploadCompletionService
         if ($detectedType !== null && $fileTypeService->requiresSanitization($detectedType)) {
             $this->sanitizeTempUploadIfNeeded($uploadSession, $tempKey, $bucket, $detectedType);
         }
+    }
+
+    /**
+     * Phase 6: Run ImageExifScrubService on raster images. Reads the temp
+     * object, strips privacy-leaking metadata, and re-PUTs the cleaned
+     * bytes to the same key. Failure is non-fatal: scrubbing is a privacy
+     * hardening, not a correctness gate, and we'd rather ingest the
+     * original than fail an upload over an Imagick edge case.
+     */
+    protected function scrubImageExifIfNeeded(
+        UploadSession $uploadSession,
+        string $tempKey,
+        $bucket,
+        ?string $canonicalMime,
+    ): void {
+        if (! is_string($canonicalMime) || $canonicalMime === '') {
+            return;
+        }
+        if (! in_array($canonicalMime, ['image/jpeg', 'image/png', 'image/webp', 'image/tiff'], true)) {
+            return;
+        }
+        if (! (bool) config('assets.security.exif_scrub.enabled', true)) {
+            return;
+        }
+
+        try {
+            $bytes = $bucket
+                ? app(\App\Services\TenantBucketService::class)->getObjectContents($bucket, $tempKey)
+                : Storage::disk('s3')->get($tempKey);
+        } catch (\Throwable $e) {
+            Log::info('upload_exif_scrub_read_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        $clean = app(\App\Services\Security\ImageExifScrubService::class)->scrub((string) $bytes, $canonicalMime);
+        if ($clean === null || $clean === (string) $bytes) {
+            return;
+        }
+
+        try {
+            if ($bucket) {
+                app(\App\Services\TenantBucketService::class)->getS3Client()->putObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $tempKey,
+                    'Body' => $clean,
+                    'ContentType' => $canonicalMime,
+                    'Metadata' => [
+                        'exif-scrubbed' => '1',
+                        'scrubbed-at' => now()->toIso8601String(),
+                    ],
+                ]);
+            } else {
+                Storage::disk('s3')->put($tempKey, $clean);
+            }
+            Log::info('upload_exif_scrubbed', [
+                'upload_session_id' => $uploadSession->id,
+                'mime' => $canonicalMime,
+                'before_bytes' => strlen((string) $bytes),
+                'after_bytes' => strlen($clean),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('upload_exif_scrub_write_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Phase 6: Run MagicByteVerifier against the first 1KB of the temp
+     * object. When the detected signature contradicts the declared MIME
+     * (e.g. PE executable inside a file we labeled image/jpeg), reject
+     * the upload, mark the session failed, delete the temp bytes, and
+     * throw the same {@see UploadContentRejectedException} the rest of
+     * the gate uses so the queue row surfaces a structured error.
+     *
+     * @param  array<string, mixed>  $fileInfo
+     */
+    protected function enforceMagicByteVerification(
+        UploadSession $uploadSession,
+        string $tempKey,
+        $bucket,
+        ?string $finalFilename,
+        string $extension,
+        ?string $canonicalMime,
+        array $fileInfo,
+    ): void {
+        if (! (bool) config('assets.security.magic_byte_verifier.enabled', true)) {
+            return;
+        }
+        if (! is_string($canonicalMime) || $canonicalMime === '') {
+            return;
+        }
+
+        try {
+            $bytes = $bucket
+                ? app(\App\Services\TenantBucketService::class)->getObjectContents($bucket, $tempKey)
+                : Storage::disk('s3')->get($tempKey);
+        } catch (\Throwable $e) {
+            Log::warning('upload_magic_byte_read_failed', [
+                'upload_session_id' => $uploadSession->id,
+                'temp_key' => $tempKey,
+                'error' => $e->getMessage(),
+            ]);
+
+            return; // Best-effort — don't block on a read failure.
+        }
+        $head = substr((string) $bytes, 0, 1024);
+        if ($head === '') {
+            return;
+        }
+
+        $verifier = app(\App\Services\Security\MagicByteVerifier::class);
+        $result = $verifier->verify($head, $canonicalMime);
+        if ($result['ok'] ?? false) {
+            return;
+        }
+
+        $blockOnMismatch = (bool) config('assets.security.magic_byte_verifier.block_on_mismatch', true);
+
+        UploadAuditLogger::warning([
+            'gate' => 'finalize_content_sniff',
+            'reason' => $result['reason'] ?? 'mime_mismatch',
+            'tenant_id' => $uploadSession->tenant_id,
+            'brand_id' => $uploadSession->brand_id,
+            'upload_session_id' => $uploadSession->id,
+            'name' => $finalFilename,
+            'declared_mime' => $fileInfo['mime_type'] ?? null,
+            'canonical_mime' => $canonicalMime,
+            'extension' => $extension,
+            'detected_signature' => $result['detected_signature'] ?? null,
+            'block_on_mismatch' => $blockOnMismatch,
+        ]);
+
+        if (! $blockOnMismatch) {
+            return;
+        }
+
+        $this->deleteTempUploadOnContentReject($uploadSession, $tempKey, $bucket);
+        $this->markSessionFailedForContentReject($uploadSession, 'magic_byte_mismatch');
+
+        throw new UploadContentRejectedException(
+            'The actual contents of this file do not match the declared file type and were rejected.',
+            errorCode: 'content_magic_byte_mismatch',
+            blockedGroup: 'magic_byte',
+            detectedMime: $result['detected_signature'] ?? null,
+            declaredMime: $canonicalMime,
+            extension: $extension !== '' ? $extension : null,
+        );
     }
 
     /**
@@ -1537,7 +1712,7 @@ class UploadCompletionService
 
         $clean = app(SvgSanitizationService::class)->sanitize((string) $bytes);
         if ($clean === null) {
-            Log::warning('upload_blocked', [
+            UploadAuditLogger::warning([
                 'gate' => 'finalize_content_sniff',
                 'reason' => 'svg_sanitization_failed',
                 'tenant_id' => $uploadSession->tenant_id,

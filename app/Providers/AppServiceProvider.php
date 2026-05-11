@@ -234,6 +234,10 @@ class AppServiceProvider extends ServiceProvider
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('incubation.not_locked', EnsureIncubationWorkspaceNotLocked::class);
         $router->aliasMiddleware('ensure.onboarding', EnsureOnboardingComplete::class);
+        $router->aliasMiddleware(
+            'tenant.admin.brand_setup',
+            \App\Http\Middleware\EnsureTenantAdminForBrandWorkspaceSetup::class
+        );
         $router->aliasMiddleware('impersonation', \App\Http\Middleware\ImpersonationMiddleware::class);
 
         $this->hydrateStudioRenderingDefaultFontPath();

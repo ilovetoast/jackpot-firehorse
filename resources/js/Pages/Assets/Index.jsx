@@ -1004,8 +1004,8 @@ export default function AssetsIndex({
 
     const folderSchemaTriggerMobile =
         textColor === '#ffffff'
-            ? 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-lg px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
-            : 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-lg px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
+            ? 'flex h-full min-h-[2.5rem] w-full min-w-[2rem] items-center justify-center px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
+            : 'flex h-full min-h-[2.5rem] w-full min-w-[2rem] items-center justify-center px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
 
     const canPublish = can('asset.publish')
     const pendingReviewTotal = Number(pending_publication_review_count) || 0
@@ -1051,14 +1051,14 @@ export default function AssetsIndex({
                 <div className="hidden lg:flex lg:flex-shrink-0">
                     <AssetSidebar
                         addAssetButton={
-                            auth?.user && (
+                            canUpload && auth?.user ? (
                                 <AddAssetButton
                                     defaultAssetType="asset"
                                     className="w-full"
                                     onClick={handleOpenUploadDialog}
                                     disabled={isAutoClosing}
                                 />
-                            )
+                            ) : null
                         }
                         categories={categories}
                         filterCategories={(cats) => filterActiveCategories(cats || [])}
@@ -1124,11 +1124,11 @@ export default function AssetsIndex({
                                 </button>
                             </div>
                             <div className="flex-1 overflow-y-auto py-4 px-2">
-                                {auth?.user && (
+                                {canUpload && auth?.user ? (
                                     <div className="px-2 py-2 mb-3">
                                         <AddAssetButton defaultAssetType="asset" className="w-full" onClick={() => { handleOpenUploadDialog(); setMobileCategoriesOpen(false) }} disabled={isAutoClosing} />
                                     </div>
-                                )}
+                                ) : null}
                                 {categories && categories.length > 0 && (
                                     <div className="space-y-0.5">
                                         {show_all_button && (
@@ -1140,12 +1140,19 @@ export default function AssetsIndex({
                                                 <TagIcon className="mr-3 h-5 w-5 opacity-80" style={{ color: selectedCategoryId == null ? activeTextColor : textColor }} />
                                                 <span className="flex-1">All</span>
                                                 {typeof total_asset_count === 'number' && total_asset_count > 0 && (
-                                                    <span className="text-xs opacity-80">{total_asset_count}</span>
+                                                    <span className="text-xs tabular-nums opacity-80">{total_asset_count}</span>
                                                 )}
                                             </button>
                                         )}
                                         {filterActiveCategories(categories).map((category) => {
                                             const isSelected = selectedCategoryId === category.id
+                                            const categoryCount = Number(category.asset_count)
+                                            const showCategoryCount =
+                                                typeof category.asset_count === 'number' &&
+                                                Number.isFinite(categoryCount) &&
+                                                categoryCount > 0
+                                            const showSchemaTrigger = canViewFolderSchema && category?.id != null
+                                            const showRightTrail = showSchemaTrigger || showCategoryCount
                                             const rowHighlighted =
                                                 isSelected ||
                                                 (!isSelected && mobileLibraryRowActiveId === category.id)
@@ -1168,13 +1175,9 @@ export default function AssetsIndex({
                                                         const rel = e.relatedTarget
                                                         if (rel instanceof Node && e.currentTarget.contains(rel))
                                                             return
-                                                        requestAnimationFrame(() => {
-                                                            if (!e.currentTarget.contains(document.activeElement)) {
-                                                                setMobileLibraryRowActiveId((id) =>
-                                                                    id === category.id ? null : id
-                                                                )
-                                                            }
-                                                        })
+                                                        setMobileLibraryRowActiveId((id) =>
+                                                            id === category.id ? null : id
+                                                        )
                                                     }}
                                                     onFocusCapture={() => {
                                                         if (!isSelected) setMobileLibraryRowActiveId(category.id)
@@ -1193,7 +1196,9 @@ export default function AssetsIndex({
                                                             handleCategorySelect(category)
                                                             setMobileCategoriesOpen(false)
                                                         }}
-                                                        className="flex min-w-0 flex-1 items-center rounded-l-lg px-3 py-2.5 text-left text-sm font-medium"
+                                                        className={`flex min-w-0 flex-1 items-center py-2.5 pl-3 text-left text-sm font-medium ${
+                                                            showRightTrail ? 'rounded-l-lg pr-1' : 'rounded-lg pr-3'
+                                                        }`}
                                                         style={{
                                                             backgroundColor: 'transparent',
                                                             color: rowFg,
@@ -1205,19 +1210,25 @@ export default function AssetsIndex({
                                                             style={{ color: rowFg }}
                                                         />
                                                         <span className="min-w-0 flex-1 truncate">{category.name}</span>
-                                                        {typeof category.asset_count === 'number' && category.asset_count > 0 && (
-                                                            <span className="shrink-0 text-xs opacity-80">{category.asset_count}</span>
-                                                        )}
                                                     </button>
-                                                    {canViewFolderSchema && category?.id ? (
-                                                        <div
-                                                            className="flex shrink-0 items-stretch opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                                                            style={{ color: rowFg }}
-                                                        >
-                                                            <FolderSchemaHelp
-                                                                category={category}
-                                                                triggerClassName={folderSchemaTriggerMobile}
-                                                            />
+                                                    {showRightTrail ? (
+                                                        <div className="flex shrink-0 items-stretch rounded-r-lg">
+                                                            {showSchemaTrigger ? (
+                                                                <div
+                                                                    className="flex min-w-[2rem] shrink-0 items-stretch justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-open]]:opacity-100"
+                                                                    style={{ color: rowFg }}
+                                                                >
+                                                                    <FolderSchemaHelp
+                                                                        category={category}
+                                                                        triggerClassName={folderSchemaTriggerMobile}
+                                                                    />
+                                                                </div>
+                                                            ) : null}
+                                                            {showCategoryCount ? (
+                                                                <span className="flex items-center pr-3 text-xs tabular-nums opacity-80">
+                                                                    {categoryCount}
+                                                                </span>
+                                                            ) : null}
                                                         </div>
                                                     ) : null}
                                                 </div>
@@ -1564,15 +1575,15 @@ export default function AssetsIndex({
                                                 ? 'Get started by uploading your first asset to this folder. Organize your brand assets and keep everything in one place.'
                                                 : 'Get started by choosing a folder or uploading your first asset. Organize your brand assets and keep everything in sync.'}
                                 </p>
-                                {!isPendingPublicationFilter && (
+                                {!isPendingPublicationFilter && canUpload ? (
                                     <div className="mt-8">
-                                        <AddAssetButton 
-                                            defaultAssetType="asset" 
+                                        <AddAssetButton
+                                            defaultAssetType="asset"
                                             onClick={handleOpenUploadDialog}
                                             disabled={isAutoClosing}
                                         />
                                     </div>
-                                )}
+                                ) : null}
                             </div>
                         )}
                         </div>

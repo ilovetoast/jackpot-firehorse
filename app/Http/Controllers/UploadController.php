@@ -31,6 +31,7 @@ use App\Services\UploadMetadataSchemaResolver;
 use App\Services\UploadPreflightService;
 use App\Support\Billing\PlanLimitUpgradePayload;
 use App\Support\Metadata\CategoryTypeResolver;
+use App\Support\UploadAuditLogger;
 use Aws\S3\S3Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -69,6 +70,49 @@ class UploadController extends Controller
     ) {}
 
     /**
+     * Resolve brand for upload authorization (session row, request brand_id, container brand, tenant default).
+     */
+    private function brandForUploadGate(Tenant $tenant, ?Request $request = null, ?UploadSession $uploadSession = null): ?Brand
+    {
+        if ($uploadSession && $uploadSession->brand_id) {
+            $b = Brand::query()
+                ->where('id', $uploadSession->brand_id)
+                ->where('tenant_id', $tenant->id)
+                ->first();
+            if ($b) {
+                return $b;
+            }
+        }
+        if ($request && $request->has('brand_id') && $request->input('brand_id') !== null && $request->input('brand_id') !== '') {
+            return Brand::query()
+                ->where('id', (int) $request->input('brand_id'))
+                ->where('tenant_id', $tenant->id)
+                ->first();
+        }
+        if (app()->bound('brand')) {
+            $b = app('brand');
+            if ($b instanceof Brand && (int) $b->tenant_id === (int) $tenant->id) {
+                return $b;
+            }
+        }
+
+        return $tenant->defaultBrand;
+    }
+
+    /**
+     * Upload permission must respect **brand** role (e.g. brand viewer is read-only even if tenant member has asset.upload).
+     */
+    private function userMayUploadForActiveBrand(User $user, Tenant $tenant, ?Request $request = null, ?UploadSession $uploadSession = null): bool
+    {
+        $brand = $this->brandForUploadGate($tenant, $request, $uploadSession);
+        if (! $brand instanceof Brand) {
+            return false;
+        }
+
+        return $user->canForContext('asset.upload', $tenant, $brand);
+    }
+
+    /**
      * Initiate an upload session.
      *
      * POST /uploads/initiate
@@ -89,8 +133,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -114,7 +158,7 @@ class UploadController extends Controller
         // as initiate-batch so this route can never be used to bypass the gate.
         $sanitizedName = $this->fileTypeService->sanitizeFilename((string) $validated['file_name']);
         if ($sanitizedName === '' || $sanitizedName !== $validated['file_name']) {
-            Log::warning('upload_blocked', [
+            UploadAuditLogger::warning([
                 'gate' => 'initiate',
                 'reason' => 'invalid_filename',
                 'tenant_id' => $tenant->id,
@@ -132,7 +176,7 @@ class UploadController extends Controller
 
         $double = $this->fileTypeService->detectDoubleExtensionAttack($validated['file_name']);
         if ($double !== null) {
-            Log::warning('upload_blocked', [
+            UploadAuditLogger::warning([
                 'gate' => 'initiate',
                 'reason' => 'double_extension',
                 'tenant_id' => $tenant->id,
@@ -152,9 +196,8 @@ class UploadController extends Controller
         $extForGate = strtolower((string) pathinfo($validated['file_name'], PATHINFO_EXTENSION));
         $decision = $this->fileTypeService->isUploadAllowed($validated['mime_type'] ?? null, $extForGate);
         if (! $decision['allowed']) {
-            Log::log(
+            UploadAuditLogger::log(
                 $decision['log_severity'] === 'warning' ? 'warning' : 'info',
-                'upload_blocked',
                 [
                     'gate' => 'initiate',
                     'tenant_id' => $tenant->id,
@@ -249,8 +292,7 @@ class UploadController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Check upload permission - viewers cannot check storage limits (they can't upload)
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json([
                 'error' => 'You do not have permission to upload assets.',
             ], 403);
@@ -300,8 +342,7 @@ class UploadController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json([
                 'error' => 'You do not have permission to upload assets.',
             ], 403);
@@ -395,7 +436,7 @@ class UploadController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json([
                 'error' => 'You do not have permission to upload assets.',
             ], 403);
@@ -469,16 +510,6 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
-            return UploadErrorResponse::error(
-                UploadErrorResponse::CODE_PERMISSION_DENIED,
-                'You do not have permission to upload assets.',
-                403,
-                []
-            );
-        }
-
         // Validate request - enforce required fields and types
         // Note: asset_type is nullable for backward compatibility, defaults to 'asset' if not provided
         try {
@@ -513,6 +544,15 @@ class UploadController extends Controller
         $uploadSession = UploadSession::where('id', $validated['upload_session_id'])
             ->where('tenant_id', $tenant->id)
             ->firstOrFail();
+
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
+            return UploadErrorResponse::error(
+                UploadErrorResponse::CODE_PERMISSION_DENIED,
+                'You do not have permission to upload assets.',
+                403,
+                []
+            );
+        }
 
         $categoryId = isset($validated['category_id']) ? (int) $validated['category_id'] : null;
 
@@ -603,8 +643,7 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -696,7 +735,7 @@ class UploadController extends Controller
                 $ext = strtolower((string) pathinfo($rawName, PATHINFO_EXTENSION));
 
                 if ($rawName === '' || $rawName !== $this->fileTypeService->sanitizeFilename($rawName)) {
-                    Log::warning('upload_blocked', [
+                    UploadAuditLogger::warning([
                         'gate' => 'initiate_batch',
                         'reason' => 'invalid_filename',
                         'tenant_id' => $tenant->id,
@@ -716,7 +755,7 @@ class UploadController extends Controller
 
                 $double = $this->fileTypeService->detectDoubleExtensionAttack($rawName);
                 if ($double !== null) {
-                    Log::warning('upload_blocked', [
+                    UploadAuditLogger::warning([
                         'gate' => 'initiate_batch',
                         'reason' => 'double_extension',
                         'tenant_id' => $tenant->id,
@@ -738,9 +777,8 @@ class UploadController extends Controller
 
                 $decision = $this->fileTypeService->isUploadAllowed($f['mime_type'] ?? null, $ext);
                 if (! $decision['allowed']) {
-                    Log::log(
+                    UploadAuditLogger::log(
                         $decision['log_severity'] === 'warning' ? 'warning' : 'info',
-                        'upload_blocked',
                         [
                             'gate' => 'initiate_batch',
                             'tenant_id' => $tenant->id,
@@ -950,8 +988,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1061,8 +1099,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1135,8 +1173,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1228,8 +1266,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1392,8 +1430,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1489,8 +1527,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1594,8 +1632,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1719,8 +1757,8 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        // Check upload permission — brand-scoped (brand viewer cannot upload)
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request, $uploadSession)) {
             return UploadErrorResponse::error(
                 UploadErrorResponse::CODE_PERMISSION_DENIED,
                 'You do not have permission to upload assets.',
@@ -1843,8 +1881,7 @@ class UploadController extends Controller
             );
         }
 
-        // Check upload permission - viewers cannot upload
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json([
                 'message' => 'You do not have permission to upload assets.',
             ], 403);
@@ -2705,7 +2742,7 @@ class UploadController extends Controller
                 // object has already been deleted and the UploadSession marked
                 // failed by UploadCompletionService. We just surface a clean
                 // structured error so the queue row shows the right message.
-                Log::warning('upload_blocked', [
+                UploadAuditLogger::warning([
                     'gate' => 'finalize_response',
                     'tenant_id' => $tenant->id,
                     'user_id' => $user->id,
@@ -3241,7 +3278,7 @@ class UploadController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
@@ -3275,7 +3312,7 @@ class UploadController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $this->userMayUploadForActiveBrand($user, $tenant, $request)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 

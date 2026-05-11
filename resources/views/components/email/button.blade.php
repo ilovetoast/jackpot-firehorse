@@ -8,15 +8,15 @@
 @endphp
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
   <tr>
-    <td align="center" style="border-radius:8px;background-color:{{ $__btnColor }};">
+    <td align="left" style="border-radius:6px;background-color:{{ $__btnColor }};">
       <!--[if mso]>
-      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ $url }}" style="height:44px;v-text-anchor:middle;width:200px;" arcsize="18%" strokecolor="{{ $__btnColor }}" fillcolor="{{ $__btnColor }}">
+      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ $url }}" style="height:44px;v-text-anchor:middle;width:200px;" arcsize="12%" strokecolor="{{ $__btnColor }}" fillcolor="{{ $__btnColor }}">
         <w:anchorlock/>
         <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:bold;">{{ $slot }}</center>
       </v:roundrect>
       <![endif]-->
       <!--[if !mso]><!-->
-      <a href="{{ $url }}" style="display:inline-block;padding:12px 28px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;background-color:{{ $__btnColor }};mso-hide:all;">{{ $slot }}</a>
+      <a href="{{ $url }}" style="display:inline-block;padding:12px 20px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;background-color:{{ $__btnColor }};mso-hide:all;">{{ $slot }}</a>
       <!--<![endif]-->
     </td>
   </tr>

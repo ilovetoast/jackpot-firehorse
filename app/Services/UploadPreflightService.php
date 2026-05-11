@@ -8,6 +8,7 @@ use App\Models\Collection;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Billing\PlanLimitUpgradePayload;
+use App\Support\UploadAuditLogger;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -147,6 +148,28 @@ class UploadPreflightService
                     ];
                 }
 
+                // Phase 6: Per-plan, per-type caps. The global plan cap above
+                // gates "any file"; this gates "audio on free", "video on free",
+                // etc. It surfaces an upgrade nudge keyed to the file type so
+                // the UI can show "Need bigger video uploads? Upgrade to Pro."
+                $planCap = app(\App\Services\Security\PlanUploadCapResolver::class)
+                    ->resolve($tenant, $mime ?: null, $ext ?: null);
+                if ($planCap['plan_overrides'] && $size > $planCap['effective_cap_bytes']) {
+                    $reasons[] = [
+                        'code' => 'plan_cap_exceeded',
+                        'message' => sprintf(
+                            'This %s file is larger than your plan’s %s cap (%s).',
+                            $planCap['file_type'] ?? 'file',
+                            $planCap['file_type'] ?? 'type',
+                            $this->formatBytesShort((int) $planCap['effective_cap_bytes']),
+                        ),
+                        'plan_limit' => PlanLimitUpgradePayload::buildForUploadSizeExceeded($tenant, $size),
+                        'plan_cap_bytes' => $planCap['effective_cap_bytes'],
+                        'file_type' => $planCap['file_type'] ?? null,
+                        'plan' => $planCap['plan'] ?? null,
+                    ];
+                }
+
                 // Gate 1: single decision, single source of truth (config/file_types.php).
                 // Catches blocked executables/scripts/archives, unsupported types, and coming_soon types.
                 $decision = $this->fileTypeService->isUploadAllowed($mime ?: null, $ext ?: null);
@@ -156,9 +179,8 @@ class UploadPreflightService
                         'message' => (string) ($decision['message'] ?? 'This file type is not supported for upload.'),
                     ];
 
-                    Log::log(
+                    UploadAuditLogger::log(
                         $decision['log_severity'] === 'warning' ? 'warning' : 'info',
-                        'upload_blocked',
                         [
                             'gate' => 'preflight',
                             'tenant_id' => $tenant->id,
@@ -182,7 +204,7 @@ class UploadPreflightService
                         'code' => 'blocked_double_extension',
                         'message' => $doubleExt['message'],
                     ];
-                    Log::warning('upload_blocked', [
+                    UploadAuditLogger::warning([
                         'gate' => 'preflight',
                         'reason' => 'double_extension',
                         'tenant_id' => $tenant->id,
@@ -322,6 +344,26 @@ class UploadPreflightService
         $data = Cache::get(self::CACHE_PREFIX.$preflightId);
 
         return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Compact "230 MB" / "1.5 GB" formatter for plan cap rejection
+     * messages — small surface area so we don't need a global helper.
+     */
+    protected function formatBytesShort(int $bytes): string
+    {
+        if ($bytes <= 0) {
+            return '0 B';
+        }
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = (int) floor(log($bytes, 1024));
+        $i = max(0, min(count($units) - 1, $i));
+        $value = $bytes / (1024 ** $i);
+        $formatted = $value >= 100 || $i === 0
+            ? number_format($value, 0)
+            : number_format($value, 1);
+
+        return $formatted.' '.$units[$i];
     }
 
     /**

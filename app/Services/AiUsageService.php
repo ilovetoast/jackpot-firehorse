@@ -387,6 +387,29 @@ class AiUsageService
     }
 
     /**
+     * Phase 4 (audio): credit cost for one audio AI analysis job (transcript +
+     * mood + summary). Mirrors {@see getVideoInsightsCreditCost()} so the
+     * audio pipeline integrates with the same unified credit pool / display.
+     *
+     * Cost is duration-tiered because Whisper bills per minute; the floor of
+     * 1 minute means even a sub-minute voice memo still debits the base cost.
+     *
+     * @param  float  $billableMinutes  Duration of the audio asset in minutes.
+     */
+    public function getAudioInsightsCreditCost(float $billableMinutes): int
+    {
+        $base = (int) config('ai_credits.audio_insights.base_credits', 1);
+        $perMin = (int) config('ai_credits.audio_insights.per_additional_minute', 1);
+
+        $ceiledMinutes = (int) ceil(max(0.0, $billableMinutes));
+        if ($ceiledMinutes < 1) {
+            $ceiledMinutes = 1;
+        }
+
+        return $base + max(0, $ceiledMinutes - 1) * $perMin;
+    }
+
+    /**
      * Credits for one Studio composition animation job (duration-aware).
      *
      * Formula: base + max(0, duration_seconds - base_covers_seconds) * per_extra_second
@@ -512,7 +535,7 @@ class AiUsageService
      */
     public function getUsageStatus(Tenant $tenant): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'audio_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 
@@ -550,7 +573,7 @@ class AiUsageService
      */
     public function getUsageStatusForPeriod(Tenant $tenant, int $year, int $month): array
     {
-        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
+        $features = ['tagging', 'suggestions', 'photography_focal_point', 'brand_research', 'insights', 'generative_editor_images', 'generative_editor_edits', 'video_insights', 'audio_insights', 'pdf_extraction', 'presentation_preview', 'studio_animation', 'studio_layer_extraction', 'studio_layer_background_fill'];
         $perFeature = [];
         $totalCreditsUsed = 0;
 

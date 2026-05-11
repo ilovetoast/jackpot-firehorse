@@ -37,6 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->web(prepend: [
+            \App\Http\Middleware\AssignRequestId::class,
             \App\Http\Middleware\ResponseTimingMiddleware::class,
         ]);
         $middleware->web(append: [
@@ -59,6 +60,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // middleware strings via this map; route:cache may still reference this name.
             'incubation.not_locked' => \App\Http\Middleware\EnsureIncubationWorkspaceNotLocked::class,
             'ensure.onboarding' => \App\Http\Middleware\EnsureOnboardingComplete::class,
+            'tenant.admin.brand_setup' => \App\Http\Middleware\EnsureTenantAdminForBrandWorkspaceSetup::class,
             'impersonation' => \App\Http\Middleware\ImpersonationMiddleware::class,
         ]);
 

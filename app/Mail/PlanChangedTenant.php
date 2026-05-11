@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
@@ -60,12 +61,12 @@ class PlanChangedTenant extends BaseMailable
     {
         $this->applyTenantMailBranding($this->tenant);
 
-        $subject = $this->template 
-            ? $this->template->render([
+        $subject = $this->template
+            ? $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'old_plan' => ucfirst($this->oldPlan),
                 'new_plan' => ucfirst($this->newPlan),
-            ])['subject']
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem()))['subject']
             : "Your plan has been updated - {$this->tenant->name}";
 
         return new Envelope(
@@ -79,7 +80,7 @@ class PlanChangedTenant extends BaseMailable
     public function content(): Content
     {
         if ($this->template) {
-            $rendered = $this->template->render([
+            $rendered = $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'owner_name' => $this->owner->name,
                 'owner_email' => $this->owner->email,
@@ -91,7 +92,7 @@ class PlanChangedTenant extends BaseMailable
                 'app_name' => config('app.name'),
                 'app_url' => config('app.url'),
                 'billing_url' => config('app.url') . '/app/billing',
-            ]);
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem()));
 
             return new Content(
                 htmlString: $rendered['body_html'],

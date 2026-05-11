@@ -296,6 +296,110 @@ return [
             'common_sort' => 45,
         ],
         [
+            // The Help panel renders <HelpSupportedFileTypes /> for the live
+            // list (sourced from config/file_types.php → FileTypeService), but
+            // the Ask-AI flow needs a strongly-aliased registry entry to lock
+            // onto so questions like "what file types are supported" don't
+            // fall back to "Confidence: low". Aliases are deliberately broad
+            // (extensions, MIMEs, plain English) so token + phrase scoring
+            // wins from the first character the user types.
+            'key' => 'concepts.supported_file_types',
+            'title' => 'Supported file types',
+            // Aliases are intentionally narrow + question-shaped: each one
+            // is a phrase a real user might type. Avoid grab-bag keyword
+            // dumps because every alias becomes its own scoring haystack,
+            // and a bloated list lets short tokens (e.g. "i", "do") win
+            // unrelated queries.
+            'aliases' => [
+                'what file types are supported',
+                'what files can i upload',
+                'what files does jackpot accept',
+                'supported file types',
+                'supported formats',
+                'allowed file types',
+                'accepted file types',
+                'file size limits',
+                'max upload size',
+                'why was my file rejected',
+                'why is my upload blocked',
+            ],
+            'category' => 'Assets',
+            'short_answer' => 'Jackpot accepts images (JPG, PNG, GIF, WebP, TIFF, AVIF, HEIC, CR2 RAW), video (MP4, MOV, AVI, etc.), audio (MP3, WAV, AAC, M4A, OGG, FLAC), PDF, SVG (sanitized on upload), Microsoft Office files (Word, Excel, PowerPoint), and Adobe design files (PSD, AI, EPS). Executables, scripts, archives, and web HTML/JS are blocked for security. The Help panel shows the live list — including any "coming soon" formats — straight from the workspace registry.',
+            'steps' => [
+                'Open the Help panel and scroll to "Supported file types" for the live, per-format list with size limits, preview support, and AI-analysis support.',
+                'In the upload dialog, the file picker also enforces the same allowlist — drag-and-drop and "Retry" both validate against it.',
+                'If a file is rejected, the upload tray "Why?" link explains the exact reason (unsupported type, blocked group, plan size cap, magic-byte mismatch, etc.).',
+            ],
+            'route_name' => 'assets.index',
+            'route_bindings' => [],
+            'deep_link' => [
+                'route_name' => 'assets.index',
+                'params' => [],
+                'query' => [],
+            ],
+            'page_label' => 'Assets',
+            'permissions' => [],
+            // Keep tags compound and specific. Bare tags like "doc", "ai",
+            // "mp3", "jpg" prefix-match common single-letter query tokens
+            // and end up beating focused entries on unrelated questions.
+            'tags' => ['file types', 'supported formats', 'allowlist', 'rejected upload', 'blocked file'],
+            'related' => ['assets.upload', 'assets.processing', 'ai.audio_insights'],
+            'routes' => ['assets.index'],
+            'page_context' => ['Assets'],
+            'priority' => 92,
+            'in_common' => true,
+            'common_sort' => 30,
+        ],
+        [
+            // Phase 4 audio AI lives on the unified credit pool (config key:
+            // ai_credits.audio_insights). This entry is the user-facing
+            // explainer — what it does, what it costs, where to see it. The
+            // alias list intentionally includes the literal feature key so
+            // engineers searching "audio_insights" land on a documented page.
+            'key' => 'ai.audio_insights',
+            'title' => 'Audio insights (transcript, mood, summary)',
+            // Same alias-discipline note as concepts.supported_file_types:
+            // narrow, phrase-shaped, scoped to the audio AI feature.
+            'aliases' => [
+                'audio ai',
+                'audio insights',
+                'audio_insights',
+                'audio transcription',
+                'transcribe audio',
+                'transcribe mp3',
+                'mp3 transcript',
+                'whisper',
+                'audio mood',
+                'audio summary',
+                'speech to text',
+                'audio ai cost',
+                'how much does audio ai cost',
+                'how many credits does audio ai cost',
+            ],
+            'category' => 'AI & insights',
+            'short_answer' => 'When you upload audio (MP3, WAV, AAC, M4A, OGG, FLAC), Jackpot runs an AI pass that produces a transcript, a short summary, a coarse mood label, and a searchable spoken-word index. The transcript and summary appear in the audio asset\'s drawer and lightbox. Cost is duration-tiered against the unified AI credit pool: 1 base credit + 1 per additional minute (a 30-second voice memo costs 1 credit, a 5-minute clip costs 5, a 60-minute podcast costs 60). It debits the same monthly credit budget as auto-tagging, video insights, and brand research — see Insights → Usage for the live per-feature breakdown.',
+            'steps' => [
+                'Upload an audio file from the Assets page; processing runs automatically when AI is enabled for the workspace.',
+                'Open the audio asset drawer or lightbox to see the transcript, summary, and mood once analysis finishes.',
+                'Open Insights → Usage to see the "Audio insights" row alongside the other AI features and remaining credits for the month.',
+                'If your monthly AI credit budget is exhausted, the audio AI pass is skipped — the file still uploads and plays, it just won\'t have a transcript until the next month or until a credit add-on is purchased.',
+            ],
+            'route_name' => 'insights.usage',
+            'route_bindings' => [],
+            'page_label' => 'Insights — Usage',
+            'permissions' => [],
+            'required_features' => ['ai'],
+            // Compound, audio-scoped tags only — never bare 'ai' / 'audio'
+            // (those bleed into unrelated queries via single-token matches).
+            'tags' => ['audio insights', 'audio transcript', 'audio mood', 'audio summary', 'whisper', 'audio_insights'],
+            'related' => ['ai.credits_usage', 'concepts.supported_file_types', 'assets.upload'],
+            'routes' => ['insights.usage'],
+            'page_context' => ['Insights'],
+            'priority' => 86,
+            'in_common' => true,
+            'common_sort' => 105,
+        ],
+        [
             'key' => 'concepts.asset',
             'title' => 'What is an asset?',
             'aliases' => [
@@ -1119,11 +1223,16 @@ return [
             'title' => 'View AI credits and feature usage',
             'aliases' => ['credits', 'usage', 'ai limits'],
             'category' => 'AI & insights',
-            'short_answer' => 'Insights → Usage surfaces AI credit consumption and related usage context for your workspace when enabled.',
+            // Short-answer copy now names every credit-bearing feature so
+            // the AI grounding step has the right context if a user asks
+            // "what AI features does this cost?" — the registry stays the
+            // single source of truth alongside config/ai_credits.php.
+            'short_answer' => 'Insights → Usage surfaces your unified AI credit consumption per feature — auto-tagging, metadata suggestions, brand research, video insights, audio insights (transcripts), generative editor, presentation preview, Studio animations, and PDF brand extraction all draw from the same monthly pool. Per-action cost weights are shown on the Billing → Overview page under "Credit Costs per Action" (flat-rate features) and as tier formulas for duration-priced features (video and audio).',
             'steps' => [
                 'Open Insights from the navigation.',
                 'Go to the Usage tab.',
                 'Review credit usage, warnings, and per-feature breakdown when shown.',
+                'For per-action costs (e.g. "audio insights = 1 + 1/min", "video insights = 5 + 3/min", "tagging = 1 credit"), open Billing → Overview.',
             ],
             'route_name' => 'insights.usage',
             'route_bindings' => [],
@@ -1131,7 +1240,7 @@ return [
             'permissions' => [],
             'required_features' => ['ai', 'workspace_insights'],
             'tags' => ['ai', 'credits', 'usage'],
-            'related' => ['ai.company_usage_panel', 'studio.generative'],
+            'related' => ['ai.company_usage_panel', 'ai.audio_insights', 'studio.generative'],
             'in_common' => true,
             'common_sort' => 100,
         ],

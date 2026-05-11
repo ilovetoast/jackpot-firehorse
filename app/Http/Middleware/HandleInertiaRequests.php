@@ -8,6 +8,7 @@ use App\Models\Consent;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\AgencyBrandAccessService;
+use App\Services\Navigation\AgencyContextPickerOptionsBuilder;
 use App\Services\AuthPermissionService;
 use App\Services\CreatorModuleStatusService;
 use App\Services\FeatureGate;
@@ -331,13 +332,15 @@ class HandleInertiaRequests extends Middleware
             }
         }
 
-        // App nav: Brand Guidelines link — show when published (any brand user) or when user can set up DNA/builder
+        // App nav: Brand Guidelines — company owners/admins only (not viewers, uploaders, or brand managers alone).
         $showBrandGuidelinesNav = false;
         if ($user && $activeBrand && $tenant && ! (app()->bound('collection_only') && app('collection_only'))) {
-            $activeBrand->loadMissing('brandModel');
-            $hasPublishedGuidelines = $activeBrand->brandModel?->active_version_id !== null;
-            $canSetupBrandGuidelines = $user->hasPermissionForBrand($activeBrand, 'brand_settings.manage');
-            $showBrandGuidelinesNav = $hasPublishedGuidelines || $canSetupBrandGuidelines;
+            if ($user->isTenantOwnerAdminOrAgencyAdmin($tenant)) {
+                $activeBrand->loadMissing('brandModel');
+                $hasPublishedGuidelines = $activeBrand->brandModel?->active_version_id !== null;
+                $canSetupBrandGuidelines = $user->hasPermissionForBrand($activeBrand, 'brand_settings.manage');
+                $showBrandGuidelinesNav = $hasPublishedGuidelines || $canSetupBrandGuidelines;
+            }
         }
 
         // C12: Collection guests (grants only, no brand membership) — same chrome as collection_only; used when container flag is unset (e.g. some /app/assets/* routes).
@@ -435,7 +438,9 @@ class HandleInertiaRequests extends Middleware
             'creator_module_status' => app(CreatorModuleStatusService::class)->sharedPayload($tenant),
             'ai_credit_warning_level' => $tenant ? app(\App\Services\AiUsageService::class)->getCreditWarningLevel($tenant) : null,
             'can_upload_assets' => $tenant ? app(\App\Services\FeatureGate::class)->canUploadAssets($tenant) : true,
-            'onboarding_status' => $activeBrand ? app(\App\Services\OnboardingService::class)->getStatusPayload($activeBrand) : null,
+            'onboarding_status' => ($activeBrand && $user && $tenant && $user->isTenantOwnerAdminOrAgencyAdmin($tenant))
+                ? app(\App\Services\OnboardingService::class)->getStatusPayload($activeBrand)
+                : null,
             'signup_enabled' => ! app()->environment('staging'),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
@@ -537,6 +542,18 @@ class HandleInertiaRequests extends Middleware
                 'managed_agency_clients' => $user ? $this->agencyBrandAccessService->managedAgencyClientSummariesForUser($user) : [],
                 /** Agency + linked-client brands the user can open (flat list for agency strip quick switch) */
                 'agency_flat_brands' => $user ? $this->agencyBrandAccessService->flatBrandsForAgencyStrip($user) : [],
+                /** Unified agency context picker (main nav); null for normal tenants and non–agency-context sessions */
+                'agency_context_picker' => ($user && $tenant && $activeBrand
+                    && ! (app()->bound('collection_only') && app('collection_only'))
+                    && ! $isCollectionGuestExperience)
+                    ? app(AgencyContextPickerOptionsBuilder::class)->build(
+                        $user,
+                        $tenant,
+                        $activeBrand,
+                        $effectivePermissions,
+                        $planLimitInfo ?? null
+                    )
+                    : null,
                 'activeBrand' => $activeBrand ? (function () use ($activeBrand) {
                     $activeBrand->loadMissing('brandModel');
 
@@ -588,12 +605,12 @@ class HandleInertiaRequests extends Middleware
                         || in_array('metadata.bulk_edit', $effectivePermissions, true),
                     // Company overview: tenant-level permission (admin/owner via company.view)
                     'can_view_company_overview' => $tenant && in_array('company.view', $effectivePermissions, true),
-                    // Nav: show Brand Guidelines when DNA is published for everyone, or unpublished only for brand_settings.manage
+                    // Nav: Brand Guidelines — tenant owner/admin/agency_admin only (see $showBrandGuidelinesNav above)
                     'show_brand_guidelines_nav' => $showBrandGuidelinesNav,
                     // /app/insights/* — same rule as AnalyticsOverviewController (User::canViewBrandWorkspaceInsights)
                     'can_view_workspace_insights' => $tenant && $activeBrand && $user
                         && $user->canViewBrandWorkspaceInsights($tenant, $activeBrand),
-                    // Creators list dashboard — managers / tenant admins / brand managers only (not individual creators)
+                    // Creators **management** list — brand admin / brand_manager only (not viewers, uploaders, or enrolled creators)
                     'can_view_creators_dashboard' => $tenant && $activeBrand && $user
                         && app(ResolveCreatorsDashboardAccess::class)->canView($user, $tenant, $activeBrand),
                     'can_manage_creators_dashboard' => $tenant && $activeBrand && $user
@@ -657,29 +674,37 @@ class HandleInertiaRequests extends Middleware
         // Only calculate if tenant and brand are available
         if ($tenant && $activeBrand && $user) {
             try {
-                // Pending AI suggestions (same asset scope as /api/ai/review — contributors: teammates' uploads only)
-                $aiScope = app(\App\Services\AiReviewSuggestionScopeService::class);
-                $pendingMetadataQuery = DB::table('asset_metadata_candidates')
-                    ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
-                    ->whereNull('assets.deleted_at')
-                    ->where('assets.tenant_id', $tenant->id)
-                    ->where('assets.brand_id', $activeBrand->id)
-                    ->whereNull('asset_metadata_candidates.resolved_at')
-                    ->whereNull('asset_metadata_candidates.dismissed_at')
-                    ->where('asset_metadata_candidates.producer', 'ai');
-                $aiScope->scopeQueryToAiReviewAssetVisibility($pendingMetadataQuery, $user, $activeBrand);
-                $pendingMetadataCount = (int) $pendingMetadataQuery->count();
+                // Bell + badges: only users who may **apply** AI suggestions get pending counts (not view-only).
+                // Brand viewers never have apply; tenant-role lift no longer grants suggestion perms for viewers
+                // (see TenantPermissionResolver::hasForBrand).
+                $canApplyAiSuggestions = $user->canForContext('metadata.suggestions.apply', $tenant, $activeBrand);
+                $pendingMetadataCount = 0;
+                $pendingTagCount = 0;
+                if ($canApplyAiSuggestions) {
+                    // Pending AI suggestions (same asset scope as /api/ai/review — contributors: teammates' uploads only)
+                    $aiScope = app(\App\Services\AiReviewSuggestionScopeService::class);
+                    $pendingMetadataQuery = DB::table('asset_metadata_candidates')
+                        ->join('assets', 'asset_metadata_candidates.asset_id', '=', 'assets.id')
+                        ->whereNull('assets.deleted_at')
+                        ->where('assets.tenant_id', $tenant->id)
+                        ->where('assets.brand_id', $activeBrand->id)
+                        ->whereNull('asset_metadata_candidates.resolved_at')
+                        ->whereNull('asset_metadata_candidates.dismissed_at')
+                        ->where('asset_metadata_candidates.producer', 'ai');
+                    $aiScope->scopeQueryToAiReviewAssetVisibility($pendingMetadataQuery, $user, $activeBrand);
+                    $pendingMetadataCount = (int) $pendingMetadataQuery->count();
 
-                $pendingTagQuery = DB::table('asset_tag_candidates')
-                    ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
-                    ->whereNull('assets.deleted_at')
-                    ->where('assets.tenant_id', $tenant->id)
-                    ->where('assets.brand_id', $activeBrand->id)
-                    ->where('asset_tag_candidates.producer', 'ai')
-                    ->whereNull('asset_tag_candidates.resolved_at')
-                    ->whereNull('asset_tag_candidates.dismissed_at');
-                $aiScope->scopeQueryToAiReviewAssetVisibility($pendingTagQuery, $user, $activeBrand);
-                $pendingTagCount = (int) $pendingTagQuery->count();
+                    $pendingTagQuery = DB::table('asset_tag_candidates')
+                        ->join('assets', 'asset_tag_candidates.asset_id', '=', 'assets.id')
+                        ->whereNull('assets.deleted_at')
+                        ->where('assets.tenant_id', $tenant->id)
+                        ->where('assets.brand_id', $activeBrand->id)
+                        ->where('asset_tag_candidates.producer', 'ai')
+                        ->whereNull('asset_tag_candidates.resolved_at')
+                        ->whereNull('asset_tag_candidates.dismissed_at');
+                    $aiScope->scopeQueryToAiReviewAssetVisibility($pendingTagQuery, $user, $activeBrand);
+                    $pendingTagCount = (int) $pendingTagQuery->count();
+                }
 
                 $totalPendingAiSuggestions = $pendingMetadataCount + $pendingTagCount;
 

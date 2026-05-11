@@ -20,6 +20,42 @@ class AgencyBrandAccessService
     }
 
     /**
+     * Managed client tenant ids the user may open under an agency workspace: rows in tenant_agencies
+     * plus memberships incubated via tenant_user (is_agency_managed + agency_tenant_id) even when no
+     * tenant_agencies row exists yet. Aligns portfolio pickers with {@see AppNav} agency strip visibility.
+     *
+     * @return Collection<int, int>
+     */
+    public function accessibleManagedClientTenantIdsForAgency(User $user, Tenant $agencyTenant): Collection
+    {
+        if (! $agencyTenant->is_agency) {
+            return collect();
+        }
+
+        $user->loadMissing('tenants');
+
+        $linkedIds = TenantAgency::query()
+            ->where('agency_tenant_id', $agencyTenant->id)
+            ->pluck('tenant_id');
+
+        $memberIds = $user->tenants->pluck('id');
+        $fromLinks = $linkedIds->intersect($memberIds);
+
+        $fromPivot = collect();
+        foreach ($user->tenants as $t) {
+            if ((int) $t->id === (int) $agencyTenant->id) {
+                continue;
+            }
+            $p = $t->pivot;
+            if (($p->is_agency_managed ?? false) && (int) ($p->agency_tenant_id ?? 0) === (int) $agencyTenant->id) {
+                $fromPivot->push((int) $t->id);
+            }
+        }
+
+        return $fromLinks->merge($fromPivot)->unique()->values();
+    }
+
+    /**
      * Linked client companies (tenant_agencies) for the user's agency — not the active session tenant.
      *
      * @return array<int, array{id: int, name: string, slug: string}>
@@ -31,15 +67,7 @@ class AgencyBrandAccessService
             return [];
         }
 
-        $linkedClientIds = TenantAgency::query()
-            ->where('agency_tenant_id', $agency->id)
-            ->pluck('tenant_id');
-        if ($linkedClientIds->isEmpty()) {
-            return [];
-        }
-
-        $memberIds = $user->tenants()->pluck('tenants.id');
-        $accessibleIds = $linkedClientIds->intersect($memberIds);
+        $accessibleIds = $this->accessibleManagedClientTenantIdsForAgency($user, $agency);
         if ($accessibleIds->isEmpty()) {
             return [];
         }
@@ -74,21 +102,15 @@ class AgencyBrandAccessService
             return [];
         }
 
-        $links = TenantAgency::query()
-            ->where('agency_tenant_id', $agencyTenant->id)
-            ->get(['id', 'tenant_id']);
-        if ($links->isEmpty()) {
-            return [];
-        }
-
-        $tenantAgencyIdByClientId = $links->pluck('id', 'tenant_id');
-        $linkedClientIds = $links->pluck('tenant_id');
-
-        $memberIds = $user->tenants()->pluck('tenants.id');
-        $accessibleIds = $linkedClientIds->intersect($memberIds);
+        $accessibleIds = $this->accessibleManagedClientTenantIdsForAgency($user, $agencyTenant);
         if ($accessibleIds->isEmpty()) {
             return [];
         }
+
+        $links = TenantAgency::query()
+            ->where('agency_tenant_id', $agencyTenant->id)
+            ->get(['id', 'tenant_id']);
+        $tenantAgencyIdByClientId = $links->pluck('id', 'tenant_id');
 
         if ($brandsByTenant === null) {
             $brandsByTenant = $this->loadBrandsGroupedForTenantIds($accessibleIds->all());
@@ -143,11 +165,7 @@ class AgencyBrandAccessService
             return [];
         }
 
-        $links = TenantAgency::query()
-            ->where('agency_tenant_id', $agency->id)
-            ->pluck('tenant_id');
-        $memberIds = $user->tenants()->pluck('tenants.id');
-        $accessibleClientIds = $links->intersect($memberIds);
+        $accessibleClientIds = $this->accessibleManagedClientTenantIdsForAgency($user, $agency);
 
         $tenantIdsForBatch = collect([$agency->id])->merge($accessibleClientIds)->unique()->values()->all();
         $brandsByTenant = $this->loadBrandsGroupedForTenantIds($tenantIdsForBatch);
@@ -174,6 +192,78 @@ class AgencyBrandAccessService
         usort($flat, fn ($a, $b) => strcasecmp($a['name'] ?? '', $b['name'] ?? ''));
 
         return array_values($flat);
+    }
+
+    /**
+     * Grouped agency portfolio for the unified nav context picker (agency tenant brands + managed client workspaces).
+     * Returns null when the user has no agency tenant membership.
+     *
+     * @return array{
+     *     agency_tenant_id: int,
+     *     agency_tenant_name: string,
+     *     agency_brands: array<int, array<string, mixed>>,
+     *     client_workspaces: array<int, array{tenant_id: int, tenant_name: string, brands: array<int, array<string, mixed>>}>
+     * }|null
+     */
+    public function groupedAgencyPortfolioBrands(User $user): ?array
+    {
+        $user->loadMissing('tenants');
+        $user->warmTenantRoleCacheFromLoadedTenants();
+
+        $agency = $this->agencyTenantForUser($user);
+        if (! $agency) {
+            return null;
+        }
+
+        $accessibleClientIds = $this->accessibleManagedClientTenantIdsForAgency($user, $agency);
+
+        $tenantIdsForBatch = collect([$agency->id])->merge($accessibleClientIds)->unique()->values()->all();
+        $brandsByTenant = $this->loadBrandsGroupedForTenantIds($tenantIdsForBatch);
+        $allowedBrandIdSet = $this->allowedBrandIdsForUserAmongBrands($user, $brandsByTenant);
+
+        $agencyBrands = $this->brandsUserCanOpenInClientTenant(
+            $user,
+            $agency,
+            $brandsByTenant->get($agency->id, collect()),
+            $allowedBrandIdSet
+        );
+
+        $clientIdsSorted = $accessibleClientIds->values()->all();
+        usort($clientIdsSorted, function ($a, $b) use ($user) {
+            $na = (string) ($user->tenants->firstWhere('id', $a)?->name ?? '');
+            $nb = (string) ($user->tenants->firstWhere('id', $b)?->name ?? '');
+
+            return strcasecmp($na, $nb);
+        });
+
+        $clientWorkspaces = [];
+        foreach ($clientIdsSorted as $clientId) {
+            $clientTenant = $user->tenants->firstWhere('id', $clientId);
+            if (! $clientTenant) {
+                continue;
+            }
+            $brands = $this->brandsUserCanOpenInClientTenant(
+                $user,
+                $clientTenant,
+                $brandsByTenant->get($clientId, collect()),
+                $allowedBrandIdSet
+            );
+            if ($brands === []) {
+                continue;
+            }
+            $clientWorkspaces[] = [
+                'tenant_id' => (int) $clientId,
+                'tenant_name' => (string) $clientTenant->name,
+                'brands' => $brands,
+            ];
+        }
+
+        return [
+            'agency_tenant_id' => (int) $agency->id,
+            'agency_tenant_name' => (string) $agency->name,
+            'agency_brands' => $agencyBrands,
+            'client_workspaces' => $clientWorkspaces,
+        ];
     }
 
     /**

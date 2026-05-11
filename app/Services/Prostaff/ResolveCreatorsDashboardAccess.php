@@ -8,9 +8,11 @@ use App\Models\User;
 use App\Services\FeatureGate;
 
 /**
- * Who may open the Creators dashboard vs. manage prostaff assignments.
+ * Who may open the Creators **management** dashboard (roster, invites, full JSON) vs. individual creator UX.
  *
  * {@see self::canView()} — brand-level Creators list + manager dashboard API (not individual creator profiles).
+ * Brand viewers and uploaders (contributors) use {@see ProstaffDashboardController::creatorPage},
+ * {@see ProstaffDashboardController::creatorSelfProgress}, and GET /api/prostaff/me when enrolled as prostaff.
  */
 final class ResolveCreatorsDashboardAccess
 {
@@ -19,8 +21,7 @@ final class ResolveCreatorsDashboardAccess
     ) {}
 
     /**
-     * Creators list page and GET .../prostaff/dashboard JSON — managers / tenant admins / brand managers only.
-     * Active prostaff contributors use {@see ProstaffDashboardController::me} and their own profile route instead.
+     * Creators list page and GET .../prostaff/dashboard JSON — brand admin / brand_manager only.
      */
     public function canView(User $user, Tenant $tenant, Brand $brand): bool
     {
@@ -42,16 +43,13 @@ final class ResolveCreatorsDashboardAccess
             return false;
         }
 
-        $brandRole = $membership['role'];
-        $tenantRole = $user->getRoleForTenant($tenant);
-        $isTenantOwnerOrAdmin = in_array($tenantRole, ['owner', 'admin'], true);
-        $isBrandManager = $brandRole === 'brand_manager';
-        $isContributor = $brandRole === 'contributor';
+        $brandRole = strtolower((string) ($membership['role'] ?? ''));
 
-        if ($isContributor && ! $isTenantOwnerOrAdmin && ! $isBrandManager) {
+        // Never the management module for read-only or uploader brand roles — even if tenant role is elevated.
+        if (in_array($brandRole, ['viewer', 'contributor'], true)) {
             return false;
         }
 
-        return true;
+        return in_array($brandRole, ['admin', 'brand_manager'], true);
     }
 }

@@ -77,6 +77,18 @@ class TenantPermissionResolver
 
         if ($brand) {
             $tenant = $brand->tenant;
+            $brandRoleLower = strtolower((string) ($user->getRoleForBrand($brand) ?? ''));
+            if ($brandRoleLower === 'viewer') {
+                $tenantRoleLower = strtolower((string) ($user->getRoleForTenant($tenant) ?? ''));
+                $tenantElevated = in_array($tenantRoleLower, ['owner', 'admin', 'agency_admin'], true);
+                if (! $tenantElevated) {
+                    $viewerCaps = PermissionMap::brandPermissions()['viewer'] ?? [];
+                    if (! in_array($permission, $viewerCaps, true)) {
+                        return ['result' => false, 'source' => 'denied'];
+                    }
+                }
+            }
+
             $tenantRole = $user->getRoleForTenant($tenant);
             if ($tenantRole) {
                 $rolePermissions = PermissionMap::tenantPermissions()[strtolower($tenantRole)] ?? [];
@@ -134,8 +146,22 @@ class TenantPermissionResolver
             return false;
         }
 
-        // Check tenant-level permission first (owner/admin have all permissions)
+        // Brand **viewer**: read-only on this brand — tenant `member` (etc.) must not grant upload, metadata
+        // edits, AI suggestion queues, etc. Company owner/admin/agency_admin still pass via tenant elevation.
         $tenant = $brand->tenant;
+        $brandRoleLower = strtolower((string) ($user->getRoleForBrand($brand) ?? ''));
+        if ($brandRoleLower === 'viewer') {
+            $tenantRoleLower = strtolower((string) ($user->getRoleForTenant($tenant) ?? ''));
+            $tenantElevated = in_array($tenantRoleLower, ['owner', 'admin', 'agency_admin'], true);
+            if (! $tenantElevated) {
+                $viewerCaps = PermissionMap::brandPermissions()['viewer'] ?? [];
+                if (! in_array($permission, $viewerCaps, true)) {
+                    return false;
+                }
+            }
+        }
+
+        // Check tenant-level permission first (owner/admin have all permissions)
         if ($this->has($user, $tenant, $permission)) {
             return true;
         }

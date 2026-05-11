@@ -63,6 +63,36 @@
     }
 
     /**
+     * Workbench light panels (folder schema flyout, etc.): same idea as jp-upload-modal-scroll /
+     * studio — padded thumb, light track, tint from --wb-accent on an ancestor.
+     */
+    .wb-panel-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--wb-accent, #6366f1) 52%, transparent) rgb(248 250 252);
+    }
+    .wb-panel-scroll::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    .wb-panel-scroll::-webkit-scrollbar-track {
+        margin: 4px 0;
+        background: rgb(248 250 252);
+        border-radius: 9999px;
+    }
+    .wb-panel-scroll::-webkit-scrollbar-thumb {
+        background-color: color-mix(in srgb, var(--wb-accent, #6366f1) 55%, #cbd5e1);
+        border-radius: 9999px;
+        border: 2px solid rgb(248 250 252);
+        background-clip: padding-box;
+    }
+    .wb-panel-scroll::-webkit-scrollbar-thumb:hover {
+        background-color: color-mix(in srgb, var(--wb-accent, #6366f1) 72%, #94a3b8);
+    }
+    .wb-panel-scroll::-webkit-scrollbar-corner {
+        background: transparent;
+    }
+
+    /**
      * Studio properties — section header band (tonal step below panel chrome).
      * Hatch sits inside a shallow band for scanability, not decoration.
      */
@@ -277,23 +307,24 @@
         animation: editor-gen-fade-in 0.45s ease-out;
     }
 
-    /* Thin scrollbar for navigation panels */
+    /* Thin scrollbar for navigation panels (inherits --wb-accent from .brand-workbench-theme / BrandWorkbenchChrome) */
     .scrollbar-thin {
         scrollbar-width: thin;
-        scrollbar-color: rgb(209 213 219) transparent;
+        scrollbar-color: color-mix(in srgb, var(--wb-accent, rgb(148 163 184)) 42%, rgb(226 232 240)) transparent;
     }
     .scrollbar-thin::-webkit-scrollbar {
         width: 6px;
+        height: 6px;
     }
     .scrollbar-thin::-webkit-scrollbar-track {
         background: transparent;
     }
     .scrollbar-thin::-webkit-scrollbar-thumb {
-        background-color: rgb(209 213 219);
+        background-color: color-mix(in srgb, var(--wb-accent, rgb(148 163 184)) 44%, rgb(226 232 240));
         border-radius: 9999px;
     }
     .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-        background-color: rgb(156 163 175);
+        background-color: color-mix(in srgb, var(--wb-accent, rgb(100 116 139)) 58%, rgb(203 213 225));
     }
 
     /* Cinematic scrollbar for dark-themed pages (Builder, Research, Review) */
@@ -517,11 +548,11 @@ nav.app-nav span {
     transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
 }
 
-/* Selected items preview drawer: fit above bottom nav + selection bar on mobile */
+/* Selected items preview drawer: fit above bottom nav + selection bar (bottom nav is lg:hidden) */
 .selected-items-drawer-max-h {
     max-height: min(50vh, calc(100vh - 12rem - env(safe-area-inset-bottom, 0px)));
 }
-@media (min-width: 640px) {
+@media (min-width: 1024px) {
     .selected-items-drawer-max-h {
         max-height: 50vh;
     }
@@ -596,7 +627,8 @@ body.has-mobile-tabbar {
     padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
 }
 
-@media (min-width: 640px) {
+/* Match AppNav: bottom tab bar is lg:hidden (visible below 1024px) */
+@media (min-width: 1024px) {
     .app-mobile-bottom-offset {
         bottom: 0;
     }

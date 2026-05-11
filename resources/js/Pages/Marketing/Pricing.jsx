@@ -129,6 +129,7 @@ const ADDONS = [
 
 const AI_COSTS = [
     { action: 'Auto-tag / Suggestions / Insights', cost: '1 credit' },
+    { action: 'Audio insights (transcript + mood)', cost: '1 + 1/min' },
     { action: 'PDF brand extraction', cost: '5 credits' },
     { action: 'Presentation preview', cost: '10 credits' },
     { action: 'Generative image edits', cost: '15 credits' },

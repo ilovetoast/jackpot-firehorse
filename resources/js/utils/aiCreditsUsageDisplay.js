@@ -15,6 +15,7 @@ export const AI_FEATURE_LABELS = {
     generative_editor_images: 'Generative images',
     generative_editor_edits: 'Generative edits',
     video_insights: 'Video insights',
+    audio_insights: 'Audio insights',
     pdf_extraction: 'PDF extraction',
     presentation_preview: 'Presentation preview (drawer AI)',
 }

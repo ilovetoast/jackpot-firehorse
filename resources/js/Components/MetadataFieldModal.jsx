@@ -157,6 +157,8 @@ export default function MetadataFieldModal({
     onSuccess,
     /** When opening create: { systemLabel, fieldType?: 'select'|'multiselect'|'text', highlightValues?: bool } */
     createPrefill = null,
+    /** When editing: scroll to values / bulk-add (Manage deep link from folder flyout). */
+    highlightValuesOnOpen = false,
 }) {
     const pkgFromContext = useBrandWorkbenchChrome()
     const { auth, company } = usePage().props
@@ -197,6 +199,7 @@ export default function MetadataFieldModal({
     /** Avoid wiping the "new field" form when parent re-renders (e.g. Inertia) while the modal stays open. */
     const wasModalOpenRef = useRef(false)
     const highlightValuesAfterOpenRef = useRef(false)
+    const editValuesHighlightConsumedRef = useRef(false)
     const bulkAddTextareaRef = useRef(null)
     const [valuesPanelEmphasis, setValuesPanelEmphasis] = useState(false)
 
@@ -257,6 +260,7 @@ export default function MetadataFieldModal({
     useEffect(() => {
         if (!isOpen) {
             wasModalOpenRef.current = false
+            editValuesHighlightConsumedRef.current = false
             setFilterTransitionNotice(null)
             return
         }
@@ -496,6 +500,36 @@ export default function MetadataFieldModal({
         })
         return () => cancelAnimationFrame(frame)
     }, [isOpen, field, formData.type, loadingField])
+
+    /** Edit existing select/multiselect: same values-panel emphasis as quick-create (e.g. ?field_values= from folder flyout). */
+    useLayoutEffect(() => {
+        if (!isOpen || !field || loadingField || !highlightValuesOnOpen || editValuesHighlightConsumedRef.current) {
+            return
+        }
+        if (formData.type !== 'select' && formData.type !== 'multiselect') return
+        if (formData.option_editing_restricted) return
+
+        editValuesHighlightConsumedRef.current = true
+        const frame = requestAnimationFrame(() => {
+            document.getElementById('metadata-modal-values-panel')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            })
+            setValuesPanelEmphasis(true)
+            window.setTimeout(() => setValuesPanelEmphasis(false), 2600)
+            window.setTimeout(() => {
+                bulkAddTextareaRef.current?.focus({ preventScroll: true })
+            }, 450)
+        })
+        return () => cancelAnimationFrame(frame)
+    }, [
+        isOpen,
+        field,
+        loadingField,
+        highlightValuesOnOpen,
+        formData.type,
+        formData.option_editing_restricted,
+    ])
 
     if (!isOpen) return null
 

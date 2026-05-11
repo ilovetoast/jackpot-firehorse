@@ -1152,8 +1152,8 @@ class BrandController extends Controller
             'token' => $token,
         ]);
 
-        // Send invitation email (using tenant invite for now - can create brand-specific later)
-        Mail::to($validated['email'])->send(new InviteMember($tenant, $authUser, $inviteUrl));
+        // InviteMember uses this brand for header + CTA colors (not only the tenant default brand).
+        Mail::to($validated['email'])->send(new InviteMember($tenant, $authUser, $inviteUrl, $brand));
 
         // Log activity
         ActivityRecorder::record(
@@ -1484,8 +1484,7 @@ class BrandController extends Controller
             'token' => $invitation->token,
         ]);
 
-        // Resend email
-        Mail::to($invitation->email)->send(new InviteMember($tenant, $authUser, $inviteUrl));
+        Mail::to($invitation->email)->send(new InviteMember($tenant, $authUser, $inviteUrl, $brand));
 
         return back()->with('success', 'Invitation resent successfully.');
     }

@@ -4,6 +4,7 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import AppFooter from '../../Components/AppFooter'
 import { RECOGNIZED_PLAN_LIMIT_REASONS } from '../../utils/planLimitEligibility'
+import { AI_FEATURE_LABELS } from '../../utils/aiCreditsUsageDisplay'
 
 export default function BillingOverview({
     tenant,
@@ -19,6 +20,7 @@ export default function BillingOverview({
     storage_addon_packages,
     ai_credits,
     credit_weights,
+    credit_tier_costs = {},
     ai_credits_addon_packages,
     ai_credits_addon_state = { active: false, monthly_credits: 0 },
     creator_addon_config,
@@ -653,7 +655,9 @@ export default function BillingOverview({
                                             {Object.entries(ai_credits.per_feature).map(([feature, data]) => (
                                                 data.calls > 0 && (
                                                     <div key={feature} className="text-sm bg-gray-50 rounded-md p-2">
-                                                        <div className="text-gray-500 capitalize">{feature.replace(/_/g, ' ')}</div>
+                                                        <div className="text-gray-500">
+                                                            {AI_FEATURE_LABELS[feature] ?? feature.replace(/_/g, ' ')}
+                                                        </div>
                                                         <div className="font-medium text-gray-900">
                                                             {data.calls} calls = {data.credits_used} credits
                                                         </div>
@@ -665,14 +669,24 @@ export default function BillingOverview({
                                 )}
 
                                 {/* Common action costs */}
-                                {credit_weights && Object.keys(credit_weights).length > 0 && (
+                                {((credit_weights && Object.keys(credit_weights).length > 0) ||
+                                    Object.keys(credit_tier_costs).length > 0) && (
                                     <div className="mt-4 border-t border-gray-100 pt-4">
                                         <h4 className="text-sm font-medium text-gray-700 mb-2">Credit Costs per Action</h4>
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-500">
-                                            {Object.entries(credit_weights).map(([action, cost]) => (
+                                            {Object.entries(credit_weights || {}).map(([action, cost]) => (
                                                 <div key={action} className="flex justify-between bg-gray-50 rounded px-2 py-1">
                                                     <span className="capitalize">{action.replace(/_/g, ' ')}</span>
                                                     <span className="font-medium text-gray-700">{cost}</span>
+                                                </div>
+                                            ))}
+                                            {Object.entries(credit_tier_costs).map(([action, tier]) => (
+                                                <div key={action} className="flex justify-between bg-gray-50 rounded px-2 py-1">
+                                                    <span>{tier.label || action.replace(/_/g, ' ')}</span>
+                                                    <span className="font-medium text-gray-700">
+                                                        {tier.base_credits}
+                                                        {tier.per_additional_minute ? ` + ${tier.per_additional_minute}/min` : ''}
+                                                    </span>
                                                 </div>
                                             ))}
                                         </div>

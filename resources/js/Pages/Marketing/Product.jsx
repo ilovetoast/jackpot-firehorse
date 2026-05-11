@@ -37,6 +37,7 @@ const SYSTEMS = [
             { label: 'Brand research', text: 'Extract intelligence from brand documents, websites, and competitor analysis' },
             { label: 'Generative editor', text: 'Edit images and generate new ones within brand guidelines' },
             { label: 'Video insights', text: 'Per-minute AI analysis of video content with structured output' },
+            { label: 'Audio insights', text: 'Transcripts, mood, and summaries for MP3 / WAV / AAC — 1 credit + 1 per minute' },
         ],
         color: 'emerald',
     },

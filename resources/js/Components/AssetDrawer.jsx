@@ -56,6 +56,8 @@ import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
 import LightboxRasterImage from './LightboxRasterImage'
+import AudioCardVisual from './Audio/AudioCardVisual'
+import AudioLightboxPlayer from './Audio/AudioLightboxPlayer'
 import {
     getUploadPreviewSnapshotForAsset,
     subscribeUploadPreviewRegistry,
@@ -134,11 +136,13 @@ function assetSupportsLightboxCarousel(a) {
     const ext = (a.file_extension || a.original_filename?.split('.').pop() || '').toUpperCase()
     const mimeType = a.mime_type || ''
     const isVideoFile = mimeType.startsWith('video/') || ['MP4', 'MOV', 'AVI', 'MKV', 'WEBM', 'M4V'].includes(ext)
+    const isAudioFile = mimeType.startsWith('audio/') || ['MP3', 'WAV', 'AAC', 'M4A', 'OGG', 'FLAC', 'WEBA'].includes(ext)
     return (
         mimeType.startsWith('image/') ||
         mimeType === 'application/pdf' ||
         mimeType === 'image/vnd.adobe.photoshop' ||
         (isVideoFile && (a.video_poster_url || a.thumbnail_url || a.final_thumbnail_url)) ||
+        isAudioFile ||
         ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'SVG', 'BMP', 'TIF', 'TIFF', 'PDF', 'PSD', 'PSB'].includes(ext)
     )
 }
@@ -1280,6 +1284,19 @@ export default function AssetDrawer({
         return mimeType.startsWith('video/') || videoExtensions.includes(ext)
     }, [displayAsset])
 
+    // Drawer audio block (Phase 3): mirrors the AssetCard logic so the
+    // right-rail quick view shows the same waveform / play control as the
+    // grid tile, instead of falling through to the "Preview was unable to
+    // generate" fallback.
+    const isAudio = useMemo(() => {
+        if (!displayAsset) return false
+        const mimeType = displayAsset.mime_type || ''
+        const filename = displayAsset.original_filename || ''
+        const audioExtensions = ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba']
+        const ext = filename.split('.').pop()?.toLowerCase() || ''
+        return mimeType.startsWith('audio/') || audioExtensions.includes(ext)
+    }, [displayAsset])
+
     const drawerAllowsFocalPoint = useMemo(() => {
         const m = displayAsset?.mime_type || ''
         return Boolean(displayAsset && !isVideo && m.startsWith('image/') && !m.includes('svg'))
@@ -2075,6 +2092,9 @@ export default function AssetDrawer({
     const cooldownMinutesThumb = processingGuardStatus?.actions?.thumbnails?.cooldown_remaining_minutes ?? 0
     const cooldownMinutesAi = processingGuardStatus?.actions?.ai_metadata?.cooldown_remaining_minutes ?? 0
     const isTenantAdminForProcessing = canRegenerateAiMetadata || isTenantOwnerOrAdminForAi
+    /** Brand viewers lack metadata.edit_post_upload — hide processing tools even if tenant role is elevated. */
+    const canUseAssetProcessingTools =
+        can('metadata.edit_post_upload') || can('assets.retry_thumbnails')
     const canOfferEnhancedPreviewGenerate = useMemo(
         () => canQueueStudioViewSave && showExecutionPreviewChrome,
         [canQueueStudioViewSave, showExecutionPreviewChrome],
@@ -2516,6 +2536,9 @@ export default function AssetDrawer({
     const isFontFile = useMemo(() => isUploadedFontFileAsset(displayAsset), [displayAsset])
 
     const canRotateDrawerRasterPreview = useMemo(() => {
+        if (!can('metadata.edit_post_upload')) {
+            return false
+        }
         if (!displayAsset?.id || isVirtualGoogleFont || isVideo || isPdf || isFontFile) {
             return false
         }
@@ -2527,7 +2550,7 @@ export default function AssetDrawer({
             return false
         }
         return true
-    }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile])
+    }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile, can])
 
     /** Fullscreen / lightbox: only when this asset has something to show (avoids opening on OBJ / failed thumbs / stale carousel index). */
     const canOpenDrawerLightbox = useMemo(() => {
@@ -2553,6 +2576,11 @@ export default function AssetDrawer({
                 displayAsset.final_thumbnail_url
             )
         }
+        if (isAudio) {
+            // Audio always opens the lightbox player; we paint the visual
+            // ourselves rather than relying on a generated thumbnail.
+            return true
+        }
         if (drawerEphemeralLocalPreviewUrl) {
             return true
         }
@@ -2565,6 +2593,7 @@ export default function AssetDrawer({
     }, [
         displayAsset,
         drawerEphemeralLocalPreviewUrl,
+        isAudio,
         isPdf,
         isVideo,
         pdfCurrentPage,
@@ -3388,10 +3417,11 @@ export default function AssetDrawer({
     const showProcessingAutomationSection =
         !externalCollectionGuest &&
         !displayAsset?.deleted_at &&
-        (showDrawerYourProcessingActions ||
-            isTenantAdminForProcessing ||
-            canSiteAdminPipeline ||
-            showDrawerFocalAiRegenerateCard)
+        (canSiteAdminPipeline ||
+            (canUseAssetProcessingTools &&
+                (showDrawerYourProcessingActions ||
+                    isTenantAdminForProcessing ||
+                    showDrawerFocalAiRegenerateCard)))
 
     const thumbnailStatusForPanel = String(
         processingGuardStatus?.thumbnail_status ?? thumbnailStatus ?? '—',
@@ -3554,7 +3584,7 @@ export default function AssetDrawer({
 
     /** Short note under the drawer preview when no raster is available (OBJ, failed/skipped pipeline, unsupported). */
     const drawerPreviewTerminalNote = useMemo(() => {
-        if (!displayAsset?.id || isVirtualGoogleFont || isVideo) {
+        if (!displayAsset?.id || isVirtualGoogleFont || isVideo || isAudio) {
             return null
         }
         if (drawerEphemeralLocalPreviewUrl) {
@@ -3571,6 +3601,7 @@ export default function AssetDrawer({
     }, [
         displayAsset,
         drawerEphemeralLocalPreviewUrl,
+        isAudio,
         isVideo,
         isVirtualGoogleFont,
         thumbnailRetryCount,
@@ -4503,6 +4534,25 @@ export default function AssetDrawer({
                                             Open on Google Fonts
                                         </a>
                                     )}
+                                </div>
+                            ) : isAudio && displayAsset.id ? (
+                                // Phase 3: Audio drawer preview — same visual language as the
+                                // grid tile (dark brand bg, organic capsule bars, frosted-blur
+                                // play/pause). Clicking the play button toggles real audio
+                                // playback through the shared registry; clicking elsewhere on
+                                // the preview opens the full lightbox player.
+                                <div
+                                    className={`relative h-full w-full ${canOpenDrawerLightbox ? 'cursor-pointer' : 'cursor-default'}`}
+                                    onClick={() => {
+                                        if (canOpenDrawerLightbox) openDrawerLightbox()
+                                    }}
+                                >
+                                    <AudioCardVisual
+                                        asset={displayAsset}
+                                        primaryColor={brandPrimary}
+                                        size="drawer"
+                                        className="h-full w-full"
+                                    />
                                 </div>
                             ) : isVideo && displayAsset.id ? (
                                 // Phase V-1: Video thumbnail with hover preview (same as other assets)
@@ -5953,20 +6003,6 @@ export default function AssetDrawer({
                                 </div>
                             )}
                             
-                            {/* Folder as first line */}
-                            {categoryName && categoryName !== 'No folder' && (
-                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap mb-2 md:mb-3">
-                                    <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex items-center md:items-start">
-                                        <span className="flex items-center flex-wrap gap-1 md:gap-1.5">
-                                            Folder
-                                        </span>
-                                    </dt>
-                                    <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
-                                        {categoryName}
-                                    </dd>
-                                </div>
-                            )}
-
                             <AssetMetadataDisplay
                                 assetId={displayAsset.id}
                                 onPendingCountChange={setPendingMetadataCount}
@@ -5974,6 +6010,9 @@ export default function AssetDrawer({
                                 primaryColor={brandPrimary}
                                 readOnly={!can('metadata.edit_post_upload')}
                                 suppressAnalysisRunningBanner={suppressAnalysisRunningBannerInMetadata}
+                                folderCategorySummary={
+                                    categoryName && categoryName !== 'No folder' ? categoryName : null
+                                }
                                 onAnalysisPipelineStateChange={
                                     showRevueCollapsible && !externalCollectionGuest && !isVirtualGoogleFont
                                         ? handleAnalysisPipelineState
@@ -7549,12 +7588,23 @@ export default function AssetDrawer({
                             const currentMimeType = currentCarouselAsset.mime_type || ''
                             const currentFilename = currentCarouselAsset.original_filename || ''
                             const videoExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v']
+                            const audioExtensions = ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba']
                             const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
                             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
+                            const isCurrentAudio = currentMimeType.startsWith('audio/') || audioExtensions.includes(ext)
                             const isCurrentPdf = Boolean(currentCarouselAsset?.is_pdf)
                                 || currentMimeType === 'application/pdf'
                                 || ext === 'pdf'
-                            
+
+                            if (isCurrentAudio && currentCarouselAsset.id) {
+                                return (
+                                    <AudioLightboxPlayer
+                                        asset={currentCarouselAsset}
+                                        primaryColor={brandPrimary}
+                                    />
+                                )
+                            }
+
                             if (isCurrentVideo && currentCarouselAsset.id) {
                                 // Video playback in fullscreen modal
                                 // Use view URL (not download URL) to avoid tracking download

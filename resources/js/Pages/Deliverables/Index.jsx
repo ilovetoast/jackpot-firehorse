@@ -708,13 +708,13 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                 <div className="hidden lg:flex lg:flex-shrink-0">
                     <AssetSidebar
                         addAssetButton={
-                            auth?.user && (
+                            canUpload && auth?.user ? (
                                 <AddAssetButton
                                     defaultAssetType="deliverable"
                                     className="w-full"
                                     onClick={handleOpenUploadDialog}
                                 />
-                            )
+                            ) : null
                         }
                         categories={categories}
                         filterCategories={(cats) =>
@@ -1001,12 +1001,14 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                                             ? `Get started by uploading your first ${DELIVERABLES_ITEM_LABEL} to this folder. Manage your brand assets with ease and keep everything organized.`
                                             : `Get started by choosing a folder or uploading your first ${DELIVERABLES_ITEM_LABEL}. Manage your brand assets with ease and keep everything in sync.`}
                                 </p>
-                                <div className="mt-8">
-                                    <AddAssetButton 
-                                        defaultAssetType="deliverable" 
-                                        onClick={handleOpenUploadDialog}
-                                    />
-                                </div>
+                                {canUpload ? (
+                                    <div className="mt-8">
+                                        <AddAssetButton
+                                            defaultAssetType="deliverable"
+                                            onClick={handleOpenUploadDialog}
+                                        />
+                                    </div>
+                                ) : null}
                             </div>
                         )}
                         </div>

@@ -39,12 +39,12 @@ class InviteCollectionAccess extends BaseMailable
 
         $brandName = $this->collection->brand?->name ?? $tenant?->name ?? '';
         $subject = $this->template
-            ? $this->template->render([
+            ? $this->template->render(array_merge([
                 'tenant_name' => $tenant?->name ?? '',
                 'brand_name' => $brandName,
                 'collection_name' => $this->collection->name,
                 'inviter_name' => $this->inviter->name,
-            ])['subject']
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand($this->collection->brand)))['subject']
             : 'You\'re invited to view a collection: '.$this->collection->name;
 
         return new Envelope(
@@ -58,7 +58,7 @@ class InviteCollectionAccess extends BaseMailable
         $brand = $this->collection->brand;
 
         if ($this->template) {
-            $rendered = $this->template->render([
+            $rendered = $this->template->render(array_merge([
                 'tenant_name' => $tenant?->name ?? '',
                 'brand_name' => $brand?->name ?? ($tenant?->name ?? ''),
                 'collection_name' => $this->collection->name,
@@ -67,7 +67,7 @@ class InviteCollectionAccess extends BaseMailable
                 'app_name' => config('app.name'),
                 'app_url' => rtrim((string) config('app.url'), '/'),
                 'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($brand),
-            ]);
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand($brand)));
 
             return new Content(
                 htmlString: $rendered['body_html'],

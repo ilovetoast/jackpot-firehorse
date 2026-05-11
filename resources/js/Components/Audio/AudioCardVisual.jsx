@@ -1,29 +1,143 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import useAudioPlayer from '../../hooks/useAudioPlayer'
 
 /**
- * Card-sized visual for audio assets.
+ * Card-sized audio visual.
  *
- * Three layered states, in order:
- *   1. Always: brand-tinted gradient + a deterministic synthetic waveform
- *      derived from the asset id. Each asset gets a unique-looking
- *      "fingerprint" of mirrored bars — so even before the FFmpeg
- *      waveform PNG is rendered, the tile reads as audio (never as a
- *      broken image).
- *   2. When `asset.audio_waveform_url` is present (set by the
- *      GenerateAudioWaveformJob → AudioWaveformService pipeline) the
- *      real waveform crossfades in over the synthetic bars while
- *      keeping the gradient backdrop + chrome.
- *   3. Chrome: small "AUDIO" pill top-left, AI status pill top-right
- *      while processing, play triangle bottom-left, duration bottom-
- *      right. The chrome gives the card a strong type identity (a la
- *      Spotify / SoundCloud) so audio assets are obvious in a mixed
- *      asset grid.
+ * Visual language (matches the brand palette and the video player chrome):
+ *   - Dark brand-tinted gradient background (deep base, never light gray).
+ *   - Organic waveform bars in the brand accent color — varying widths
+ *     (thin / thick / thin / fat) and asymmetric amplitudes so the
+ *     silhouette reads as a living waveform, not a metronome.
+ *   - When idle: deterministic synthetic bars seeded from the asset id
+ *     (so each track has a unique, stable fingerprint).
+ *   - When playing: bars are driven by a shared Web Audio AnalyserNode
+ *     so they react to actual audio levels.
+ *   - Play / pause control: bottom-left, frosted black/40 blur circle
+ *     matching the existing video overlay (just smaller).
+ *   - Duration overlay: bottom-right when known.
+ *   - No "AUDIO" pill — type identity comes from the visual itself.
  *
- * IMPORTANT: this component never renders an <img> with a missing src
- * (the previous version fell back to `asset.thumbnail_url`, which
- * landed broken on audio assets). The real waveform <img> only mounts
- * when its url is non-empty.
+ * Design language: an editor-style printed waveform (capsule bars with
+ * dramatic height variation), set on the brand-tinted dark gradient. We
+ * intentionally do NOT draw any chrome over the bars — no bezel ring, no
+ * reflection highlight, no reel separators, no curved-viewport mask. Each
+ * one of those, on iteration, ended up reading as "this is a framed bar
+ * chart" rather than as a free-floating waveform; the reference designs
+ * the agency stakeholders pointed at have none of that ornamentation.
+ *
+ * Jackpot brand cues (subtle, only show up during user activity):
+ *   1. Soft-cornered bars: each bar uses rx = ry = w * 0.28 — clearly
+ *      rounded but NOT a full capsule. Full pill caps were reviewed as
+ *      "lozenge-y", and square corners read as graph paper; this is the
+ *      middle ground. Height is the dominant rhythm cue. Opacity is
+ *      uniform at idle (every bar full). The instant playback engages
+ *      — playing, buffering, or paused with progress > 0 — bars not yet
+ *      reached drop hard to 0.28 opacity, and bars at-or-behind the
+ *      play-head pop back to full 1.0. The result is an unmistakable
+ *      progress-fill wipe driven entirely by opacity contrast, no
+ *      separate progress bar needed.
+ *   2. Pay-line: 1px horizontal accent hairline at the vertical center.
+ *      INVISIBLE when idle, brightens during playback, flashes briefly
+ *      on loud peaks. This is the "win line" beat without saying so —
+ *      the only persistent slot cue, and it only shows up on activity.
+ *   3. Spin-on-load: when audio is buffering, bars + pay-line get a
+ *      vertical scroll-blur animation that mimics a reel mid-spin,
+ *      then snap to crisp on play. Strongest slot cue — only visible
+ *      during a transient state, so it never feels heavy.
+ *   4. Live-driven amplitudes: when playing, the AnalyserNode output
+ *      replaces the synthetic envelope so the bars become a literal
+ *      VU meter for what's coming out of the speakers.
+ *
+ * The component is fully self-contained: clicking the play button starts
+ * actual audio playback through the shared registry, so it works in the
+ * grid, in the asset drawer, and in the lightbox identically.
  */
+function hashSeed(str) {
+    let h = 5381
+    if (!str) return 1
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) + h) + str.charCodeAt(i)
+        h |= 0
+    }
+    return Math.abs(h) || 1
+}
+
+/**
+ * Build organic-feeling synthetic bar data: variable widths, asymmetric
+ * top/bottom heights, occasional taller "transients" — modeled after
+ * real audio waveform PNGs (and the reference designs the user shared).
+ *
+ * @returns Array<{ x: number, w: number, top: number, bot: number }>
+ *   x, w, top, bot are all in % units (0..100) of the SVG viewBox.
+ */
+function syntheticBars(seed, count = 56) {
+    let s = seed
+    const rng = () => {
+        s = (s * 1103515245 + 12345) & 0x7fffffff
+        return s / 0x7fffffff
+    }
+    const bars = []
+    let x = 1
+    const totalWidth = 98
+    // Tight packing: small gap factor brings the bars in close enough that
+    // the silhouette reads as a continuous waveform envelope, matching the
+    // printed-waveform reference rather than a sparser bar chart.
+    const GAP_WEIGHT = 0.22
+    const weights = []
+    let weightSum = 0
+    for (let i = 0; i < count; i++) {
+        // Width variation is intentionally MILD (was 0.6–2.6vb, now 0.8–
+        // 1.4vb). Heights should drive the silhouette — fat outlier bars
+        // make the visual feel like a chart, not a waveform. Refs
+        // consistently show near-uniform widths with dramatic height swing.
+        const r = rng()
+        const w = r < 0.85 ? 0.8 + rng() * 0.3 : 1.1 + rng() * 0.3
+        weights.push(w)
+        weightSum += w + GAP_WEIGHT
+    }
+    const scale = totalWidth / weightSum
+    for (let i = 0; i < count; i++) {
+        const w = weights[i] * scale
+        const gap = GAP_WEIGHT * scale
+        // Height bias: middle of card is louder, edges quieter — mimics
+        // the natural envelope of a song that opens, peaks, and tails.
+        // Wider amplitude range now (0.18 floor vs 0.10 before, 1.0 ceiling
+        // vs 0.98) so peaks really tower and valleys really dip — the
+        // dynamic range itself is the visual story.
+        const center = (i / (count - 1)) * 2 - 1 // [-1, 1]
+        const envelope = Math.cos(center * 0.9) * 0.55 + 0.45
+        const baseAmp = (0.28 + rng() * 0.6) * envelope
+        const peakRoll = ((s >> 8) & 0x1f) === 0 ? 1.0 : baseAmp
+        // Symmetric: top and bottom heights match. The reference shows a
+        // mirrored top/bottom waveform, not a lopsided one.
+        const amp = Math.min(1.0, Math.max(0.18, peakRoll))
+        bars.push({ x, w, top: amp, bot: amp })
+        x += w + gap
+    }
+    return bars
+}
+
+/**
+ * Map AnalyserNode frequency data (Uint8Array length = analyser.frequencyBinCount)
+ * onto our bar-count grid, returning normalized [0..1] amplitudes.
+ */
+function sampleAnalyser(buffer, count) {
+    if (!buffer || buffer.length === 0) return null
+    const out = new Array(count)
+    const step = buffer.length / count
+    for (let i = 0; i < count; i++) {
+        // Average the bin slice for smoother bars (vs. raw indexing).
+        const start = Math.floor(i * step)
+        const end = Math.max(start + 1, Math.floor((i + 1) * step))
+        let sum = 0
+        for (let j = start; j < end; j++) sum += buffer[j]
+        const avg = sum / Math.max(1, end - start)
+        out[i] = Math.min(1, (avg / 255) ** 0.85)
+    }
+    return out
+}
+
 function formatDuration(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) return null
     const total = Math.round(seconds)
@@ -37,138 +151,284 @@ function formatDuration(seconds) {
     return `${m}:${String(s).padStart(2, '0')}`
 }
 
-/**
- * djb2-ish hash → integer. Stable across reloads / users / browsers,
- * so the same asset always gets the same waveform shape.
- */
-function hashSeed(str) {
-    let h = 5381
-    if (!str) return 0
-    for (let i = 0; i < str.length; i++) {
-        h = ((h << 5) + h) + str.charCodeAt(i)
-        h |= 0
-    }
-    return Math.abs(h)
+function darkenHex(hex, factor = 0.35) {
+    if (typeof hex !== 'string' || !/^#?[0-9a-f]{6}$/i.test(hex.replace('#', ''))) return '#1f2937'
+    const n = parseInt(hex.replace('#', ''), 16)
+    const r = Math.round(((n >> 16) & 0xff) * factor)
+    const g = Math.round(((n >> 8) & 0xff) * factor)
+    const b = Math.round((n & 0xff) * factor)
+    return `rgb(${r}, ${g}, ${b})`
 }
 
-/**
- * Generate `count` bar amplitudes in [0.18, 1.0] from a seed.
- * Uses an LCG so bars are pseudo-random but reproducible per asset.
- */
-function syntheticBars(seed, count = 64) {
-    let state = seed || 1
-    const bars = new Array(count)
-    for (let i = 0; i < count; i++) {
-        state = (state * 1103515245 + 12345) & 0x7fffffff
-        const r = (state / 0x7fffffff)
-        // Bias toward middle-tall bars so the silhouette reads as a song,
-        // with occasional taller "transient" peaks like real audio.
-        const base = 0.25 + r * 0.55
-        const peak = ((state >> 7) & 0x1f) === 0 ? 0.95 : base
-        bars[i] = Math.min(1, peak)
-    }
-    return bars
+const VIEW_W = 100
+const VIEW_H = 56
+const CENTER_Y = VIEW_H / 2
+
+function PlayIcon({ className = 'h-4 w-4' }) {
+    return (
+        <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+            <path d="M8 5v14l11-7z" />
+        </svg>
+    )
 }
 
-/**
- * Color helpers — derive a slightly darker companion to the brand color
- * for the gradient floor. Falls back to indigo if no brand color set.
- */
-function hexToRgb(hex) {
-    if (!hex || typeof hex !== 'string') return null
-    const m = hex.replace('#', '')
-    if (m.length !== 6) return null
-    const n = parseInt(m, 16)
-    if (Number.isNaN(n)) return null
-    return { r: (n >> 16) & 0xff, g: (n >> 8) & 0xff, b: n & 0xff }
+function PauseIcon({ className = 'h-4 w-4' }) {
+    return (
+        <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+            <rect x="6" y="5" width="4" height="14" rx="1" />
+            <rect x="14" y="5" width="4" height="14" rx="1" />
+        </svg>
+    )
 }
 
-function rgba(rgb, a) {
-    if (!rgb) return `rgba(99,102,241,${a})`
-    return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`
+function LoadingSpinner({ className = 'h-4 w-4' }) {
+    return (
+        <svg viewBox="0 0 24 24" className={`${className} animate-spin`} fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+    )
 }
 
-export default function AudioCardVisual({ asset, primaryColor = '#6366f1', className = '' }) {
+export default function AudioCardVisual({
+    asset,
+    primaryColor = '#f97316',
+    className = '',
+    /**
+     * Size variant — `card` (grid tile, default), `drawer` (right-rail),
+     * `lightbox` (modal). Affects bar density + chrome scale only; the
+     * underlying playback engine and bar logic are identical.
+     */
+    size = 'card',
+}) {
     const audioMeta = asset?.metadata?.audio || {}
-    const realWaveformUrl =
-        (typeof asset?.audio_waveform_url === 'string' && asset.audio_waveform_url) || null
     const duration = useMemo(() => formatDuration(audioMeta?.duration_seconds), [audioMeta?.duration_seconds])
     const aiStatus = audioMeta?.ai_status
 
+    const src = useMemo(
+        () =>
+            (typeof asset?.audio_playback_url === 'string' && asset.audio_playback_url) ||
+            (typeof asset?.original_url === 'string' && asset.original_url) ||
+            (typeof asset?.preview_url === 'string' && asset.preview_url) ||
+            '',
+        [asset?.audio_playback_url, asset?.original_url, asset?.preview_url],
+    )
+
+    const token = asset?.id ?? src
+    const { audioRef, isPlaying, isLoading, currentTime, duration: liveDuration, toggle, getFrequencyData } =
+        useAudioPlayer({ token, src })
+
     const seed = useMemo(() => hashSeed(asset?.id || asset?.original_filename || 'audio'), [asset?.id, asset?.original_filename])
-    const bars = useMemo(() => syntheticBars(seed, 64), [seed])
+    const barCount = size === 'lightbox' ? 80 : size === 'drawer' ? 60 : 56
+    const baseBars = useMemo(() => syntheticBars(seed, barCount), [seed, barCount])
 
-    const rgb = useMemo(() => hexToRgb(primaryColor), [primaryColor])
-    const gradient = useMemo(() => {
-        const a = rgba(rgb, 0.18)
-        const b = rgba(rgb, 0.42)
-        return `linear-gradient(135deg, ${a} 0%, ${b} 100%)`
-    }, [rgb])
+    // Stable per-instance id so SVG mask/gradient ids never collide between
+    // multiple AudioCardVisual mounts on the same page (grid + drawer +
+    // lightbox can all be live at once).
+    const reactId = useId()
+    const svgId = useMemo(() => reactId.replace(/[^a-zA-Z0-9_-]/g, ''), [reactId])
 
-    const [waveformLoaded, setWaveformLoaded] = useState(false)
+    // Live bar levels driven by the shared analyser. We RAF only while playing.
+    const [levels, setLevels] = useState(null)
+    // Rolling peak energy for the pay-line "jackpot" flash — kept as a ref
+    // so we don't trigger React re-renders on every animation frame.
+    const peakRef = useRef(0)
+    const [payLinePulse, setPayLinePulse] = useState(0)
+    const rafRef = useRef(null)
+    useEffect(() => {
+        if (!isPlaying) {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current)
+            rafRef.current = null
+            setLevels(null)
+            peakRef.current = 0
+            setPayLinePulse(0)
+            return undefined
+        }
+        let lastPulseAt = 0
+        const tick = () => {
+            const data = getFrequencyData()
+            const sampled = sampleAnalyser(data, barCount)
+            if (sampled) {
+                setLevels(sampled)
+                // Mean energy across the spectrum — when it spikes above the
+                // rolling baseline, briefly brighten the pay-line. This is
+                // the "jackpot win" cue: the win-line glows on loud beats
+                // without ever feeling literal.
+                let sum = 0
+                for (let i = 0; i < sampled.length; i++) sum += sampled[i]
+                const mean = sum / sampled.length
+                peakRef.current = peakRef.current * 0.92 + mean * 0.08
+                const now = performance.now()
+                if (mean > peakRef.current * 1.4 && now - lastPulseAt > 120) {
+                    lastPulseAt = now
+                    setPayLinePulse(1)
+                    setTimeout(() => setPayLinePulse(0), 180)
+                }
+            }
+            rafRef.current = requestAnimationFrame(tick)
+        }
+        rafRef.current = requestAnimationFrame(tick)
+        return () => {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current)
+            rafRef.current = null
+        }
+    }, [isPlaying, barCount, getFrequencyData])
+
+    // Progress: prefer live duration from <audio>, fall back to FFprobe metadata.
+    const effectiveDuration = liveDuration || audioMeta?.duration_seconds || 0
+    const progress = effectiveDuration > 0 ? Math.min(1, currentTime / effectiveDuration) : 0
+
+    const bgGradient = useMemo(() => {
+        const dark = darkenHex(primaryColor, 0.32)
+        const darker = darkenHex(primaryColor, 0.14)
+        return `linear-gradient(135deg, ${dark} 0%, ${darker} 100%)`
+    }, [primaryColor])
+
+    const playButtonScale = size === 'lightbox' ? 'h-12 w-12' : size === 'drawer' ? 'h-10 w-10' : 'h-9 w-9'
+    const playIconScale = size === 'lightbox' ? 'h-5 w-5' : 'h-4 w-4'
+
+    const handlePlayClick = (e) => {
+        // Stop the click from also opening the asset drawer / lightbox.
+        e.preventDefault()
+        e.stopPropagation()
+        toggle()
+    }
+
+    // Pay-line opacity: hidden when idle (no chrome on a static card),
+    // appears during playback, flashes briefly on loud peaks. Visibility
+    // is gated on activity so the idle state stays as clean as the
+    // reference designs we lifted the silhouette from.
+    const payLineOpacity = isLoading
+        ? 0.18
+        : isPlaying
+          ? 0.32 + 0.45 * payLinePulse
+          : 0
 
     return (
         <div
             className={`relative flex h-full w-full items-center justify-center overflow-hidden ${className}`}
-            style={{ background: gradient }}
+            style={{ background: bgGradient }}
             aria-label={asset?.title || asset?.original_filename || 'Audio'}
         >
-            {/* Layer 1 — synthetic waveform (always rendered, fades out under the real one). */}
+            {/* Reel-spin keyframes: only used while audio is buffering. Defining the
+                animation in a <style> tag keeps everything self-contained — no global
+                CSS file to keep in sync, and duplicate definitions across instances
+                are inert. */}
+            <style>{`
+                @keyframes jp-reel-spin-${svgId} {
+                    0%   { transform: translateY(0); filter: blur(0); }
+                    50%  { transform: translateY(-3px); filter: blur(0.4px); }
+                    100% { transform: translateY(0); filter: blur(0); }
+                }
+                .jp-reel-spin-${svgId} {
+                    transform-origin: 50% 50%;
+                    animation: jp-reel-spin-${svgId} 0.85s cubic-bezier(0.4, 0.0, 0.6, 1) infinite;
+                }
+            `}</style>
+
             <svg
-                viewBox="0 0 100 50"
+                viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
                 preserveAspectRatio="none"
                 className="absolute inset-x-3 inset-y-0 h-full"
+                // Scale the entire waveform to 80% of the card area, centered.
+                // Leaves a generous margin around the visual so the audio tile
+                // reads as embedded artwork instead of full-bleed chart fill —
+                // matches the breathing room in the agency reference designs.
+                // Play button + duration overlay sit OUTSIDE the SVG so they
+                // are unaffected and stay anchored in the corners.
                 style={{
                     width: 'calc(100% - 1.5rem)',
-                    opacity: waveformLoaded ? 0.18 : 0.85,
-                    transition: 'opacity 320ms ease',
+                    transform: 'scale(0.8)',
+                    transformOrigin: 'center',
                 }}
                 aria-hidden="true"
             >
-                {bars.map((h, i) => {
-                    const w = 100 / bars.length
-                    const x = i * w
-                    const barW = Math.max(0.6, w * 0.55)
-                    const half = h * 22 // bar reaches +/-22 around centerline (=44 of 50 total)
-                    return (
-                        <rect
-                            key={i}
-                            x={x + (w - barW) / 2}
-                            y={25 - half}
-                            width={barW}
-                            height={half * 2}
-                            rx={barW * 0.45}
-                            fill={primaryColor}
-                            opacity={0.55 + (i % 5) * 0.08}
-                        />
-                    )
-                })}
+                {/* Bars + pay-line. No defs / mask / separators by design —
+                    every previous chrome layer ended up reading as a frame.
+                    The `jp-reel-spin` class only applies while audio is
+                    buffering (slot-reel mid-spin cue). */}
+                <g className={isLoading ? `jp-reel-spin-${svgId}` : undefined}>
+                    {baseBars.map((bar, i) => {
+                        const liveAmp = levels?.[i]
+                        const topAmp = liveAmp != null ? Math.max(bar.top * 0.35, liveAmp) : bar.top
+                        const botAmp = liveAmp != null ? Math.max(bar.bot * 0.35, liveAmp * 0.85) : bar.bot
+                        const halfTop = (topAmp * VIEW_H) / 2
+                        const halfBot = (botAmp * VIEW_H) / 2
+                        // Soft-cornered (not full-pill) bar tips: rx = ry =
+                        // bar.w * 0.28 gives a clearly rounded corner without
+                        // the dome of a capsule. Full pill (bar.w / 2) read as
+                        // "lozenges" in agency review; this is the middle
+                        // ground — visibly soft, but the bar still reads as a
+                        // bar. The min() guard against half-height stops very
+                        // short amplitudes from rendering as squashed ellipses.
+                        const r = Math.min(bar.w * 0.28, (halfTop + halfBot) / 2)
+                        const cx = bar.x + bar.w / 2
+                        const passed = progress > 0 && cx / VIEW_W <= progress
+                        // Opacity rules (informed by agency review):
+                        //   - Idle: every bar full opacity. NO per-bar
+                        //     variation — random `(i % 4) * 0.07` reads as
+                        //     "some bars are randomly darker for no reason".
+                        //   - Playback active (playing OR buffering OR a
+                        //     paused track with mid-progress): bars NOT yet
+                        //     reached drop hard to 0.28 so the play-head
+                        //     position is unmistakable as bars fill in
+                        //     left-to-right. Bars already reached pop back
+                        //     to full 1.0 — the contrast is the point.
+                        // Always animate opacity (even when live amplitudes
+                        // are driving height each frame) so the fill swelling
+                        // past the play-head reads as a smooth wipe.
+                        const playbackActive = isPlaying || isLoading || progress > 0
+                        const barOpacity = passed ? 1 : playbackActive ? 0.28 : 1
+                        return (
+                            <rect
+                                key={i}
+                                x={bar.x}
+                                y={CENTER_Y - halfTop}
+                                width={bar.w}
+                                height={halfTop + halfBot}
+                                rx={r}
+                                ry={r}
+                                fill={primaryColor}
+                                opacity={barOpacity}
+                                style={{ transition: 'opacity 220ms ease' }}
+                            />
+                        )
+                    })}
+
+                    {/* Pay-line: 1px hairline across the exact center. Hidden
+                        when idle, brightens on play, flashes on loud peaks via
+                        payLinePulse. The only persistent slot-machine cue. */}
+                    <line
+                        x1={0}
+                        y1={CENTER_Y}
+                        x2={VIEW_W}
+                        y2={CENTER_Y}
+                        stroke={primaryColor}
+                        strokeWidth={0.22}
+                        opacity={payLineOpacity}
+                        style={{ transition: 'opacity 140ms ease' }}
+                    />
+                </g>
             </svg>
 
-            {/* Layer 2 — real FFmpeg waveform PNG. Mounted only when a url exists. */}
-            {realWaveformUrl ? (
-                <img
-                    src={realWaveformUrl}
-                    alt=""
-                    className="absolute inset-0 h-full w-full select-none object-cover transition-opacity duration-300"
-                    style={{ opacity: waveformLoaded ? 0.95 : 0 }}
-                    loading="lazy"
-                    draggable={false}
-                    onLoad={() => setWaveformLoaded(true)}
-                    onError={() => setWaveformLoaded(false)}
-                />
-            ) : null}
-
-            {/* Layer 3 — chrome */}
-            <div className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-full bg-white/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 shadow-sm backdrop-blur-sm dark:bg-slate-900/70 dark:text-slate-100">
-                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                    <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z" />
-                </svg>
-                Audio
-            </div>
+            <button
+                type="button"
+                onClick={handlePlayClick}
+                className={`absolute bottom-2 left-2 z-10 flex ${playButtonScale} items-center justify-center rounded-full bg-black/45 text-white shadow-lg ring-1 ring-white/25 backdrop-blur-md transition-transform duration-150 hover:scale-105 hover:bg-black/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white`}
+                aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
+                aria-pressed={isPlaying}
+            >
+                {isLoading ? (
+                    <LoadingSpinner className={playIconScale} />
+                ) : isPlaying ? (
+                    <PauseIcon className={playIconScale} />
+                ) : (
+                    <PlayIcon className={`${playIconScale} translate-x-[1px]`} />
+                )}
+            </button>
 
             {(aiStatus === 'queued' || aiStatus === 'processing') && (
-                <div className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-full bg-indigo-600/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                <div className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/95 shadow-sm backdrop-blur-md">
                     <span className="relative flex h-1.5 w-1.5">
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
                         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
@@ -177,17 +437,21 @@ export default function AudioCardVisual({ asset, primaryColor = '#6366f1', class
                 </div>
             )}
 
-            <div className="pointer-events-none absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-800 shadow-md backdrop-blur-sm transition-transform duration-200 group-hover:scale-110 dark:bg-slate-900/80 dark:text-slate-100">
-                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 translate-x-[1px]" fill="currentColor" aria-hidden="true">
-                    <path d="M8 5v14l11-7z" />
-                </svg>
-            </div>
-
             {duration && (
-                <span className="pointer-events-none absolute bottom-2 right-2 rounded-md bg-black/70 px-2 py-0.5 font-mono text-[11px] font-medium text-white shadow-sm backdrop-blur-sm">
+                <span className="pointer-events-none absolute bottom-2 right-2 z-10 rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] font-medium text-white/95 shadow-sm backdrop-blur-md">
                     {duration}
                 </span>
             )}
+
+            {src ? (
+                <audio
+                    ref={audioRef}
+                    src={src}
+                    preload="metadata"
+                    crossOrigin="anonymous"
+                    className="hidden"
+                />
+            ) : null}
         </div>
     )
 }

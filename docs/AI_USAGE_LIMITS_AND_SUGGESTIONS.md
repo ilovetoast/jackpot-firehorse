@@ -2287,6 +2287,49 @@ Updated `MetadataFilterService::applyFieldFilter()` to include all approved sour
 
 ---
 
+### Audio Insights (Phase 4)
+
+**Status:** ✅ COMPLETE
+
+**Feature key:** `audio_insights` (debits the unified AI credit pool — same enforcement and dashboard plumbing as `video_insights`).
+
+**What it covers:**
+- Whisper transcription (and any future audio-AI providers registered behind `App\Services\Audio\Providers\AudioAiProviderInterface`)
+- Mood / tone classification derived from the transcript
+- Short summary derived from the transcript
+- Search-blob generation for spoken-word search
+
+**Cost formula** (from `config/ai_credits.audio_insights`):
+
+```
+credits = base_credits + max(0, ceil(duration_minutes) - 1) * per_additional_minute
+       = 1 + max(0, ceil(minutes) - 1) * 1
+```
+
+| Duration            | Credits |
+|---------------------|---------|
+| 30s voice memo      | 1       |
+| 3-minute clip       | 3       |
+| 60-minute podcast   | 60      |
+
+Roughly 1/3 the per-minute price of `video_insights` because Whisper bills ~$0.006/min vs. the multimodal vision pipeline.
+
+**Enforcement points:**
+- **Pre-flight** — `AudioAiAnalysisService::analyzeForAsset()` calls `AiUsageService::checkUsage($tenant, 'audio_insights', $credits)` BEFORE downloading the original from S3. Failure → asset status `plan_limit_exceeded` (or `ai_disabled` when a workspace has globally disabled AI), no S3 egress, no provider call.
+- **On success** — the service calls `trackUsageWithCost($tenant, 'audio_insights', $credits, $costUsd, …)` so the per-feature dashboard reflects the actual cost. `metadata.audio.credits_charged` records what was billed.
+- **Defense-in-depth backstop** — the Whisper provider keeps its own per-asset *dollar* budget (`assets.audio_ai.whisper.budget_cents_per_asset`) so a single runaway 12-hour file can't burn the pool even if pre-flight passes.
+
+**UI surfaces that list this cost:**
+- `resources/js/Pages/Marketing/Pricing.jsx` (`AI_COSTS`)
+- `resources/js/Pages/Marketing/Product.jsx` (AI System detail rows)
+- `resources/js/Pages/Marketing/Home.jsx` (AI section bullets)
+- `resources/js/Pages/Billing/Overview.jsx` ("Credit Costs per Action" — flat weights + tiered video/audio)
+- `resources/js/Pages/Insights/Usage.jsx` ("Usage by feature" — via `AI_FEATURE_LABELS.audio_insights`)
+- `resources/js/utils/aiCreditsUsageDisplay.js` (`AI_FEATURE_LABELS.audio_insights = 'Audio insights'`)
+- `config/help_actions.php` → `ai.audio_insights` row (in-app Help panel + grounded Ask-AI answer; also referenced from `concepts.supported_file_types` and `ai.credits_usage`). Pinned by `tests/Feature/HelpAskCoversAudioAndFileTypesTest.php` so the registry stays in lock-step with this pricing.
+
+---
+
 ### Cost Tracking Verification
 
 **Status:** ✅ VERIFIED

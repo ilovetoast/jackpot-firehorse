@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Mail\BaseMailable;
@@ -44,10 +45,10 @@ class SubscriptionCancelScheduledTenant extends BaseMailable
         $this->applyTenantMailBranding($this->tenant);
 
         $subject = $this->template
-            ? $this->template->render([
+            ? $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'plan_name' => config("plans.{$this->planKey}.name", ucfirst($this->planKey)),
-            ])['subject']
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem()))['subject']
             : "We’ve canceled your subscription — {$this->tenant->name}";
 
         return new Envelope(subject: $subject);
@@ -60,7 +61,7 @@ class SubscriptionCancelScheduledTenant extends BaseMailable
             ? $this->accessEndsAt->timezone(config('app.timezone'))->format('F j, Y \a\t g:i A T')
             : 'the end of your current billing period';
 
-        $vars = [
+        $vars = array_merge([
             'tenant_name' => $this->tenant->name,
             'owner_name' => $this->owner->name,
             'owner_email' => $this->owner->email,
@@ -69,7 +70,7 @@ class SubscriptionCancelScheduledTenant extends BaseMailable
             'app_name' => config('app.name'),
             'app_url' => config('app.url'),
             'billing_url' => config('app.url').'/app/billing',
-        ];
+        ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
 
         if ($this->template) {
             $rendered = $this->template->render($vars);

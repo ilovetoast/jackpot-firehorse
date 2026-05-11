@@ -564,6 +564,82 @@ return [
         'provider' => env('ASSET_AUDIO_AI_PROVIDER', null),
         'transcription_enabled' => (bool) env('ASSET_AUDIO_AI_TRANSCRIPTION', true),
         'mood_enabled' => (bool) env('ASSET_AUDIO_AI_MOOD', true),
+        // Phase 4: Whisper provider settings — only used when provider='whisper'.
+        'whisper' => [
+            'api_key' => env('OPENAI_API_KEY'),
+            'model' => env('ASSET_AUDIO_AI_WHISPER_MODEL', 'whisper-1'),
+            'endpoint' => env('ASSET_AUDIO_AI_WHISPER_ENDPOINT', 'https://api.openai.com/v1/audio/transcriptions'),
+            // Hard cap (in cents) per asset. Whisper is $0.006/min so 60 minutes
+            // = ~36 cents. Default budget allows ~3 hours per asset.
+            'budget_cents_per_asset' => (int) env('ASSET_AUDIO_AI_WHISPER_BUDGET_CENTS', 200),
+            // Hard cap on the audio duration we'll send (seconds). Files
+            // longer than this are skipped to avoid runaway cost.
+            'max_duration_seconds' => (int) env('ASSET_AUDIO_AI_WHISPER_MAX_DURATION', 7200),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Upload security
+    |--------------------------------------------------------------------------
+    |
+    | Phase 5: Anomaly detection on `upload_blocked` events. When N+ blocked
+    | upload attempts come from the same IP / user_id / tenant_id within the
+    | rolling window, we emit a Log::critical('upload_anomaly_detected', …)
+    | event so an on-call channel can be alerted.
+    |
+    | Phase 6: Defense-in-depth flags for magic-byte verification, EXIF
+    | scrubbing, and per-plan size caps. All default to safe values; ops
+    | can dial them per environment via env vars without code changes.
+    */
+    'security' => [
+        'upload_anomaly' => [
+            'enabled' => (bool) env('UPLOAD_ANOMALY_ENABLED', true),
+            'threshold' => (int) env('UPLOAD_ANOMALY_THRESHOLD', 8),
+            'window_minutes' => (int) env('UPLOAD_ANOMALY_WINDOW_MINUTES', 5),
+            'dedupe_minutes' => (int) env('UPLOAD_ANOMALY_DEDUPE_MINUTES', 30),
+        ],
+        'magic_byte_verifier' => [
+            'enabled' => (bool) env('UPLOAD_MAGIC_BYTE_VERIFIER', true),
+            // When true, a mismatch between declared MIME and detected
+            // signature blocks the upload at finalize. When false, we only
+            // log the mismatch (use during rollout to measure noise first).
+            'block_on_mismatch' => (bool) env('UPLOAD_MAGIC_BYTE_BLOCK_ON_MISMATCH', true),
+        ],
+        'exif_scrub' => [
+            'enabled' => (bool) env('UPLOAD_EXIF_SCRUB_ENABLED', true),
+            // Strip GPS / camera serial / comments by default; keep harmless
+            // technical EXIF (orientation, color profile) so thumbnail
+            // pipelines render correctly.
+            'strip_gps' => (bool) env('UPLOAD_EXIF_SCRUB_STRIP_GPS', true),
+            'strip_camera_serial' => (bool) env('UPLOAD_EXIF_SCRUB_STRIP_SERIAL', true),
+            'strip_user_comments' => (bool) env('UPLOAD_EXIF_SCRUB_STRIP_COMMENTS', true),
+        ],
+    ],
+
+    'plan_upload_caps' => [
+        // Per-plan, per-type maximum size (bytes). null = no override; the
+        // global `max_upload_size` from file_types.php still applies. These
+        // values intentionally favor "do not surprise the user" — show the
+        // smaller of {plan cap, global cap} at preflight with an upgrade
+        // nudge when relevant.
+        'free' => [
+            'image' => 25 * 1024 * 1024,
+            'video' => 200 * 1024 * 1024,
+            'audio' => 100 * 1024 * 1024,
+            'document' => 25 * 1024 * 1024,
+            'design' => 100 * 1024 * 1024,
+            'archive' => null,
+        ],
+        'pro' => [
+            'image' => 200 * 1024 * 1024,
+            'video' => 2 * 1024 * 1024 * 1024,
+            'audio' => 500 * 1024 * 1024,
+            'document' => 200 * 1024 * 1024,
+            'design' => 500 * 1024 * 1024,
+            'archive' => null,
+        ],
+        'enterprise' => null, // null = inherit global registry caps
     ],
 
     /*

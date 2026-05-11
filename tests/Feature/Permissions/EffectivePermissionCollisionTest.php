@@ -151,4 +151,99 @@ class EffectivePermissionCollisionTest extends TestCase
         $this->assertFalse($service->can($viewer, 'team.manage', $tenant, $brand));
         $this->assertTrue($service->can($viewer, 'asset.view', $tenant, $brand));
     }
+
+    #[Test]
+    public function brand_viewer_does_not_inherit_tenant_ai_suggestion_permissions(): void
+    {
+        $tenant = Tenant::create(['name' => 'Test Co', 'slug' => 'test-co-ai']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand',
+            'slug' => 'test-brand-ai',
+        ]);
+
+        $user = User::create([
+            'email' => 'viewer-member@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Brand',
+            'last_name' => 'Viewer',
+        ]);
+
+        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        $user->brands()->attach($brand->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        $service = app(\App\Services\AuthPermissionService::class);
+
+        $this->assertFalse(
+            $service->can($user, 'metadata.suggestions.view', $tenant, $brand),
+            'Brand viewer must not get AI suggestion queue via tenant member role'
+        );
+        $this->assertFalse(
+            $service->can($user, 'metadata.suggestions.apply', $tenant, $brand),
+            'Brand viewer must not apply AI suggestions'
+        );
+        $this->assertFalse(
+            $service->can($user, 'metadata.suggestions.dismiss', $tenant, $brand),
+            'Brand viewer must not dismiss AI suggestions'
+        );
+
+        $effective = $service->effectivePermissions($user, $tenant, $brand);
+        $this->assertNotContains('metadata.suggestions.apply', $effective);
+        $this->assertNotContains('metadata.suggestions.view', $effective);
+    }
+
+    #[Test]
+    public function brand_viewer_does_not_get_asset_upload_via_tenant_member_role(): void
+    {
+        $tenant = Tenant::create(['name' => 'Upload Co', 'slug' => 'upload-co']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Upload Brand',
+            'slug' => 'upload-brand',
+        ]);
+
+        $user = User::create([
+            'email' => 'brand-viewer-upload@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'V',
+            'last_name' => 'U',
+        ]);
+
+        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        $user->brands()->attach($brand->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        $service = app(\App\Services\AuthPermissionService::class);
+
+        $this->assertFalse(
+            $service->can($user, 'asset.upload', $tenant, $brand),
+            'Brand viewer must not upload even when tenant member has asset.upload'
+        );
+        $effective = $service->effectivePermissions($user, $tenant, $brand);
+        $this->assertNotContains('asset.upload', $effective);
+    }
+
+    #[Test]
+    public function brand_contributor_keeps_metadata_suggestions_apply(): void
+    {
+        $tenant = Tenant::create(['name' => 'Test Co B', 'slug' => 'test-co-contrib']);
+        $brand = Brand::create([
+            'tenant_id' => $tenant->id,
+            'name' => 'Test Brand B',
+            'slug' => 'test-brand-contrib',
+        ]);
+
+        $user = User::create([
+            'email' => 'contributor@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'Contrib',
+            'last_name' => 'User',
+        ]);
+
+        $user->tenants()->attach($tenant->id, ['role' => 'member']);
+        $user->brands()->attach($brand->id, ['role' => 'contributor', 'removed_at' => null]);
+
+        $service = app(\App\Services\AuthPermissionService::class);
+
+        $this->assertTrue($service->can($user, 'metadata.suggestions.apply', $tenant, $brand));
+    }
 }

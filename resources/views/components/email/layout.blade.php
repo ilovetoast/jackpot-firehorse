@@ -6,6 +6,8 @@
     'tenantName' => null,
     'tenantLogoUrl' => null,
     'tenantAccentColor' => null,
+    /** Optional: `<a>` color on white (defaults to a darkened hue from the bar color). */
+    'tenantLinkColor' => null,
     'tenantIsFree' => false,
 ])
 @php
@@ -15,27 +17,21 @@
     $isTenant = $mode === 'tenant';
 
     $jackpotPrimary = config('mail.branding.primary', '#7c3aed');
-    $jackpotAccentRule = config('mail.branding.accent_rule_gradient', 'linear-gradient(90deg,#5b21b6 0%,#7c3aed 50%,#06b6d4 100%)');
 
-    // Tenant accent: validate hex + contrast safety (must be dark enough for white text)
-    $accent = $jackpotPrimary;
-    if ($isTenant && $tenantAccentColor) {
-        $hex = ltrim($tenantAccentColor, '#');
-        if (preg_match('/^[0-9a-fA-F]{6}$/', $hex)) {
-            $r = hexdec(substr($hex, 0, 2)) / 255;
-            $g = hexdec(substr($hex, 2, 2)) / 255;
-            $b = hexdec(substr($hex, 4, 2)) / 255;
-            // Relative luminance (WCAG)
-            $lum = 0.2126 * ($r <= 0.03928 ? $r/12.92 : pow(($r+0.055)/1.055, 2.4))
-                 + 0.7152 * ($g <= 0.03928 ? $g/12.92 : pow(($g+0.055)/1.055, 2.4))
-                 + 0.0722 * ($b <= 0.03928 ? $b/12.92 : pow(($b+0.055)/1.055, 2.4));
-            // Contrast ratio against white (lum=1): (1+0.05)/(lum+0.05)
-            $contrast = (1.05) / ($lum + 0.05);
-            if ($contrast >= 3.0) {
-                $accent = '#' . $hex;
-            }
-        }
-    }
+    // Decorative bar + header hue: do not run “white text on fill” clamp — bright brand primaries stay vivid.
+    $barColor = $isTenant && $tenantAccentColor
+        ? (\App\Support\TransactionalEmailHtml::sanitizeHexColor($tenantAccentColor)
+            ?? \App\Support\TransactionalEmailHtml::sanitizeHexColor($jackpotPrimary)
+            ?? '#7c3aed')
+        : \App\Support\TransactionalEmailHtml::safePrimaryButtonHex($jackpotPrimary);
+
+    $linkColor = $isTenant && $tenantLinkColor
+        ? (\App\Support\TransactionalEmailHtml::sanitizeHexColor($tenantLinkColor) ?? \App\Support\TransactionalEmailHtml::readableLinkHexOnWhite($tenantAccentColor ?? $jackpotPrimary))
+        : ($isTenant
+            ? \App\Support\TransactionalEmailHtml::readableLinkHexOnWhite($tenantAccentColor ?? $jackpotPrimary)
+            : \App\Support\TransactionalEmailHtml::safePrimaryButtonHex($jackpotPrimary));
+
+    $accent = $barColor;
 @endphp
 <!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -50,7 +46,7 @@
         body, table, td { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
         table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
         img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
-        a { color: {{ $accent }}; }
+        a { color: {{ $linkColor }}; }
     </style>
 </head>
 <body style="margin:0;padding:0;word-spacing:normal;background-color:#f5f6f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
@@ -79,7 +75,7 @@
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
               {{-- Accent rule --}}
               <tr>
-                <td style="height:3px;background:{{ $isTenant ? $accent : $jackpotAccentRule }};font-size:0;line-height:0;">&nbsp;</td>
+                <td style="height:3px;background-color:{{ $accent }};font-size:0;line-height:0;">&nbsp;</td>
               </tr>
               {{-- Content --}}
               <tr>

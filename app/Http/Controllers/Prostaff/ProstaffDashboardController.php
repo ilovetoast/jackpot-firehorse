@@ -246,16 +246,8 @@ class ProstaffDashboardController extends Controller
 
         $service = app(GetProstaffDashboardData::class);
         $active = $service->managerDashboardRows($brand);
-        if (! $access->canManage($user, $tenant, $brand)) {
-            $active = array_values(array_filter(
-                $active,
-                static fn (array $row): bool => (int) ($row['user_id'] ?? 0) === (int) $user->id
-            ));
-        }
 
-        $pendingInvitations = $access->canManage($user, $tenant, $brand)
-            ? $service->pendingCreatorInvitesForBrand($brand)
-            : [];
+        $pendingInvitations = $service->pendingCreatorInvitesForBrand($brand);
 
         return response()->json([
             'active' => $active,

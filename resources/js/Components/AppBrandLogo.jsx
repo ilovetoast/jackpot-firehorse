@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/react'
 import JackpotLogo from './JackpotLogo'
 import { usePermission } from '../hooks/usePermission'
 import BrandIconUnified from './BrandIconUnified'
+import AgencyContextNavPicker from './agency/AgencyContextNavPicker'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import { getBrandLogoForSurface, hasDedicatedVariantForSurface } from '../utils/brandLogo'
 
@@ -24,6 +25,8 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const { can } = usePermission()
     const tenant = auth?.activeCompany
     const canViewCompanyOverview = auth?.permissions?.can_view_company_overview ?? false
+    /** Viewers (no company.view) must not land on /app — use brand workspace instead. */
+    const workspaceHomeHref = canViewCompanyOverview ? '/app' : '/app/overview'
     const planLimitInfo = auth?.brand_plan_limit_info
     const canAddBrand = can('brand_settings.manage')
         && planLimitInfo
@@ -81,7 +84,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
             const fallbackSrc = getBrandLogoForSurface(firstBrand, fallbackSurface)
             const fallbackHasVariant = hasDedicatedVariantForSurface(firstBrand, fallbackSurface)
             return (
-                <Link href="/app" className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
+                <Link href={workspaceHomeHref} className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
                     {fallbackSrc ? (
                         <img
                             src={fallbackSrc}
@@ -141,6 +144,24 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
     const displayLabel = (isOnCompanyOverview && canViewCompanyOverview && tenant)
         ? tenant.name
         : brandName
+
+    const agencyContextPicker = auth?.agency_context_picker
+    if (agencyContextPicker?.is_agency_context_picker === true) {
+        return (
+            <AgencyContextNavPicker
+                agencyPicker={agencyContextPicker}
+                activeBrand={activeBrand}
+                textColor={textColor}
+                isDarkNavChrome={isDarkNavChrome}
+                logoFilterStyle={logoFilterStyle}
+                navLogoSrc={navLogoSrc}
+                useDedicatedVariantLogo={useDedicatedVariantLogo}
+                brandName={brandName}
+                logoError={logoError}
+                setLogoError={setLogoError}
+            />
+        )
+    }
 
     // If multiple brands, show logo + name + chevron as single clickable area that opens dropdown
     // Dropdown anchored to far left of logo; includes Company Portal link + brand switcher
@@ -305,15 +326,24 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                                 <div className="border-t border-gray-100">
                                     <Link
                                         href="/app/brands/create"
-                                        className="flex items-center gap-3 px-4 py-3 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                                        className="flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-gray-50"
                                         onClick={() => setBrandMenuOpen(false)}
+                                        aria-label={`Create a new brand for ${tenant?.name?.trim() || 'this company'}`}
                                     >
-                                        <div className="h-10 w-10 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center flex-shrink-0">
+                                        <div className="h-10 w-10 shrink-0 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
                                             <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                                             </svg>
                                         </div>
-                                        <span>Add Brand</span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block font-medium text-gray-900">New brand</span>
+                                            <span className="mt-0.5 block truncate text-[11px] leading-snug text-gray-500">
+                                                For{' '}
+                                                <span className="font-medium text-gray-600">
+                                                    {tenant?.name?.trim() || 'this company'}
+                                                </span>
+                                            </span>
+                                        </span>
                                     </Link>
                                 </div>
                             )}
@@ -326,7 +356,7 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
 
     // Single brand - simple link to dashboard (or rootLinkHref when provided, e.g. collection landing)
     // When brands array is empty but we have activeBrand, link to /app/brands so user can switch (recovery from stale state)
-    const singleBrandHref = rootLinkHref ?? '/app'
+    const singleBrandHref = rootLinkHref ?? workspaceHomeHref
     return (
         <Link href={singleBrandHref} className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
             {navLogoSrc && !logoError ? (

@@ -288,28 +288,37 @@ export default function ManageStructureWorkspace({
                         : 'rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm'
                 }
             >
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                        <h2 className="text-base font-semibold text-slate-900">
-                            {hubLayout ? 'Folders' : 'Brand structure'}
-                        </h2>
-                        <p className="mt-1 text-sm leading-snug text-slate-600">
-                            {hubLayout
-                                ? 'Choose a folder. Drag to reorder. Use the eye to hide a folder from library sidebars; use the (i) for a quick field schema.'
-                                : 'Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden folders are below.'}
+                {hubLayout ? (
+                    <div className="space-y-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                            <h2 className="text-base font-semibold text-slate-900">Folders</h2>
+                            {brandId && canManageBrandCategories ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setAddCategoryOpen(true)}
+                                    className={`inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold ${productButtonPrimary}`}
+                                >
+                                    <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
+                                    Add folder
+                                </button>
+                            ) : null}
+                        </div>
+                        <p className="text-sm leading-relaxed text-slate-600">
+                            Pick a folder to edit fields on the right. Drag folders to reorder. The eye hides a folder
+                            from asset library sidebars; the (i) opens a quick field schema.
                         </p>
                     </div>
-                    {hubLayout && brandId && canManageBrandCategories ? (
-                        <button
-                            type="button"
-                            onClick={() => setAddCategoryOpen(true)}
-                            className={`inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold ${productButtonPrimary}`}
-                        >
-                            <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
-                            Add folder
-                        </button>
-                    ) : null}
-                </div>
+                ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                            <h2 className="text-base font-semibold text-slate-900">Brand structure</h2>
+                            <p className="mt-1 text-sm leading-snug text-slate-600">
+                                Drag to reorder folders. Use the eye to hide a folder from library sidebars; hidden
+                                folders are below.
+                            </p>
+                        </div>
+                    </div>
+                )}
                 {!hubLayout && brand?.name ? (
                     <div
                         className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/90 bg-slate-50/90 py-1 pl-2 pr-3 text-xs text-slate-600"

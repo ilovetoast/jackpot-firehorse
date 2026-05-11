@@ -67,6 +67,7 @@ export default function OperationsQuickLinks({ brandId }) {
     const { auth } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
     const can = (p) => effectivePermissions.includes(p)
+    const canViewCreatorsDashboard = auth?.permissions?.can_view_creators_dashboard === true
     const tenantRole = auth?.tenant_role != null ? String(auth.tenant_role).toLowerCase() : ''
     const isOwnerOrAdmin = tenantRole === 'owner' || tenantRole === 'admin'
     const activeCompany = auth?.activeCompany
@@ -173,12 +174,16 @@ export default function OperationsQuickLinks({ brandId }) {
             description: 'Downloads, views, storage, and AI credits.',
             icon: CloudArrowDownIcon,
         },
-        {
-            href: r('brands.creators', { brand: brandId }),
-            title: 'Creator dashboard',
-            description: 'Creator workflow, submissions, and performance.',
-            icon: UserGroupIcon,
-        },
+        ...(canViewCreatorsDashboard
+            ? [
+                  {
+                      href: r('brands.creators', { brand: brandId }),
+                      title: 'Creator dashboard',
+                      description: 'Creator workflow, submissions, and performance.',
+                      icon: UserGroupIcon,
+                  },
+              ]
+            : []),
     ]
 
     const meta = SECTION_INTRO.operations

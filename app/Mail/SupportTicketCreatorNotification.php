@@ -5,6 +5,7 @@ namespace App\Mail;
 use App\Enums\TicketCategory;
 use App\Enums\TicketType;
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use Illuminate\Bus\Queueable;
@@ -141,7 +142,7 @@ class SupportTicketCreatorNotification extends BaseMailable
             $vars['status_label'] = $this->terminalStatusLabel ?? '—';
         }
 
-        return $vars;
+        return array_merge($vars, TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
     }
 
     protected function tenantTicketShowUrl(Ticket $ticket): string

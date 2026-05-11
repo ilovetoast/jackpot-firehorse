@@ -1,15 +1,19 @@
 {{-- MODE: tenant | Team Invitation --}}
 @php
-    $brand = \App\Models\Brand::where('tenant_id', $tenant->id)->orderByDesc('is_default')->first();
+    $brand = $brandingBrand ?? \App\Models\Brand::where('tenant_id', $tenant->id)->orderByDesc('is_default')->first();
     $logoUrl = $brand?->logoUrlForTransactionalEmail();
-    $accentColor = $brand?->primary_color;
+    $cta = \App\Support\TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand($brand);
+    $buttonColor = $cta['primary_button_color'];
+    $barColor = $cta['card_accent_bar'];
+    $linkColor = $cta['link_accent_color'];
 @endphp
 <x-email.layout
     title="You've been invited to {{ $tenant->name }}"
     mode="tenant"
     :tenantName="$tenant->name"
     :tenantLogoUrl="$logoUrl"
-    :tenantAccentColor="$accentColor"
+    :tenantAccentColor="$barColor"
+    :tenantLinkColor="$linkColor"
     preheader="{{ $inviter->name }} invited you to join {{ $tenant->name }}"
 >
 
@@ -23,8 +27,8 @@
 
     <x-email.text>Click below to accept the invitation and create your account:</x-email.text>
 
-    <x-email.button :url="$inviteUrl">Accept invitation</x-email.button>
-    <x-email.link-fallback :url="$inviteUrl" />
+    <x-email.button :url="$inviteUrl" :color="$buttonColor">Accept invitation</x-email.button>
+    <x-email.link-fallback :url="$inviteUrl" :color="$linkColor" />
 
     <x-email.text :muted="true">If you didn&rsquo;t expect this invitation, you can safely ignore this email.</x-email.text>
 

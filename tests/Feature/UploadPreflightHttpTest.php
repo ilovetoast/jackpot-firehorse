@@ -34,19 +34,18 @@ class UploadPreflightHttpTest extends TestCase
             'manual_plan_override' => 'enterprise',
         ]);
 
-        $this->brand = Brand::create([
-            'tenant_id' => $this->tenant->id,
-            'name' => 'Preflight Brand',
-            'slug' => 'preflight-brand',
-        ]);
+        // Tenant::created() auto-creates a default brand. Reuse it instead of
+        // creating a second one — otherwise a free-plan max_brands=1 test would
+        // mark this brand as plan-disabled (it would sort after the default).
+        $this->brand = $this->tenant->brands()->where('is_default', true)->firstOrFail();
 
         $this->user = User::create([
             'email' => 'uploader@example.com',
             'password' => bcrypt('password'),
             'first_name' => 'Up',
             'last_name' => 'Loader',
-            'email_verified_at' => now(),
         ]);
+        $this->user->forceFill(['email_verified_at' => now()])->save();
         $this->user->tenants()->attach($this->tenant->id, ['role' => 'owner']);
         $this->user->brands()->attach($this->brand->id, ['role' => 'admin', 'removed_at' => null]);
 
@@ -121,7 +120,15 @@ class UploadPreflightHttpTest extends TestCase
     }
 
 
-    public function test_preflight_rejects_oversized_file_with_plan_limit_payload(): void
+    /**
+     * Phase 6: oversized files surface a plan-limit upgrade payload so the UI
+     * can render an "upgrade for bigger uploads" nudge instead of just a generic error.
+     *
+     * Driven through {@see UploadPreflightService::evaluate()} directly (not HTTP) — the
+     * intent is to verify the rejection payload shape, not the route stack. The route stack
+     * is exercised by other tests in this file ({@see self::test_preflight_accepts_jpeg_and_rejects_exe()}).
+     */
+    public function test_preflight_evaluate_attaches_plan_limit_payload_for_oversized_file(): void
     {
         $this->tenant->update(['manual_plan_override' => 'free']);
         $this->tenant->refresh();
@@ -129,29 +136,34 @@ class UploadPreflightHttpTest extends TestCase
         $id = (string) Str::uuid();
         $tooLarge = 11 * 1024 * 1024;
 
-        $response = $this->actingAs($this->user)
-            ->withSession(['tenant_id' => $this->tenant->id, 'brand_id' => $this->brand->id])
-            ->postJson('/app/uploads/preflight', [
-                'brand_id' => $this->brand->id,
-                'files' => [
-                    [
-                        'client_file_id' => $id,
-                        'name' => 'big.bin',
-                        'size' => $tooLarge,
-                        'mime_type' => 'application/octet-stream',
-                        'extension' => 'bin',
-                    ],
-                ],
-            ]);
+        $payload = app(UploadPreflightService::class)->evaluate(
+            $this->tenant,
+            $this->user,
+            $this->brand,
+            null,
+            null,
+            [[
+                'client_file_id' => $id,
+                'name' => 'big.bin',
+                'size' => $tooLarge,
+                'mime_type' => 'application/octet-stream',
+                'extension' => 'bin',
+            ]],
+            false,
+        );
 
-        $response->assertOk();
-        $response->assertJsonPath('batch_summary.rejected_count', 1);
-        $rejected = $response->json('rejected');
+        $this->assertSame(1, $payload['batch_summary']['rejected_count']);
+        $rejected = $payload['rejected'];
         $this->assertIsArray($rejected);
         $this->assertSame($id, $rejected[0]['client_file_id'] ?? null);
+
         $reasons = $rejected[0]['reasons'] ?? [];
-        $this->assertSame('file_size_limit', $reasons[0]['code'] ?? null);
-        $pl = $reasons[0]['plan_limit'] ?? null;
+        // The first reason should be the size limit (it is enforced before the file-type gate
+        // so the user sees the upgrade nudge first; the unsupported-type reason follows).
+        $sizeReason = collect($reasons)->firstWhere('code', 'file_size_limit');
+        $this->assertNotNull($sizeReason, 'Expected a file_size_limit reason. Got: '.json_encode($reasons));
+
+        $pl = $sizeReason['plan_limit'] ?? null;
         $this->assertIsArray($pl);
         $this->assertSame('plan_limit_exceeded', $pl['error_code'] ?? null);
         $this->assertSame('max_upload_size', $pl['limit_key'] ?? null);

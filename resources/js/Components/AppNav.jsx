@@ -6,7 +6,6 @@ import { JACKPOT_VIOLET } from '../components/brand-workspace/brandWorkspaceToke
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
-import AgencyStripBrandSelect from './agency/AgencyStripBrandSelect'
 import GlobalUserControls from './Layout/GlobalUserControls'
 import ImpersonationBanner from './ImpersonationBanner'
 import {
@@ -14,6 +13,7 @@ import {
     ArrowDownTrayIcon,
     ArrowTrendingUpIcon,
     BookOpenIcon,
+    BuildingOffice2Icon,
     ChartBarIcon,
     ChevronDownIcon,
     ChevronRightIcon,
@@ -156,8 +156,7 @@ export default function AppNav({
     const activeCompany = auth.companies?.find((c) => c.is_active)
 
     // --- LOCK: Agency nav data prerequisites (see file-level AGENCY NAV contract) ---
-    // LOCK: `agency_flat_brands` is ONLY for the agency strip brand picker; backend must not send it for non-agency users.
-    const agencyFlatBrands = Array.isArray(auth.agency_flat_brands) ? auth.agency_flat_brands : []
+    // Agency portfolio brands for the strip CLIENT dropdown were replaced by `auth.agency_context_picker` + main nav picker.
     // LOCK: `agencyHomeCompany` === user has an agency tenant in their workspace list. No row => no agency nav, ever.
     const agencyHomeCompany = auth.companies?.find((c) => c.is_agency === true) ?? null
     // LOCK: Synonym for “this user is agency-capable” for quick links; still gated by `agencyStripVisible` for actual strip.
@@ -926,27 +925,35 @@ export default function AppNav({
                                 relocateUserChromeToAgencyStrip ? 'flex-wrap justify-end' : ''
                             }`}
                         >
-                            <AgencyStripBrandSelect
-                                brands={agencyFlatBrands}
-                                brandColor={agencyBrandColor}
-                                isTransparentVariant={isCinematicNav}
-                                currentTenantId={activeCompany?.id}
-                                currentBrandId={auth.activeBrand?.id}
-                            />
+                            {/*
+                              CLIENT dropdown removed: agency context switching uses the unified picker in the main
+                              brand logo (auth.agency_context_picker). Legacy implementation preserved in
+                              ./agency/AgencyStripBrandSelect.jsx — do not remount here.
+                            */}
                             <button
                                 type="button"
                                 onClick={goAgencyDashboardFromMenu}
-                                className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 sm:text-sm ${
+                                className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium tracking-tight transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 sm:gap-2 sm:px-3 sm:py-1.5 sm:text-sm ${
                                     isCinematicNav
-                                        ? 'bg-white/10 text-white hover:bg-white/15 focus-visible:ring-white/40 focus-visible:ring-offset-transparent'
-                                        : 'bg-white shadow-sm ring-1 ring-slate-200/80 hover:bg-slate-50 focus-visible:ring-violet-500 focus-visible:ring-offset-white'
+                                        ? 'text-white/90 ring-1 ring-white/15 bg-white/[0.06] hover:bg-white/[0.11] hover:ring-white/22 focus-visible:ring-white/45 focus-visible:ring-offset-transparent'
+                                        : 'text-slate-800 ring-1 ring-slate-200/90 bg-white/80 hover:bg-slate-50 hover:ring-slate-300/80 focus-visible:ring-slate-400/50 focus-visible:ring-offset-white'
                                 }`}
-                                style={!isCinematicNav ? { color: agencyBrandColor } : undefined}
                                 title="Agency dashboard"
                             >
+                                <BuildingOffice2Icon
+                                    className={`h-4 w-4 shrink-0 sm:h-[1.125rem] sm:w-[1.125rem] ${
+                                        isCinematicNav ? 'text-white/75' : 'text-slate-500'
+                                    }`}
+                                    aria-hidden
+                                />
                                 <span className="hidden sm:inline">Agency dashboard</span>
                                 <span className="sm:hidden">Dashboard</span>
-                                <ChevronRightIcon className="h-4 w-4 opacity-80" aria-hidden />
+                                <ChevronRightIcon
+                                    className={`h-4 w-4 shrink-0 ${
+                                        isCinematicNav ? 'text-white/45' : 'text-slate-400'
+                                    }`}
+                                    aria-hidden
+                                />
                             </button>
                             {relocateUserChromeToAgencyStrip && globalUserControls}
                         </div>
@@ -967,9 +974,9 @@ export default function AppNav({
                 <div className={isAppPage ? "px-4 sm:px-6 lg:px-8" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"}>
                 <div className="flex h-20 min-w-0 justify-between gap-2 overflow-visible">
                     <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible sm:gap-3">
-                        {/* Mobile: hamburger to open main nav drawer (main nav links hidden below sm) */}
+                        {/* Mobile / tablet: hamburger opens drawer (horizontal main links use lg+ only) */}
                         {isAppPage && isExternalCollectionChrome && (
-                            <div className="flex flex-shrink-0 mr-2 sm:mr-0 sm:hidden">
+                            <div className="flex flex-shrink-0 mr-2 lg:mr-0 lg:hidden">
                                 <button
                                     type="button"
                                     onClick={() => setMobileNavOpen(true)}
@@ -1046,7 +1053,7 @@ export default function AppNav({
 
                         {/* Main menu: Overview (dropdown: Tasks, Creator Home, …), Assets, Executions, Collections, Studio */}
                         {isAppPage ? (isExternalCollectionChrome ? (
-                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6 overflow-x-auto" data-collection-only="true">
+                            <div className="hidden min-w-0 flex-1 lg:flex lg:min-w-0 lg:items-center lg:gap-8 xl:gap-8 lg:pl-6 xl:pl-6 overflow-x-auto lg:overflow-visible" data-collection-only="true">
                                 {(() => {
                                     /** Inactive but available (e.g. Collections tab when not on collection URL) */
                                     const colOnlyMuted = textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(0, 0, 0, 0.55)'
@@ -1070,7 +1077,7 @@ export default function AppNav({
                                                     Overview
                                                 </span>
                                             </div>
-                                            <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
+                                            <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8 lg:overflow-visible">
                                                 <span
                                                     className={colOnlyDisabledClass}
                                                     style={{ color: colOnlyDisabledColor, borderBottomColor: 'transparent' }}
@@ -1193,11 +1200,11 @@ export default function AppNav({
                                 })()}
                             </div>
                         ) : suppressWorkspaceChrome ? (
-                            <div className="hidden min-w-0 flex-1 sm:block" aria-hidden="true" />
+                            <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
                         ) : (
-                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:pl-4 lg:pl-6">
+                            <div className="hidden min-w-0 flex-1 lg:flex lg:min-w-0 lg:items-center lg:gap-8 xl:gap-8 lg:pl-6 xl:pl-6">
                                 <div className="shrink-0">{renderDesktopOverviewNav()}</div>
-                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
+                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8 lg:overflow-visible">
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -1263,9 +1270,9 @@ export default function AppNav({
                                 </div>
                             </div>
                         )) : (
-                            <div className="hidden min-w-0 flex-1 sm:flex sm:min-w-0 sm:items-center sm:gap-6 lg:gap-8 sm:ml-6">
+                            <div className="hidden min-w-0 flex-1 lg:flex lg:min-w-0 lg:items-center lg:gap-8 xl:gap-8 lg:ml-6">
                                 <div className="shrink-0">{renderDesktopOverviewNav()}</div>
-                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8">
+                                <div className="app-nav-main-links flex min-w-0 flex-1 items-center gap-6 overflow-x-auto lg:gap-8 lg:overflow-visible">
                                 <Link
                                     href="/app/assets"
                                     className="inline-flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium border-transparent"
@@ -1386,16 +1393,16 @@ export default function AppNav({
                 </div>
             </div>
 
-            {/* Mobile main nav drawer: slide-in from left (below sm breakpoint) */}
+            {/* Collection-only drawer: below lg (matches when hamburger is visible) */}
             {isAppPage && isExternalCollectionChrome && mobileNavOpen && (
                 <>
                     <div
-                        className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm sm:hidden"
+                        className="fixed inset-0 z-40 bg-gray-900/50 backdrop-blur-sm lg:hidden"
                         aria-hidden="true"
                         onClick={() => setMobileNavOpen(false)}
                     />
                     <div
-                        className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white shadow-xl sm:hidden flex flex-col transition-transform duration-300 ease-out"
+                        className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white shadow-xl lg:hidden flex flex-col transition-transform duration-300 ease-out"
                         role="dialog"
                         aria-modal="true"
                         aria-label="Main navigation"
@@ -1503,7 +1510,7 @@ export default function AppNav({
                     currentUrl.startsWith('/app/manage') ||
                     Boolean(isOnCreators)
                 return (
-                    <div className={`fixed inset-x-0 bottom-0 z-[40] sm:hidden safe-area-pb ${
+                    <div className={`fixed inset-x-0 bottom-0 z-[40] lg:hidden safe-area-pb ${
                         isDarkNav
                             ? 'border-t border-white/10 bg-[#0B0B0D]/90 backdrop-blur'
                             : 'border-t border-gray-200 bg-white/95 backdrop-blur'

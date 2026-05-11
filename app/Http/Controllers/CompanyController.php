@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Jobs\RunMetadataInsightsJob;
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Models\User;
+use App\Services\AgencyBrandAccessService;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
 use App\Services\BillingService;
@@ -38,7 +40,8 @@ class CompanyController extends Controller
         protected AiUsageService $aiUsageService,
         protected AiTagPolicyService $aiTagPolicyService,
         protected TagQualityMetricsService $tagQualityMetricsService,
-        protected CompanyCostService $companyCostService
+        protected CompanyCostService $companyCostService,
+        protected AgencyBrandAccessService $agencyBrandAccessService
     ) {}
 
     /**
@@ -136,6 +139,36 @@ class CompanyController extends Controller
     }
 
     /**
+     * Agency-capable users may only switch among their agency tenant, tenant_agencies-linked clients,
+     * and incubated clients (tenant_user.is_agency_managed + agency_tenant_id).
+     * Other members (no agency home tenant) are unrestricted here.
+     */
+    protected function agencyPortfolioAllowsTenantSwitch(User $user, Tenant $tenant): bool
+    {
+        $agency = $this->agencyBrandAccessService->agencyTenantForUser($user);
+        if ($agency === null) {
+            return true;
+        }
+
+        if ((int) $tenant->id === (int) $agency->id) {
+            return true;
+        }
+
+        if (TenantAgency::query()
+            ->where('agency_tenant_id', $agency->id)
+            ->where('tenant_id', $tenant->id)
+            ->exists()) {
+            return true;
+        }
+
+        $user->loadMissing('tenants');
+        $pivot = $user->tenants->firstWhere('id', $tenant->id)?->pivot;
+
+        return (bool) ($pivot->is_agency_managed ?? false)
+            && (int) ($pivot->agency_tenant_id ?? 0) === (int) $agency->id;
+    }
+
+    /**
      * Switch to a different company.
      */
     public function switch(Request $request, Tenant $tenant)
@@ -145,6 +178,10 @@ class CompanyController extends Controller
         // Verify user belongs to this company
         if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
             abort(403, 'You do not have access to this company.');
+        }
+
+        if (! $this->agencyPortfolioAllowsTenantSwitch($user, $tenant)) {
+            abort(403, 'You do not have access to this workspace from your agency portfolio.');
         }
 
         $brandId = $request->input('brand_id');

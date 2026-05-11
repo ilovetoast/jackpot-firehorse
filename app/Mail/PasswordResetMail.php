@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use App\Mail\BaseMailable;
@@ -35,13 +36,13 @@ class PasswordResetMail extends BaseMailable
                 'email' => $this->user->email,
             ], false));
 
-            $variables = [
+            $variables = array_merge([
                 'user_name' => $this->user->name,
                 'user_email' => $this->user->email,
                 'reset_url' => $resetUrl,
                 'app_name' => config('app.name', 'Jackpot'),
                 'app_url' => rtrim((string) config('app.url', url('/')), '/'),
-            ];
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
 
             $rendered = $template->render($variables);
 
@@ -68,13 +69,13 @@ class PasswordResetMail extends BaseMailable
                 'email' => $this->user->email,
             ], false));
 
-            $variables = [
+            $variables = array_merge([
                 'user_name' => $this->user->name,
                 'user_email' => $this->user->email,
                 'reset_url' => $resetUrl,
                 'app_name' => config('app.name', 'Jackpot'),
                 'app_url' => rtrim((string) config('app.url', url('/')), '/'),
-            ];
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
 
             $rendered = $template->render($variables);
 

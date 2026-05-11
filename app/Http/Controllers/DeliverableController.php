@@ -783,6 +783,9 @@ class DeliverableController extends Controller
                     // Phase V-1: Same hover preview MP4 + poster as main Assets grid (GenerateVideoPreviewJob pipeline)
                     'video_preview_url' => $this->videoPreviewUrl($asset),
                     'video_poster_url' => $this->videoPosterUrl($asset),
+                    // Phase 3: Audio playback + waveform — keys parallel to video_preview_url for consistency.
+                    'audio_playback_url' => $this->audioPlaybackUrl($asset),
+                    'audio_waveform_url' => $this->audioWaveformUrl($asset),
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                     'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend($brandIntelligenceReferenceAssetsById),
@@ -1198,6 +1201,38 @@ class DeliverableController extends Controller
     private function videoPosterUrl(Asset $asset): ?string
     {
         $url = $asset->deliveryUrl(AssetVariant::VIDEO_POSTER, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Phase 3: Signed playback URL for an audio asset (the original file
+     * itself). Mirrors {@see AssetController::audioPlaybackUrl()}.
+     */
+    private function audioPlaybackUrl(Asset $asset): ?string
+    {
+        $mime = (string) ($asset->mime_type ?? '');
+        if (! str_starts_with($mime, 'audio/')) {
+            $ext = strtolower((string) pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+            if (! in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba'], true)) {
+                return null;
+            }
+        }
+        $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Phase 3: Signed URL for the FFmpeg-rendered waveform PNG strip.
+     * Mirrors {@see AssetController::audioWaveformUrl()}.
+     */
+    private function audioWaveformUrl(Asset $asset): ?string
+    {
+        if (empty($asset->metadata['audio']['waveform_path'] ?? null)) {
+            return null;
+        }
+        $url = $asset->deliveryUrl(AssetVariant::AUDIO_WAVEFORM, DeliveryContext::AUTHENTICATED);
 
         return $url !== '' ? $url : null;
     }

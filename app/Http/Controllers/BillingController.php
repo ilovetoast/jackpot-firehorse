@@ -238,6 +238,18 @@ class BillingController extends Controller
             'storage_addon_packages' => $storageAddonPackages,
             'ai_credits_addon_packages' => $aiCreditsAddonPackages,
             'credit_weights' => config('ai_credits.weights', []),
+            'credit_tier_costs' => [
+                'video_insights' => [
+                    'label' => 'Video insights',
+                    'base_credits' => (int) config('ai_credits.video_insights.base_credits', 5),
+                    'per_additional_minute' => (int) config('ai_credits.video_insights.per_additional_minute', 3),
+                ],
+                'audio_insights' => [
+                    'label' => 'Audio insights',
+                    'base_credits' => (int) config('ai_credits.audio_insights.base_credits', 1),
+                    'per_additional_minute' => (int) config('ai_credits.audio_insights.per_additional_minute', 1),
+                ],
+            ],
             'creator_addon_config' => [
                 'base' => config('creator_addon.base'),
                 'seat_packs' => collect(config('creator_addon.seat_packs', []))
@@ -768,6 +780,23 @@ class BillingController extends Controller
             'currency' => $currency,
             'ai_credits' => $this->aiUsageService->getUsageStatus($tenant),
             'credit_weights' => config('ai_credits.weights', []),
+            // Duration-tiered AI features (video / audio) aren't a single
+            // credit weight — they accrue per-minute. Ship the tier formula
+            // alongside the flat rates so the Billing Overview "Credit Costs
+            // per Action" list can render them next to tagging / suggestions
+            // instead of silently omitting them.
+            'credit_tier_costs' => [
+                'video_insights' => [
+                    'label' => 'Video insights',
+                    'base_credits' => (int) config('ai_credits.video_insights.base_credits', 5),
+                    'per_additional_minute' => (int) config('ai_credits.video_insights.per_additional_minute', 3),
+                ],
+                'audio_insights' => [
+                    'label' => 'Audio insights',
+                    'base_credits' => (int) config('ai_credits.audio_insights.base_credits', 1),
+                    'per_additional_minute' => (int) config('ai_credits.audio_insights.per_additional_minute', 1),
+                ],
+            ],
             'ai_credits_addon_packages' => $aiCreditsAddonPackages,
             'ai_credits_addon_state' => [
                 'active' => ((int) $tenant->ai_credits_addon) > 0,

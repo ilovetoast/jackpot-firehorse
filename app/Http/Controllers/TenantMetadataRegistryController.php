@@ -330,6 +330,10 @@ class TenantMetadataRegistryController extends Controller
     /**
      * Folder schema helper: fields on/off for this folder, option previews, access summary.
      *
+     * {@see \App\Services\Metadata\AssetMetadataDrawerFieldIdsResolver} defines which manageable fields
+     * count as "on" for the first list: folder enabled in Manage and shown on the asset metadata form
+     * (not only the folder visibility toggle).
+     *
      * GET /api/tenant/metadata/categories/{category}/folder-schema
      */
     public function folderSchema(int $category): JsonResponse
@@ -528,6 +532,17 @@ class TenantMetadataRegistryController extends Controller
             ];
         };
 
+        $brandId = $categoryModel->brand_id !== null ? (int) $categoryModel->brand_id : null;
+        $brand = $brandId !== null
+            ? Brand::query()->where('id', $brandId)->where('tenant_id', $tenant->id)->first()
+            : null;
+        $userRole = $brand !== null
+            ? ($user->getRoleForBrand($brand) ?? $user->getRoleForTenant($tenant) ?? 'member')
+            : ($user->getRoleForTenant($tenant) ?? 'member');
+
+        $drawerFieldIds = app(\App\Services\Metadata\AssetMetadataDrawerFieldIdsResolver::class)
+            ->fieldIdsForCategory($tenant, $brandId, $categoryModel, $userRole);
+
         $enabledOn = [];
         $enabledAutomated = [];
         $offManageable = [];
@@ -540,7 +555,7 @@ class TenantMetadataRegistryController extends Controller
                 } else {
                     $offAutomated[] = $payload;
                 }
-            } elseif ($payload['enabled_for_folder']) {
+            } elseif ($payload['enabled_for_folder'] && isset($drawerFieldIds[(int) $payload['id']])) {
                 $enabledOn[] = $payload;
             } else {
                 $offManageable[] = $payload;

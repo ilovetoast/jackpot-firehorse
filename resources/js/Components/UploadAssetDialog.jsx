@@ -62,6 +62,7 @@ import {
 import { shouldRegisterGridBlobPreview } from '../utils/browserGridBlobPreview'
 import { getUploadAcceptAttribute, decideClientUpload } from '../utils/damFileTypes'
 import BatchNamingBar from './Upload/BatchNamingBar'
+import UploadBatchSummary from './Upload/UploadBatchSummary'
 import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
 import { computeUploadCounts } from '../utils/uploadTrayCounts'
@@ -5611,6 +5612,24 @@ export default function UploadAssetDialog({
                                     onRetryItem={handleRetryTrayItem}
                                     disabled={batchStatus === 'finalizing' || isFinalizeSuccess}
                                     brandPrimary={brandPrimary}
+                                />
+
+                                {/* Phase 7: Mixed-outcome batch summary. Renders when at
+                                    least one file in this batch was either uploaded or
+                                    blocked, and surfaces "Why?" for each blocked file with
+                                    a one-click copyable list. Network-stage failures are
+                                    intentionally excluded — those want retry, not a
+                                    policy explainer. */}
+                                <UploadBatchSummary
+                                    files={v2Files.map((f) => ({
+                                        id: f.clientId,
+                                        name: f.file?.name || f.resolvedFilename || '',
+                                        status: f.status,
+                                        errorCode: f.error?.code ?? null,
+                                        errorMessage: f.error?.message ?? null,
+                                        errorStage: f.error?.stage ?? null,
+                                    }))}
+                                    primaryColor={brandPrimary}
                                 />
 
                                 {filesWithoutThumbnailSupport.length > 0 && (

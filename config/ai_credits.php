@@ -68,6 +68,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Audio AI Credit Pricing (per-minute tiered)
+    |--------------------------------------------------------------------------
+    |
+    | Mirrors `video_insights` for transcription / mood / summary jobs
+    | (Whisper today; other providers later). Whisper bills ~$0.006/min,
+    | so audio is intentionally cheaper than the vision pipeline above.
+    |
+    | Formula: credits = base_credits + max(0, ceil(duration_minutes) - 1) * per_additional_minute
+    |
+    | Examples:
+    |   30s voice memo (0.5 min) -> ceil(0.5)=1  -> 1 + (1-1)*1 = 1 credit
+    |   3m meeting clip          -> ceil(3.0)=3  -> 1 + (3-1)*1 = 3 credits
+    |   60m podcast              -> ceil(60)=60  -> 1 + (60-1)*1 = 60 credits
+    |
+    | The Whisper provider keeps a separate per-asset *dollar* budget cap
+    | (config('assets.audio_ai.whisper.budget_cents_per_asset')) as a
+    | defense-in-depth backstop against runaway calls; the credit pool
+    | is the primary tenant-facing enforcement.
+    |
+    */
+
+    'audio_insights' => [
+        'base_credits' => 1,
+        'per_additional_minute' => 1,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Credit Add-on Packs
     |--------------------------------------------------------------------------
     |

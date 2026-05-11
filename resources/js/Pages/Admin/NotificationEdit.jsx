@@ -39,6 +39,10 @@ export default function NotificationEdit({ template, app_name, app_url, tenants,
     
     // Initialize sample data with defaults
     const getDefaultSampleData = () => {
+        const ctaPreviewHex =
+            template.category === 'system'
+                ? saas_primary_color || '#7c3aed'
+                : selectedTenant?.first_brand?.primary_color || saas_primary_color || '#6366f1'
         const defaults = {
             tenant_name: selectedTenant?.name || 'Example Company',
             inviter_name: 'John Doe',
@@ -47,6 +51,9 @@ export default function NotificationEdit({ template, app_name, app_url, tenants,
             app_url: app_url || window.location.origin,
             user_name: 'Jane Smith',
             user_email: 'jane@example.com',
+            primary_button_color: ctaPreviewHex,
+            link_accent_color: ctaPreviewHex,
+            card_accent_bar: ctaPreviewHex,
             ...colorVars, // Add color variables
         }
         const sampleData = {}
@@ -66,10 +73,14 @@ export default function NotificationEdit({ template, app_name, app_url, tenants,
     useEffect(() => {
         const isTenantEmail = template.category === 'tenant' || !template.category
         if (isTenantEmail && selectedTenant) {
-            const newColorVars = getColorVariations(selectedTenant.first_brand?.primary_color || saas_primary_color || '#6366f1')
+            const brandHex = selectedTenant.first_brand?.primary_color || saas_primary_color || '#6366f1'
+            const newColorVars = getColorVariations(brandHex)
             setSampleData(prev => ({
                 ...prev,
                 tenant_name: selectedTenant.name,
+                primary_button_color: brandHex,
+                link_accent_color: brandHex,
+                card_accent_bar: brandHex,
                 ...newColorVars,
             }))
         }

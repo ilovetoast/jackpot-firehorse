@@ -634,7 +634,7 @@ export default function AssetGridToolbar({
                         className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-visible lg:gap-2 lg:rounded-xl lg:border lg:border-gray-100 lg:bg-gray-50/80 lg:px-2 lg:py-1"
                     >
                         {/* flex-1 + basis-0: search shrinks when the row is tight; filter cluster uses shrink-0 so TYPE/category stay full width */}
-                        <div className="hidden min-h-0 min-w-[7rem] max-w-full flex-1 basis-0 lg:block [&_.asset-grid-search-root]:min-w-0">
+                        <div className="hidden min-h-0 min-w-[7rem] w-full max-w-full flex-1 basis-0 lg:block [&_.asset-grid-search-root]:min-w-0">
                             <AssetGridSearchInput
                                 key="asset-grid-search"
                                 serverQuery={serverQ}

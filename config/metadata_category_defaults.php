@@ -72,7 +72,8 @@ return [
         ],
         'environment_type' => [
             'photography' => ['enabled' => true, 'is_primary' => false],
-            'graphics' => ['enabled' => true, 'is_primary' => false],
+            // Graphics / illustrations / brand elements: scene “environment” is a photography-oriented
+            // descriptor; omit from graphics so folder schema + editor match product expectations.
             'illustrations' => ['enabled' => true, 'is_primary' => false],
             'brand-elements' => ['enabled' => true, 'is_primary' => false],
         ],

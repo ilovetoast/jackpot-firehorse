@@ -378,6 +378,41 @@ class ProstaffDashboardTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_brand_viewer_cannot_open_creators_list_even_when_tenant_admin(): void
+    {
+        $viewer = User::factory()->create();
+        $viewer->tenants()->attach($this->tenant->id, ['role' => 'admin']);
+        $viewer->brands()->attach($this->brand->id, ['role' => 'viewer', 'removed_at' => null]);
+        $adminSpatie = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        $adminSpatie->syncPermissions(Permission::all());
+        $viewer->assignRole($adminSpatie);
+
+        $this->actingAs($viewer)
+            ->withSession($this->sessionFor($viewer))
+            ->get("/app/brands/{$this->brand->id}/creators")
+            ->assertForbidden();
+
+        $this->actingAs($viewer)
+            ->withSession($this->sessionFor($viewer))
+            ->getJson("/app/api/brands/{$this->brand->id}/prostaff/dashboard")
+            ->assertForbidden();
+    }
+
+    public function test_brand_admin_can_open_creators_list_without_being_tenant_admin(): void
+    {
+        $brandAdmin = User::factory()->create();
+        $brandAdmin->tenants()->attach($this->tenant->id, ['role' => 'member']);
+        $brandAdmin->brands()->attach($this->brand->id, ['role' => 'admin', 'removed_at' => null]);
+        $adminSpatie = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
+        $adminSpatie->syncPermissions(Permission::all());
+        $brandAdmin->assignRole($adminSpatie);
+
+        $this->actingAs($brandAdmin)
+            ->withSession($this->sessionFor($brandAdmin))
+            ->get("/app/brands/{$this->brand->id}/creators")
+            ->assertOk();
+    }
+
     public function test_manager_can_view_creator_profile_inertia(): void
     {
         $this->actingAs($this->manager)

@@ -59,9 +59,13 @@ class EnsureOnboardingComplete
         }
 
         if ($this->onboarding->isBlocking($brand)) {
-            return $request->header('X-Inertia')
-                ? inertia()->location('/app/onboarding')
-                : redirect('/app/onboarding');
+            $tenant = app()->bound('tenant') ? app('tenant') : null;
+            // Only company owners/admins complete activation; others must not be forced into onboarding.
+            if ($tenant && $user->isTenantOwnerAdminOrAgencyAdmin($tenant)) {
+                return $request->header('X-Inertia')
+                    ? inertia()->location('/app/onboarding')
+                    : redirect('/app/onboarding');
+            }
         }
 
         return $next($request);

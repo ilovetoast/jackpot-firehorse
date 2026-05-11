@@ -750,6 +750,7 @@ export default function ManageFieldsWorkspace({
     const [quickFieldDraftType, setQuickFieldDraftType] = useState('select')
     const [newFieldSectionExpanded, setNewFieldSectionExpanded] = useState(false)
     const [createFieldPrefill, setCreateFieldPrefill] = useState(null)
+    const [highlightFieldValuesOnOpen, setHighlightFieldValuesOnOpen] = useState(false)
 
     const noticeTimerRef = useRef(null)
     useEffect(() => {
@@ -1251,38 +1252,44 @@ export default function ManageFieldsWorkspace({
         [handleToggleWithConfirm, categories]
     )
 
-    const openDefinitionModal = async (field) => {
-        setCreateFieldPrefill(null)
-        try {
-            const isCustom = !systemFields.some((sf) => sf.id === field.id)
-            const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
-            const data = await response.json()
-            if (data.field) {
-                setEditingField(
-                    isCustom
-                        ? data.field
-                        : {
-                              ...field,
-                              ...data.field,
-                              scope: 'system',
-                              is_system: true,
-                              ai_eligible:
-                                  data.field?.ai_eligible !== undefined
-                                      ? data.field.ai_eligible
-                                      : (field.ai_eligible ?? false),
-                          }
-                )
-                setModalOpen(true)
+    const openDefinitionModal = useCallback(
+        async (field, options = {}) => {
+            const { highlightFieldValues = false } = options
+            setCreateFieldPrefill(null)
+            try {
+                const isCustom = !systemFields.some((sf) => sf.id === field.id)
+                const response = await fetch(`/app/tenant/metadata/fields/${field.id}`)
+                const data = await response.json()
+                if (data.field) {
+                    setEditingField(
+                        isCustom
+                            ? data.field
+                            : {
+                                  ...field,
+                                  ...data.field,
+                                  scope: 'system',
+                                  is_system: true,
+                                  ai_eligible:
+                                      data.field?.ai_eligible !== undefined
+                                          ? data.field.ai_eligible
+                                          : (field.ai_eligible ?? false),
+                              }
+                    )
+                    setHighlightFieldValuesOnOpen(Boolean(highlightFieldValues))
+                    setModalOpen(true)
+                }
+            } catch (e) {
+                console.error(e)
             }
-        } catch (e) {
-            console.error(e)
-        }
-    }
+        },
+        [systemFields]
+    )
 
     const handleModalSuccess = () => {
         setModalOpen(false)
         setEditingField(null)
         setCreateFieldPrefill(null)
+        setHighlightFieldValuesOnOpen(false)
         setFieldCategoryData({})
         router.reload({ only: ['registry', 'customFieldsLimit'] })
     }
@@ -1290,6 +1297,7 @@ export default function ManageFieldsWorkspace({
     const openBlankCreateModal = useCallback(() => {
         setCreateFieldPrefill(null)
         setEditingField(null)
+        setHighlightFieldValuesOnOpen(false)
         setModalOpen(true)
     }, [])
 
@@ -1317,6 +1325,30 @@ export default function ManageFieldsWorkspace({
         return () => clearTimeout(t)
     }, [selectedCategoryId, canManageFields, openBlankCreateModal])
 
+    /** Folder flyout “Add a value”: ?field_values={id} opens Configure with values panel focused. */
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        if (!selectedCategoryId || !canManageFields) return
+        if (!allFields.length) return
+        const params = new URLSearchParams(window.location.search)
+        const raw = params.get('field_values')
+        if (!raw) return
+
+        const field = allFields.find((f) => String(f.id) === String(raw))
+
+        params.delete('field_values')
+        const qs = params.toString()
+        const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash || ''}`
+        window.history.replaceState(window.history.state, '', nextUrl)
+
+        if (!field) return
+
+        const t = window.setTimeout(() => {
+            void openDefinitionModal(field, { highlightFieldValues: true })
+        }, 120)
+        return () => clearTimeout(t)
+    }, [selectedCategoryId, canManageFields, allFields, openDefinitionModal])
+
     const openQuickCreateModal = useCallback(() => {
         const name = quickFieldName.trim()
         if (!name) return
@@ -1328,6 +1360,7 @@ export default function ManageFieldsWorkspace({
             highlightValues: true,
         })
         setEditingField(null)
+        setHighlightFieldValuesOnOpen(false)
         setModalOpen(true)
     }, [quickFieldName, quickFieldDraftType, customFieldsLimit])
 
@@ -1820,9 +1853,11 @@ export default function ManageFieldsWorkspace({
                     setModalOpen(false)
                     setEditingField(null)
                     setCreateFieldPrefill(null)
+                    setHighlightFieldValuesOnOpen(false)
                 }}
                 field={editingField}
                 createPrefill={createFieldPrefill}
+                highlightValuesOnOpen={highlightFieldValuesOnOpen}
                 preselectedCategoryId={selectedCategoryId}
                 categories={categories}
                 canManageFields={canManageFields}

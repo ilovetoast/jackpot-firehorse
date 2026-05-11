@@ -19,7 +19,8 @@ export default function NotificationBell({ textColor = '#000000' }) {
     const [expandedIds, setExpandedIds] = useState(new Set())
     const { can } = usePermission()
     const canApprove = can('metadata.bypass_approval')
-    const canViewSuggestions = can('metadata.suggestions.view')
+    /** Bell queue + badge: actionable AI review only (view-only roles do not manage suggestions). */
+    const canApplyAiSuggestions = can('metadata.suggestions.apply')
     const [hasStaleAssetGrid, setHasStaleAssetGrid] = useState(() => {
         // Initialize from window-level state
         if (typeof window !== 'undefined' && window.__assetGridStaleness) {
@@ -269,13 +270,13 @@ export default function NotificationBell({ textColor = '#000000' }) {
             >
                 <BellIcon className="h-6 w-6" />
                 {/* Show badge if there are unread notifications OR pending items (only if user has permission) */}
-                {(unreadCount > 0 || (pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
+                {(unreadCount > 0 || (pending_items && ((canApplyAiSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
                     <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
                 )}
-                {(unreadCount > 0 || (pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
+                {(unreadCount > 0 || (pending_items && ((canApplyAiSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0))) && (
                     <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
                         {(() => {
-                            const totalPending = (canViewSuggestions ? (pending_items?.ai_suggestions || 0) : 0) + metadataApprovalsCount
+                            const totalPending = (canApplyAiSuggestions ? (pending_items?.ai_suggestions || 0) : 0) + metadataApprovalsCount
                             const total = unreadCount + totalPending
                             return total > 9 ? '9+' : total
                         })()}
@@ -296,9 +297,9 @@ export default function NotificationBell({ textColor = '#000000' }) {
                         </div>
                         <div className="py-1">
                             {/* Pending Items - Simple notifications */}
-                            {pending_items && ((canViewSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0) && (
+                            {pending_items && ((canApplyAiSuggestions && pending_items.ai_suggestions > 0) || metadataApprovalsCount > 0) && (
                                 <>
-                                    {canViewSuggestions && pending_items.ai_suggestions > 0 && (
+                                    {canApplyAiSuggestions && pending_items.ai_suggestions > 0 && (
                                         <button
                                             onClick={() => {
                                                 const tagCount = pending_items.ai_tag_suggestions ?? 0
@@ -382,7 +383,7 @@ export default function NotificationBell({ textColor = '#000000' }) {
                             {/* Regular Notifications — grouped, collapsed/expandable */}
                             {loading ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">Loading...</div>
-                            ) : notifications.length === 0 && (!pending_items || ((!canViewSuggestions || pending_items.ai_suggestions === 0) && metadataApprovalsCount === 0)) ? (
+                            ) : notifications.length === 0 && (!pending_items || ((!canApplyAiSuggestions || pending_items.ai_suggestions === 0) && metadataApprovalsCount === 0)) ? (
                                 <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
                             ) : (
                                 notifications.map((notification) => {

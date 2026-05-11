@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -86,10 +87,7 @@ class AssetTagController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'assets.tags.create')) {
-            return response()->json(['message' => 'Permission denied'], 403);
-        }
+        Gate::forUser($user)->authorize('update', $asset);
 
         // Check plan tag limit before processing
         try {
@@ -181,10 +179,7 @@ class AssetTagController extends Controller
             return response()->json(['message' => 'Asset not found'], 404);
         }
 
-        // Check permission
-        if (! $user->hasPermissionForTenant($tenant, 'assets.tags.delete')) {
-            return response()->json(['message' => 'Permission denied'], 403);
-        }
+        Gate::forUser($user)->authorize('update', $asset);
 
         // Get the tag
         $tag = DB::table('asset_tags')

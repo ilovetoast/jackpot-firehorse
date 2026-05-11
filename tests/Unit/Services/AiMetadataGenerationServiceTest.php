@@ -278,6 +278,7 @@ class AiMetadataGenerationServiceTest extends TestCase
                     ],
                     'tags' => [
                         ['value' => 'from-vision', 'confidence' => 0.96],
+                        ['value' => 'warehouse interior', 'confidence' => 0.96],
                     ],
                 ]),
                 'tokens_in' => 100,
@@ -312,12 +313,13 @@ class AiMetadataGenerationServiceTest extends TestCase
         $this->assertEmpty($results['fields_processed']);
 
         $this->assertEquals(0, DB::table('asset_metadata_candidates')->where('asset_id', $asset->id)->count());
-        $row = DB::table('asset_tag_candidates')
+        $tags = DB::table('asset_tag_candidates')
             ->where('asset_id', $asset->id)
             ->where('producer', 'ai')
-            ->first();
-        $this->assertNotNull($row);
-        $this->assertEquals('from-vision', $row->tag);
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('warehouse interior', $tags);
+        $this->assertNotContains('from vision', $tags);
     }
 
     /**
@@ -494,7 +496,8 @@ class AiMetadataGenerationServiceTest extends TestCase
 
         $service = new AiMetadataGenerationService($this->mockProvider, null, $mockBucket);
         $asset = $this->createAssetWithCategory();
-        $this->createAiEligibleField('photo_type', $asset->tenant_id);
+        $field = $this->createAiEligibleField('photo_type', $asset->tenant_id);
+        $this->createFieldOption($field->id, 'landscape');
 
         $this->expectException(\Exception::class);
         $this->expectExceptionMessage('AI image fetch failed before provider call');
@@ -595,22 +598,20 @@ class AiMetadataGenerationServiceTest extends TestCase
     }
 
     /**
-     * UI screenshot classification: photo-world tags from the model are dropped; interface tags persist.
+     * Screen captures: reject generic studio/lighting tags; keep useful UI terms.
      */
-    public function test_ui_screenshot_sanitizer_rejects_studio_lighting_tags(): void
+    public function test_screen_capture_rejects_lighting_and_studio_background(): void
     {
         $this->mockProvider->shouldReceive('analyzeImage')
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'detected_asset_type' => 'ui_screenshot',
+                    'detected_asset_type' => 'screen_capture',
                     'tags' => [
                         ['value' => 'lighting setup', 'confidence' => 0.95],
                         ['value' => 'studio background', 'confidence' => 0.95],
-                        ['value' => 'screenshot', 'confidence' => 0.96],
-                        ['value' => 'user interface', 'confidence' => 0.96],
-                        ['value' => 'form', 'confidence' => 0.96],
-                        ['value' => 'input field', 'confidence' => 0.96],
+                        ['value' => 'navigation', 'confidence' => 0.96],
+                        ['value' => 'settings', 'confidence' => 0.96],
                     ],
                 ]),
                 'tokens_in' => 100,
@@ -638,28 +639,595 @@ class AiMetadataGenerationServiceTest extends TestCase
             ->orderBy('tag')
             ->pluck('tag')
             ->all();
-        $this->assertContains('screenshot', $tags);
-        $this->assertContains('user interface', $tags);
-        $this->assertContains('form', $tags);
-        $this->assertContains('input field', $tags);
+        $this->assertContains('navigation', $tags);
+        $this->assertContains('settings', $tags);
         $this->assertNotContains('lighting setup', $tags);
         $this->assertNotContains('studio background', $tags);
     }
 
     /**
-     * Product-style classification must not drop legitimate studio-related tags.
+     * Product bottle imagery: keep concrete product tags; drop studio/lighting filler.
      */
-    public function test_product_photo_does_not_apply_ui_screenshot_photo_tag_rejections(): void
+    public function test_product_image_accepts_bottle_tags_rejects_studio_lighting(): void
     {
         $this->mockProvider->shouldReceive('analyzeImage')
             ->once()
             ->andReturn([
                 'text' => json_encode([
-                    'detected_asset_type' => 'product_photo',
+                    'detected_asset_type' => 'product_image',
                     'tags' => [
                         ['value' => 'studio lighting', 'confidence' => 0.95],
-                        ['value' => 'indoor', 'confidence' => 0.95],
+                        ['value' => 'lighting setup', 'confidence' => 0.95],
+                        ['value' => 'bourbon whiskey', 'confidence' => 0.95],
                         ['value' => 'bottle', 'confidence' => 0.95],
+                        ['value' => 'label', 'confidence' => 0.95],
+                        ['value' => 'product', 'confidence' => 0.95],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->orderBy('tag')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('bourbon', $tags);
+        $this->assertContains('bottle', $tags);
+        $this->assertContains('label', $tags);
+        $this->assertContains('product', $tags);
+        $this->assertNotContains('studio lighting', $tags);
+        $this->assertNotContains('lighting setup', $tags);
+    }
+
+    /**
+     * Brand mark in a neutral category: category-synonym tags allowed; studio filler rejected.
+     */
+    public function test_brand_mark_accepts_logo_and_transparent_background_alias(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'brand_mark',
+                    'tags' => [
+                        ['value' => 'logo', 'confidence' => 0.96],
+                        ['value' => 'brand mark', 'confidence' => 0.96],
+                        ['value' => 'transparent bg', 'confidence' => 0.96],
+                        ['value' => 'gold', 'confidence' => 0.96],
+                        ['value' => 'studio', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('logo', $tags);
+        $this->assertContains('brand mark', $tags);
+        $this->assertContains('transparent background', $tags);
+        $this->assertContains('gold', $tags);
+        $this->assertNotContains('studio', $tags);
+    }
+
+    /**
+     * Logos category: strip logo/brand mark synonyms; keep concrete visible-detail tags.
+     */
+    public function test_logos_category_rejects_logo_and_brand_mark_restatement(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'brand_mark',
+                    'tags' => [
+                        ['value' => 'logo', 'confidence' => 0.96],
+                        ['value' => 'logos', 'confidence' => 0.96],
+                        ['value' => 'brand mark', 'confidence' => 0.96],
+                        ['value' => 'wordmark', 'confidence' => 0.96],
+                        ['value' => 'gold', 'confidence' => 0.96],
+                        ['value' => 'transparent bg', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory('Logos', 'logos');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertNotContains('logo', $tags);
+        $this->assertNotContains('brand mark', $tags);
+        $this->assertContains('wordmark', $tags);
+        $this->assertContains('gold', $tags);
+        $this->assertContains('transparent background', $tags);
+    }
+
+    /**
+     * Photography category: configured aliases (photo, image, …) are stripped.
+     */
+    public function test_photography_category_strips_photo_and_image_aliases(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'lifestyle_photo',
+                    'tags' => [
+                        ['value' => 'photography', 'confidence' => 0.96],
+                        ['value' => 'photo', 'confidence' => 0.96],
+                        ['value' => 'image', 'confidence' => 0.96],
+                        ['value' => 'barrel room', 'confidence' => 0.96],
+                        ['value' => 'bourbon', 'confidence' => 0.96],
+                        ['value' => 'bourbon bottle', 'confidence' => 0.96],
+                        ['value' => 'tasting', 'confidence' => 0.96],
+                        ['value' => 'warehouse', 'confidence' => 0.96],
+                        ['value' => 'wood', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory('Photography', 'photography');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertNotContains('photography', $tags);
+        $this->assertNotContains('photo', $tags);
+        $this->assertNotContains('image', $tags);
+        $this->assertContains('barrel room', $tags);
+        $this->assertContains('bourbon', $tags);
+        $this->assertContains('bourbon bottle', $tags);
+        $this->assertContains('tasting', $tags);
+        $this->assertContains('warehouse', $tags);
+        $this->assertContains('wood', $tags);
+    }
+
+    /**
+     * Bottle Renders category: render / product render aliases stripped; other detail kept.
+     */
+    public function test_bottle_renders_category_strips_render_aliases(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'product_render',
+                    'tags' => [
+                        ['value' => 'render', 'confidence' => 0.96],
+                        ['value' => 'product render', 'confidence' => 0.96],
+                        ['value' => 'glass bottle', 'confidence' => 0.96],
+                        ['value' => 'bourbon bottle', 'confidence' => 0.96],
+                        ['value' => 'label', 'confidence' => 0.96],
+                        ['value' => 'transparent bg', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory('Bottle Renders', 'bottle-renders');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertNotContains('render', $tags);
+        $this->assertNotContains('product render', $tags);
+        $this->assertContains('glass bottle', $tags);
+        $this->assertContains('bourbon bottle', $tags);
+        $this->assertContains('label', $tags);
+        $this->assertContains('transparent background', $tags);
+    }
+
+    /**
+     * vision_tag_category_alias_bans_append merges slug_equals_any rows for custom categories.
+     */
+    public function test_vision_tag_category_alias_bans_append_merges_custom_aliases(): void
+    {
+        Config::set('ai.metadata_tagging.vision_tag_category_alias_bans_append', [
+            [
+                'aliases' => ['wibble'],
+                'match' => [
+                    'slug_equals_any' => ['my-brand-slug'],
+                ],
+            ],
+        ]);
+
+        try {
+            $this->mockProvider->shouldReceive('analyzeImage')
+                ->once()
+                ->andReturn([
+                    'text' => json_encode([
+                        'tags' => [
+                            ['value' => 'wibble', 'confidence' => 0.96],
+                            ['value' => 'gold leaf', 'confidence' => 0.96],
+                        ],
+                    ]),
+                    'tokens_in' => 100,
+                    'tokens_out' => 50,
+                    'model' => 'gpt-4o-mini',
+                    'metadata' => [],
+                ]);
+
+            $this->mockProvider->shouldReceive('calculateCost')
+                ->once()
+                ->andReturn(0.001);
+
+            $asset = $this->createAssetWithCategory('Custom Brand Assets', 'my-brand-slug');
+            $this->createSelectField('tags', $asset->tenant_id, [
+                'type' => 'multiselect',
+                'ai_eligible' => true,
+            ]);
+
+            $this->service->generateMetadata($asset);
+
+            $tags = DB::table('asset_tag_candidates')
+                ->where('asset_id', $asset->id)
+                ->where('producer', 'ai')
+                ->pluck('tag')
+                ->all();
+            $this->assertNotContains('wibble', $tags);
+            $this->assertContains('gold leaf', $tags);
+        } finally {
+            Config::set('ai.metadata_tagging.vision_tag_category_alias_bans_append', []);
+        }
+    }
+
+    /**
+     * Normalized category name (and plural variant) matches the ban set for exact tag repeats.
+     */
+    public function test_category_whole_name_rejected_as_tag(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'tags' => [
+                        ['value' => 'spring campaign', 'confidence' => 0.96],
+                        ['value' => 'spring campaigns', 'confidence' => 0.96],
+                        ['value' => 'table tent', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory('Spring Campaign', 'spring-campaign');
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertNotContains('spring campaign', $tags);
+        $this->assertNotContains('spring campaigns', $tags);
+        $this->assertContains('table tent', $tags);
+    }
+
+    /**
+     * Marketing layout: concrete promotion and product references survive; lighting filler does not.
+     */
+    public function test_marketing_layout_accepts_announcement_and_product_tags(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'marketing_layout',
+                    'tags' => [
+                        ['value' => 'announcement', 'confidence' => 0.96],
+                        ['value' => 'state graphic', 'confidence' => 0.96],
+                        ['value' => 'product promotion', 'confidence' => 0.96],
+                        ['value' => 'bourbon bottle', 'confidence' => 0.96],
+                        ['value' => 'lighting setup', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('announcement', $tags);
+        $this->assertContains('state graphic', $tags);
+        $this->assertContains('product promotion', $tags);
+        $this->assertContains('bourbon bottle', $tags);
+        $this->assertNotContains('lighting setup', $tags);
+    }
+
+    /**
+     * Environment / industrial scene: warehouse vocabulary survives; production-process tags do not.
+     */
+    public function test_environment_photo_accepts_distillery_terms_rejects_lighting_setup(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'environment_photo',
+                    'tags' => [
+                        ['value' => 'barrels', 'confidence' => 0.96],
+                        ['value' => 'distillery', 'confidence' => 0.96],
+                        ['value' => 'warehouse', 'confidence' => 0.96],
+                        ['value' => 'lighting setup', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('barrel', $tags);
+        $this->assertContains('distillery', $tags);
+        $this->assertContains('warehouse', $tags);
+        $this->assertNotContains('lighting setup', $tags);
+    }
+
+    /**
+     * Legacy vision JSON classification values map to current asset families for sanitation.
+     */
+    public function test_legacy_detected_asset_type_ui_screenshot_maps_to_screen_capture_filler_rules(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'ui_screenshot',
+                    'tags' => [
+                        ['value' => 'studio background', 'confidence' => 0.95],
+                        ['value' => 'form', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('form', $tags);
+        $this->assertNotContains('studio background', $tags);
+    }
+
+    /**
+     * Phrase alias: ui screenshot token becomes screen capture.
+     */
+    public function test_phrase_alias_ui_screenshot_becomes_screen_capture(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'screen_capture',
+                    'tags' => [
+                        ['value' => 'ui screenshot', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $row = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->first();
+        $this->assertNotNull($row);
+        $this->assertSame('screen capture', $row->tag);
+    }
+
+    /**
+     * Structural aliases only: product bottle / bottle product collapse to bottle; compound whiskey bottle preserved.
+     */
+    public function test_product_bottle_phrases_normalize_to_bottle_whiskey_bottle_preserved(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'detected_asset_type' => 'product_image',
+                    'tags' => [
+                        ['value' => 'product bottle', 'confidence' => 0.96],
+                        ['value' => 'bottle product', 'confidence' => 0.96],
+                        ['value' => 'whiskey bottle', 'confidence' => 0.96],
+                    ],
+                ]),
+                'tokens_in' => 100,
+                'tokens_out' => 50,
+                'model' => 'gpt-4o-mini',
+                'metadata' => [],
+            ]);
+
+        $this->mockProvider->shouldReceive('calculateCost')
+            ->once()
+            ->andReturn(0.001);
+
+        $asset = $this->createAssetWithCategory();
+        $this->createSelectField('tags', $asset->tenant_id, [
+            'type' => 'multiselect',
+            'ai_eligible' => true,
+        ]);
+
+        $this->service->generateMetadata($asset);
+
+        $tags = DB::table('asset_tag_candidates')
+            ->where('asset_id', $asset->id)
+            ->where('producer', 'ai')
+            ->orderBy('tag')
+            ->pluck('tag')
+            ->all();
+        $this->assertContains('bottle', $tags);
+        $this->assertContains('whiskey bottle', $tags);
+        $this->assertCount(2, $tags);
+    }
+
+    /**
+     * Provenance-style tags are dropped after normalization (exact match).
+     */
+    public function test_from_vision_rejected_as_provenance_leakage(): void
+    {
+        $this->mockProvider->shouldReceive('analyzeImage')
+            ->once()
+            ->andReturn([
+                'text' => json_encode([
+                    'tags' => [
+                        ['value' => 'from-vision', 'confidence' => 0.96],
                     ],
                 ]),
                 'tokens_in' => 100,
@@ -680,16 +1248,8 @@ class AiMetadataGenerationServiceTest extends TestCase
 
         $results = $this->service->generateMetadata($asset);
 
-        $tags = DB::table('asset_tag_candidates')
-            ->where('asset_id', $asset->id)
-            ->where('producer', 'ai')
-            ->orderBy('tag')
-            ->pluck('tag')
-            ->all();
-        $this->assertContains('studio lighting', $tags);
-        $this->assertContains('indoor', $tags);
-        $this->assertContains('bottle', $tags);
-        $this->assertSame(0, (int) ($results['tag_parse_stats']['rejected_sanitizer_count'] ?? -1));
+        $this->assertSame(0, $results['tags_created']);
+        $this->assertSame(0, DB::table('asset_tag_candidates')->where('asset_id', $asset->id)->where('producer', 'ai')->count());
     }
 
     /**
@@ -737,7 +1297,7 @@ class AiMetadataGenerationServiceTest extends TestCase
     /**
      * Helper: Create asset with category
      */
-    protected function createAssetWithCategory(): Asset
+    protected function createAssetWithCategory(string $categoryName = 'Test Category', ?string $slug = null): Asset
     {
         $asset = $this->createAsset();
 
@@ -745,8 +1305,8 @@ class AiMetadataGenerationServiceTest extends TestCase
             'tenant_id' => $asset->tenant_id,
             'brand_id' => $asset->brand_id,
             'asset_type' => \App\Enums\AssetType::ASSET,
-            'name' => 'Test Category',
-            'slug' => 'test-category',
+            'name' => $categoryName,
+            'slug' => $slug ?? \Illuminate\Support\Str::slug($categoryName),
             'is_system' => false,
         ]);
 

@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use App\Mail\Concerns\AppliesTenantMailBranding;
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Mail\BaseMailable;
@@ -40,10 +41,10 @@ class SubscriptionEndedTenant extends BaseMailable
         $this->applyTenantMailBranding($this->tenant);
 
         $subject = $this->template
-            ? $this->template->render([
+            ? $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'previous_plan' => config("plans.{$this->previousPlanKey}.name", ucfirst($this->previousPlanKey)),
-            ])['subject']
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem()))['subject']
             : "Your paid plan has ended — {$this->tenant->name}";
 
         return new Envelope(subject: $subject);
@@ -53,7 +54,7 @@ class SubscriptionEndedTenant extends BaseMailable
     {
         $previousName = config("plans.{$this->previousPlanKey}.name", ucfirst($this->previousPlanKey));
 
-        $vars = [
+        $vars = array_merge([
             'tenant_name' => $this->tenant->name,
             'owner_name' => $this->owner->name,
             'owner_email' => $this->owner->email,
@@ -61,7 +62,7 @@ class SubscriptionEndedTenant extends BaseMailable
             'app_name' => config('app.name'),
             'app_url' => config('app.url'),
             'billing_url' => config('app.url').'/app/billing',
-        ];
+        ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
 
         if ($this->template) {
             $rendered = $this->template->render($vars);

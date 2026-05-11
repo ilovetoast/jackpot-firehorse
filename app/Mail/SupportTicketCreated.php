@@ -5,6 +5,7 @@ namespace App\Mail;
 use App\Enums\TicketCategory;
 use App\Enums\TicketType;
 use App\Models\NotificationTemplate;
+use App\Support\TransactionalEmailHtml;
 use App\Models\Ticket;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailables\Content;
@@ -105,7 +106,7 @@ class SupportTicketCreated extends BaseMailable
 
         $isInternalEngineering = $ticket->type === TicketType::INTERNAL;
 
-        return [
+        return array_merge([
             'assignee_name' => $assigneeName,
             'ticket_number' => $ticket->ticket_number,
             'ticket_subject' => $subject,
@@ -119,6 +120,6 @@ class SupportTicketCreated extends BaseMailable
             'intro_line' => $isInternalEngineering
                 ? 'An internal (engineering) ticket was created and assigned to you.'
                 : 'A support ticket has been created and assigned to you.',
-        ];
+        ], TransactionalEmailHtml::transactionalCtaPlaceholdersForSystem());
     }
 }

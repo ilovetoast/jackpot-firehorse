@@ -453,7 +453,7 @@ class EditorAssetBridgeController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
+        if (! $user->canForContext('asset.upload', $tenant, $brand)) {
             return response()->json(['message' => 'You do not have permission to upload assets.'], 403);
         }
 

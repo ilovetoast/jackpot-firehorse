@@ -85,7 +85,7 @@ const NavButton = ({
         <span className="flex-1">{label}</span>
         {typeof count === 'number' && count > 0 && (
             <span
-                className="text-xs font-normal opacity-80"
+                className="text-xs font-normal tabular-nums opacity-80"
                 style={{ color: isSelected ? activeTextColor : unselectedCountColor }}
             >
                 {count}
@@ -169,8 +169,8 @@ export default function AssetSidebar({
 
     const folderSchemaTriggerClass =
         textColor === '#ffffff'
-            ? 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-md px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
-            : 'flex h-full w-full min-w-[2rem] items-center justify-center rounded-r-md px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
+            ? 'flex h-full min-h-[2.25rem] w-full min-w-[2rem] items-center justify-center px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40 focus-visible:ring-offset-0'
+            : 'flex h-full min-h-[2.25rem] w-full min-w-[2rem] items-center justify-center px-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-400/50 focus-visible:ring-offset-0'
 
     const isLibrarySelected = (id) =>
         selectedCategoryId === id && lifecycle !== 'deleted' && !isResearchView && !isStagedView
@@ -257,6 +257,7 @@ export default function AssetSidebar({
                                     const showCategoryCount =
                                         category.id != null && Number.isFinite(categoryCount) && categoryCount > 0
                                     const showSchemaTrigger = showFolderSchemaHelp && category?.id != null
+                                    const showRightTrail = showSchemaTrigger || showCategoryCount
                                     const rowHighlighted =
                                         isSelected ||
                                         (!isSelected && libraryRowActiveId === category.id)
@@ -275,14 +276,14 @@ export default function AssetSidebar({
                                             }}
                                             onMouseLeave={(e) => {
                                                 const rel = e.relatedTarget
+                                                // Still inside this row (e.g. moving onto the nested button) — keep hover.
                                                 if (rel instanceof Node && e.currentTarget.contains(rel)) return
-                                                requestAnimationFrame(() => {
-                                                    if (!e.currentTarget.contains(document.activeElement)) {
-                                                        setLibraryRowActiveId((id) =>
-                                                            id === category.id ? null : id
-                                                        )
-                                                    }
-                                                })
+                                                // Pointer left the row: always clear hover. Do not gate on
+                                                // document.activeElement — after a click the button stays focused
+                                                // and would block clearing, leaving the row "stuck" highlighted.
+                                                setLibraryRowActiveId((id) =>
+                                                    id === category.id ? null : id
+                                                )
                                             }}
                                             onFocusCapture={() => {
                                                 if (!isSelected) setLibraryRowActiveId(category.id)
@@ -298,7 +299,11 @@ export default function AssetSidebar({
                                             <button
                                                 type="button"
                                                 onClick={() => onCategorySelect(category)}
-                                                className="flex min-w-0 flex-1 items-center rounded-l-md px-2 py-1.5 text-left text-sm font-medium lg:px-3 lg:py-2"
+                                                className={`flex min-w-0 flex-1 items-center py-1.5 text-left text-sm font-medium lg:py-2 pl-2 lg:pl-3 ${
+                                                    showRightTrail
+                                                        ? 'rounded-l-md pr-1'
+                                                        : 'rounded-md pr-2 lg:pr-3'
+                                                }`}
                                                 style={{
                                                     backgroundColor: 'transparent',
                                                     color: rowFg,
@@ -310,14 +315,6 @@ export default function AssetSidebar({
                                                     style={{ color: rowIconColor }}
                                                 />
                                                 <span className="min-w-0 flex-1 truncate">{category.name}</span>
-                                                {showCategoryCount && (
-                                                    <span
-                                                        className="text-xs font-normal opacity-80 ml-2 shrink-0"
-                                                        style={{ color: rowCountColor }}
-                                                    >
-                                                        {categoryCount}
-                                                    </span>
-                                                )}
                                                 {category.is_private && setTooltipVisible && (
                                                     <div className="relative ml-2 shrink-0 group/lock">
                                                         <LockClosedIcon
@@ -354,15 +351,27 @@ export default function AssetSidebar({
                                                     </div>
                                                 )}
                                             </button>
-                                            {showSchemaTrigger ? (
-                                                <div
-                                                    className="flex shrink-0 items-stretch opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                                                    style={{ color: rowIconColor }}
-                                                >
-                                                    <FolderSchemaHelp
-                                                        category={category}
-                                                        triggerClassName={folderSchemaTriggerClass}
-                                                    />
+                                            {showRightTrail ? (
+                                                <div className="flex shrink-0 items-stretch rounded-r-md">
+                                                    {showSchemaTrigger ? (
+                                                        <div
+                                                            className="flex min-w-[2rem] shrink-0 items-stretch justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 has-[[data-open]]:opacity-100"
+                                                            style={{ color: rowIconColor }}
+                                                        >
+                                                            <FolderSchemaHelp
+                                                                category={category}
+                                                                triggerClassName={folderSchemaTriggerClass}
+                                                            />
+                                                        </div>
+                                                    ) : null}
+                                                    {showCategoryCount ? (
+                                                        <span
+                                                            className="flex items-center pr-2 text-xs font-normal tabular-nums opacity-80 lg:pr-3"
+                                                            style={{ color: rowCountColor }}
+                                                        >
+                                                            {categoryCount}
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                             ) : null}
                                         </div>

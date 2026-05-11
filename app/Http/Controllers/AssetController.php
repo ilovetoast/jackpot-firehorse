@@ -1051,6 +1051,10 @@ class AssetController extends Controller
                         // Phase V-1: Video quick preview on hover (grid and drawer)
                         'video_preview_url' => $this->videoPreviewUrl($asset),
                         'video_poster_url' => $this->videoPosterUrl($asset),
+                        // Phase 3: Audio asset signed playback + waveform PNG. Both null until the
+                        // upload pipeline completes (frontend falls back to synthetic waveform).
+                        'audio_playback_url' => $this->audioPlaybackUrl($asset),
+                        'audio_waveform_url' => $this->audioWaveformUrl($asset),
                         // Pipeline status for visible progression (uploading → complete)
                         'analysis_status' => $asset->analysis_status ?? 'uploading',
                         // Asset health badge (healthy|warning|critical) for support visibility
@@ -1118,6 +1122,8 @@ class AssetController extends Controller
                         'archived_by' => null,
                         'video_preview_url' => null,
                         'video_poster_url' => null,
+                        'audio_playback_url' => null,
+                        'audio_waveform_url' => null,
                         'analysis_status' => 'uploading',
                         'health_status' => 'healthy',
                         'brand_intelligence' => null,
@@ -3016,13 +3022,14 @@ class AssetController extends Controller
 
             return response()->json(is_array($data) ? $data : [], $response->getStatusCode());
         }
-        if (! $user->hasPermissionForTenant($tenant, 'asset.upload')) {
-            return response()->json(['error' => 'You do not have permission to replace files.'], 403);
-        }
 
         $targetBrand = $asset->brand_id ? $asset->brand : ($brand ?? $tenant->defaultBrand);
         if (! $targetBrand) {
             return response()->json(['error' => 'No brand context available for this asset.'], 403);
+        }
+
+        if (! $user->canForContext('asset.upload', $tenant, $targetBrand)) {
+            return response()->json(['error' => 'You do not have permission to replace files.'], 403);
         }
 
         $validated = $request->validate([
@@ -3264,6 +3271,41 @@ class AssetController extends Controller
     private function videoPosterUrl(Asset $asset): ?string
     {
         $url = $asset->deliveryUrl(AssetVariant::VIDEO_POSTER, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Phase 3: Signed playback URL for an audio asset (the original file
+     * itself — MP3 / WAV / AAC — used by AudioCardVisual / AudioLightboxPlayer
+     * for actual audio playback). Empty when the asset is not audio.
+     */
+    private function audioPlaybackUrl(Asset $asset): ?string
+    {
+        $mime = (string) ($asset->mime_type ?? '');
+        if (! str_starts_with($mime, 'audio/')) {
+            $ext = strtolower((string) pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+            if (! in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba'], true)) {
+                return null;
+            }
+        }
+
+        $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
+
+        return $url !== '' ? $url : null;
+    }
+
+    /**
+     * Phase 3: Signed URL for the FFmpeg-rendered waveform PNG strip.
+     * Empty when the waveform job hasn't run yet — frontend renders the
+     * synthetic waveform until this becomes non-null.
+     */
+    private function audioWaveformUrl(Asset $asset): ?string
+    {
+        if (empty($asset->metadata['audio']['waveform_path'] ?? null)) {
+            return null;
+        }
+        $url = $asset->deliveryUrl(AssetVariant::AUDIO_WAVEFORM, DeliveryContext::AUTHENTICATED);
 
         return $url !== '' ? $url : null;
     }

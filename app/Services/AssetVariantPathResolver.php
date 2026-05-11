@@ -50,7 +50,26 @@ class AssetVariantPathResolver
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
             AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
+            AssetVariant::AUDIO_WAVEFORM => $this->resolveAudioWaveformPath($asset, $basePath),
         };
+    }
+
+    /**
+     * Phase 3: Resolve waveform PNG path for AUDIO_WAVEFORM variant.
+     *
+     * AudioWaveformService writes the rendered PNG to S3 and stores the
+     * key in metadata.audio.waveform_path. We honor the recorded path
+     * verbatim and only fall back to the canonical convention (used by
+     * legacy assets pre-metadata) when nothing has been written yet.
+     */
+    protected function resolveAudioWaveformPath(Asset $asset, string $basePath): string
+    {
+        $metadataPath = $asset->metadata['audio']['waveform_path'] ?? null;
+        if (is_string($metadataPath) && $metadataPath !== '' && ! str_starts_with($metadataPath, 'http')) {
+            return $metadataPath;
+        }
+
+        return $basePath !== '' ? $basePath.'previews/audio_waveform.png' : '';
     }
 
     /**

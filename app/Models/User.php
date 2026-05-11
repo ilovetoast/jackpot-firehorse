@@ -715,6 +715,21 @@ class User extends Authenticatable
     }
 
     /**
+     * Workspace owner, tenant admin, or agency admin — elevated company roles for workspace-wide setup
+     * (Tasks → brand setup card, cinematic onboarding, brand guidelines portal and builder).
+     */
+    public function isTenantOwnerAdminOrAgencyAdmin(?Tenant $tenant): bool
+    {
+        if (! $tenant) {
+            return false;
+        }
+
+        $role = strtolower((string) ($this->getRoleForTenant($tenant) ?? ''));
+
+        return in_array($role, ['owner', 'admin', 'agency_admin'], true);
+    }
+
+    /**
      * Set the user's role for a specific brand.
      *
      * Phase MI-1: Handles soft-deleted pivots by restoring them.

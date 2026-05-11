@@ -95,6 +95,86 @@ return [
                 'model,fashion'
             )))
         ))),
+
+        /**
+         * Vision tag sanitizer: when an asset's category matches a row's `match` rules, every string in
+         * `aliases` (after the same normalization as tags) is rejected as redundant with the category.
+         * Rows are evaluated in order; first matching row still merges only its aliases (no short-circuit).
+         * Also rejects tags equal to the normalized category name/slug and simple singular/plural variants.
+         *
+         * Extend safely: add rows to `vision_tag_category_alias_bans_append` (merged after this array)
+         * or override/replace this list in a service provider / published config.
+         */
+        'vision_tag_category_alias_bans' => [
+            [
+                'aliases' => ['logo', 'logos', 'brand mark', 'brand marks', 'logomark', 'brandmark'],
+                'match' => [
+                    'name_regex_any' => ['/\blogos?\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['photo', 'photos', 'photograph', 'photography', 'image', 'images'],
+                'match' => [
+                    'name_regex_any' => ['/\bphotography\b/iu', '/\bphotographs\b/iu', '/\bphotos\b/iu', '/\bphoto\b/iu'],
+                    'name_not_regex_any' => ['/\bphotoshop\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['render', 'renders', 'bottle render', 'product render', 'product renders'],
+                'match' => [
+                    'name_regex_any' => [
+                        '/\b(bottle|product|pack)\b.*\brender/iu',
+                        '/\brender\b.*\b(bottle|product|pack|3d|cgi)\b/iu',
+                    ],
+                ],
+            ],
+            [
+                'aliases' => ['graphic', 'graphics', 'design'],
+                'match' => [
+                    'name_regex_any' => ['/\bgraphics?\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['video', 'videos'],
+                'match' => [
+                    'name_regex_any' => ['/\bvideo\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['font', 'fonts', 'typeface', 'typefaces'],
+                'match' => [
+                    'name_regex_any' => ['/\bfonts?\b/iu', '/\btypefaces?\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['document', 'documents', 'pdf', 'pdfs'],
+                'match' => [
+                    'name_regex_any' => ['/\bdocuments?\b/iu', '/\bpdfs?\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['audio', 'sound'],
+                'match' => [
+                    'name_regex_any' => ['/\baudio\b/iu', '/\bsound\b/iu'],
+                ],
+            ],
+            [
+                'aliases' => ['source file', 'working file', 'psd', 'photoshop file'],
+                'match' => [
+                    'name_regex_any' => [
+                        '/\bpsd\b/iu',
+                        '/\bphotoshop files?\b/iu',
+                        '/\bsource files?\b/iu',
+                        '/\bworking files?\b/iu',
+                        '/\billustrator files?\b/iu',
+                        '/\bindesign files?\b/iu',
+                    ],
+                ],
+            ],
+        ],
+
+        /** Merged after `vision_tag_category_alias_bans` for tenant- or env-specific category rows. */
+        'vision_tag_category_alias_bans_append' => [],
     ],
 
     /*

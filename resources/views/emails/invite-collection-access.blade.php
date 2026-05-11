@@ -1,15 +1,19 @@
 {{-- MODE: tenant | Collection Invitation --}}
 @php
-    $logoUrl     = $brand?->logoUrlForTransactionalEmail();
-    $accentColor = $brand?->primary_color;
-    $orgName     = $brand?->name ?? $tenant?->name;
+    $logoUrl = $brand?->logoUrlForTransactionalEmail();
+    $cta = \App\Support\TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand($brand);
+    $buttonColor = $cta['primary_button_color'];
+    $barColor = $cta['card_accent_bar'];
+    $linkColor = $cta['link_accent_color'];
+    $orgName = $brand?->name ?? $tenant?->name;
 @endphp
 <x-email.layout
     title="Collection invitation"
     mode="tenant"
     :tenantName="$orgName"
     :tenantLogoUrl="$logoUrl"
-    :tenantAccentColor="$accentColor"
+    :tenantAccentColor="$barColor"
+    :tenantLinkColor="$linkColor"
     preheader="{{ $inviter->name }} invited you to view {{ $collection->name }}"
 >
 
@@ -24,8 +28,8 @@
 
     <x-email.text>Click below to accept the invitation:</x-email.text>
 
-    <x-email.button :url="$inviteUrl">View collection invitation</x-email.button>
-    <x-email.link-fallback :url="$inviteUrl" />
+    <x-email.button :url="$inviteUrl" :color="$buttonColor">View collection invitation</x-email.button>
+    <x-email.link-fallback :url="$inviteUrl" :color="$linkColor" />
 
     <x-email.text :muted="true">If you didn&rsquo;t expect this invitation, you can safely ignore this email.</x-email.text>
 

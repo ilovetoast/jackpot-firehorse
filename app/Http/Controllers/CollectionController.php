@@ -1289,7 +1289,7 @@ class CollectionController extends Controller
         $tenant = app('tenant');
         $brand = app('brand');
 
-        Gate::forUser($user)->authorize('view', $asset);
+        Gate::forUser($user)->authorize('update', $asset);
 
         if (! $tenant || ! $brand) {
             abort(403, 'Tenant or brand not resolved.');

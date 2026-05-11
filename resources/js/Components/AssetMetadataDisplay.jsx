@@ -45,16 +45,51 @@ async function parseJsonResponse(res) {
     }
 }
 
-/** Field keys rendered last (after Collection + auto/system fields) — legal / rights row near AI in drawer. */
-const PINNED_BOTTOM_METADATA_KEYS = ['photo_type', 'usage_rights', 'expiration_date']
-const PINNED_BOTTOM_METADATA_SET = new Set(PINNED_BOTTOM_METADATA_KEYS)
-
-/** After pinned legal row — inline rating / starred toggles at bottom of drawer metadata. */
-const DRAWER_QUICK_EDIT_LAST_KEYS = ['quality_rating', 'starred']
-const DRAWER_QUICK_EDIT_LAST_SET = new Set(DRAWER_QUICK_EDIT_LAST_KEYS)
+/**
+ * Lightbox + Asset Data drawer: stable section order — contextual type first (photo/audio/video/…),
+ * then user custom fields (excluding type + featured + quality), Featured (starred) + Quality, Folder summary, system-automatic fields,
+ * then Collection (when rendered inline).
+ */
+const METADATA_TOP_KEYS_ORDERED = ['starred', 'quality_rating']
+/** Primary “asset type” fields per folder; shown first. Order = display priority when multiple exist. */
+const METADATA_TYPE_KEYS_ORDERED = [
+    'photo_type',
+    'video_type',
+    'audio_type',
+    'logo_type',
+    'document_type',
+    'font_type',
+    'execution_video_type',
+    'model_3d_type',
+    'template_type',
+    'type',
+]
 
 function metadataFieldKeyLo(f) {
     return String(f?.key || f?.field_key || '').toLowerCase()
+}
+
+/** Pull fields matching ordered keys; mutates `taken` with metadata_field_id. */
+function pickFieldsByKeyOrder(sourceFields, orderedKeys, takenIds) {
+    const out = []
+    for (const key of orderedKeys) {
+        const f = sourceFields.find(
+            (x) => metadataFieldKeyLo(x) === key && !takenIds.has(x.metadata_field_id),
+        )
+        if (f) {
+            out.push(f)
+            takenIds.add(f.metadata_field_id)
+        }
+    }
+    return out
+}
+
+function sortSubsetByFieldsOrder(subset, fieldsOrderSource) {
+    return [...subset].sort(
+        (a, b) =>
+            fieldsOrderSource.findIndex((x) => x.metadata_field_id === a.metadata_field_id) -
+            fieldsOrderSource.findIndex((x) => x.metadata_field_id === b.metadata_field_id),
+    )
 }
 
 /** Tooltip shows the field’s admin-written description only (Configure in Manage → Fields). */
@@ -175,6 +210,11 @@ export default function AssetMetadataDisplay({
     onToggleFieldSaved = null,
     /** Fires with the embedded_metadata summary from /metadata/editable so parents can render an Embedded tab alongside. */
     onEmbeddedMetadataChange = null,
+    /**
+     * When set, a read-only “Folder” row is rendered after Featured/Quality and before system-automatic fields.
+     * Drawer passes the active category name.
+     */
+    folderCategorySummary = null,
 }) {
     const { auth } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
@@ -431,29 +471,44 @@ export default function AssetMetadataDisplay({
                         {(() => {
                             const filtered = fields.filter(field => !isExcludedFromGenericLoop(field))
                             const isAuto = (f) => f.readonly || f.population_mode === 'automatic'
-                            const isPinnedBottom = (f) => PINNED_BOTTOM_METADATA_SET.has(metadataFieldKeyLo(f))
-                            const isQuickEditLast = (f) =>
-                                DRAWER_QUICK_EDIT_LAST_SET.has(metadataFieldKeyLo(f))
-                            const nonAutoFields = filtered.filter(f => !isAuto(f))
-                            const nonAutoMain = nonAutoFields.filter(
-                                (f) => !isPinnedBottom(f) && !isQuickEditLast(f),
+
+                            const taken = new Set()
+                            const contextualFields = pickFieldsByKeyOrder(
+                                filtered,
+                                METADATA_TYPE_KEYS_ORDERED,
+                                taken,
                             )
-                            const nonAutoQuickEditLast = nonAutoFields
-                                .filter((f) => !isPinnedBottom(f) && isQuickEditLast(f))
-                                .sort(
-                                    (a, b) =>
-                                        DRAWER_QUICK_EDIT_LAST_KEYS.indexOf(metadataFieldKeyLo(a)) -
-                                        DRAWER_QUICK_EDIT_LAST_KEYS.indexOf(metadataFieldKeyLo(b)),
-                                )
-                            const nonAutoPinned = nonAutoFields
-                                .filter((f) => isPinnedBottom(f))
-                                .sort(
-                                    (a, b) =>
-                                        PINNED_BOTTOM_METADATA_KEYS.indexOf(metadataFieldKeyLo(a)) -
-                                        PINNED_BOTTOM_METADATA_KEYS.indexOf(metadataFieldKeyLo(b)),
-                                )
-                            const autoFields = filtered.filter(f => isAuto(f)).sort((a, b) => 0)
-                            // Order: user-managed fields (except pinned trio), Collection, system auto fields, then photo_type / usage_rights / expiration_date
+                            // Reserve Featured + Quality before building userCustomFields so they are not
+                            // listed twice (userCustom used to run before topFields populated `taken`).
+                            const topFields = pickFieldsByKeyOrder(filtered, METADATA_TOP_KEYS_ORDERED, taken)
+                            const userCustomFields = sortSubsetByFieldsOrder(
+                                filtered.filter((f) => !isAuto(f) && !taken.has(f.metadata_field_id)),
+                                fields,
+                            )
+                            const autoFields = sortSubsetByFieldsOrder(
+                                filtered.filter((f) => isAuto(f) && !taken.has(f.metadata_field_id)),
+                                fields,
+                            )
+
+                            const folderSummaryTrimmed =
+                                folderCategorySummary != null && String(folderCategorySummary).trim() !== ''
+                                    ? String(folderCategorySummary).trim()
+                                    : ''
+                            const folderCategoryRowElement =
+                                folderSummaryTrimmed && folderSummaryTrimmed !== 'No folder' ? (
+                                    <div
+                                        key="folder-category-summary"
+                                        className="flex flex-col md:flex-row md:items-start md:justify-between gap-1 md:gap-4 md:flex-nowrap"
+                                    >
+                                        <dt className="text-sm text-gray-500 mb-1 md:mb-0 md:w-32 md:flex-shrink-0 flex flex-col md:items-start">
+                                            <span>Folder</span>
+                                        </dt>
+                                        <dd className="text-sm font-semibold text-gray-900 md:flex-1 md:min-w-0 break-words">
+                                            {folderSummaryTrimmed}
+                                        </dd>
+                                    </div>
+                                ) : null
+
                             const collectionElement =
                                 omitCollectionRow
                                     ? null
@@ -780,16 +835,13 @@ export default function AssetMetadataDisplay({
                                 return [fieldElement]
                             }
 
-                            const nonAutoMainElements = nonAutoMain.flatMap(renderField)
-                            const autoElements = autoFields.flatMap(renderField)
-                            const nonAutoPinnedElements = nonAutoPinned.flatMap(renderField)
-                            const nonAutoQuickEditLastElements = nonAutoQuickEditLast.flatMap(renderField)
                             return [
-                                ...nonAutoMainElements,
+                                ...contextualFields.flatMap(renderField),
+                                ...userCustomFields.flatMap(renderField),
+                                ...topFields.flatMap(renderField),
+                                ...(folderCategoryRowElement ? [folderCategoryRowElement] : []),
+                                ...autoFields.flatMap(renderField),
                                 ...(collectionElement ? [collectionElement] : []),
-                                ...autoElements,
-                                ...nonAutoPinnedElements,
-                                ...nonAutoQuickEditLastElements,
                             ]
                         })()}
                     </dl>

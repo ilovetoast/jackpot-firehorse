@@ -23,21 +23,46 @@ class InviteMember extends BaseMailable
     protected bool $recordSendActivity = false;
 
     public $tenant;
+
     public $inviter;
+
     public $inviteUrl;
+
     public $template;
 
     /**
-     * Create a new message instance.
+     * When set (e.g. brand workspace invite), logo + CTA/bar colors use this brand instead of the tenant default.
      */
-    public function __construct(Tenant $tenant, User $inviter, string $inviteUrl)
+    public ?Brand $brandingBrand = null;
+
+    /**
+     * Create a new message instance.
+     *
+     * @param  Brand|null  $brandingBrand  Must belong to {@see $tenant}; used for transactional colors + header wordmark/logo.
+     */
+    public function __construct(Tenant $tenant, User $inviter, string $inviteUrl, ?Brand $brandingBrand = null)
     {
         $this->tenant = $tenant;
         $this->inviter = $inviter;
         $this->inviteUrl = $inviteUrl;
-        
+        $this->brandingBrand = $brandingBrand;
+
         // Load template from database
         $this->template = NotificationTemplate::getByKey('invite_member');
+    }
+
+    /**
+     * Brand to use for DB template placeholders (logo block, button/link/bar hex).
+     */
+    protected function brandForMailVisuals(): ?Brand
+    {
+        if ($this->brandingBrand && (int) $this->brandingBrand->tenant_id === (int) $this->tenant->id) {
+            return $this->brandingBrand;
+        }
+
+        return Brand::where('tenant_id', $this->tenant->id)
+            ->orderByDesc('is_default')
+            ->first();
     }
 
     /**
@@ -47,11 +72,13 @@ class InviteMember extends BaseMailable
     {
         $this->applyTenantMailBranding($this->tenant);
 
-        $subject = $this->template 
-            ? $this->template->render([
+        $subject = $this->template
+            ? $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'inviter_name' => $this->inviter->name,
-            ])['subject']
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand(
+                $this->brandForMailVisuals()
+            )))['subject']
             : "You've been invited to join {$this->tenant->name}";
 
         return new Envelope(
@@ -65,18 +92,16 @@ class InviteMember extends BaseMailable
     public function content(): Content
     {
         if ($this->template) {
-            $defaultBrand = Brand::where('tenant_id', $this->tenant->id)
-                ->orderByDesc('is_default')
-                ->first();
+            $visualBrand = $this->brandForMailVisuals();
 
-            $rendered = $this->template->render([
+            $rendered = $this->template->render(array_merge([
                 'tenant_name' => $this->tenant->name,
                 'inviter_name' => $this->inviter->name,
                 'invite_url' => $this->inviteUrl,
                 'app_name' => config('app.name'),
                 'app_url' => rtrim((string) config('app.url'), '/'),
-                'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($defaultBrand),
-            ]);
+                'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($visualBrand),
+            ], TransactionalEmailHtml::transactionalCtaPlaceholdersForBrand($visualBrand)));
 
             // If template uses Blade component syntax, we need to render it
             // For now, return as HTML string - in production you'd want to compile Blade
@@ -92,6 +117,7 @@ class InviteMember extends BaseMailable
                 'tenant' => $this->tenant,
                 'inviter' => $this->inviter,
                 'inviteUrl' => $this->inviteUrl,
+                'brandingBrand' => $this->brandForMailVisuals(),
             ],
         );
     }

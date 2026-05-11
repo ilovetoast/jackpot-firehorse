@@ -195,6 +195,7 @@ export default function MarketingHome() {
                                     'Brand research & PDF extraction',
                                     'Generative editor for images & copy',
                                     'Video insights with per-minute AI analysis',
+                                    'Audio insights — transcripts, mood, summaries',
                                 ].map((item) => (
                                     <li key={item} className="flex items-center gap-2 text-sm text-white/55">
                                         <span className="h-1 w-1 rounded-full bg-emerald-400/80" />
