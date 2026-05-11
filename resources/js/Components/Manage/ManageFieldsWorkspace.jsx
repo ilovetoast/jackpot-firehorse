@@ -171,6 +171,98 @@ function FieldValuesPreview({ field, isSystemField }) {
     return <span className="text-xs text-slate-600">—</span>
 }
 
+function EnabledFieldsSummary({
+    enabledCustomRows,
+    enabledSystemRows,
+    primaryTypeKey,
+    systemFieldCountInFolder,
+    isFieldRegistryLoading,
+    anyRowVisibilityLoading,
+    onGoToRow,
+}) {
+    const total = enabledCustomRows.length + enabledSystemRows.length
+    const titleId = 'manage-enabled-fields-summary-title'
+
+    const renderChip = (row, isSystemField) => {
+        const label = fieldTitle(row.field, primaryTypeKey)
+        return (
+            <li key={row.key}>
+                <button
+                    type="button"
+                    onClick={() => onGoToRow(row.key, isSystemField)}
+                    className="inline-flex max-w-full items-center rounded-full border border-[color:color-mix(in_srgb,var(--wb-accent)_22%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_6%,#f8fafc)] px-2.5 py-1 text-left text-xs font-medium text-slate-800 transition hover:bg-[color:color-mix(in_srgb,var(--wb-accent)_12%,#f1f5f9)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring)] focus-visible:ring-offset-2"
+                    title={`Go to ${label}`}
+                >
+                    <span className="min-w-0 truncate">{label}</span>
+                </button>
+            </li>
+        )
+    }
+
+    return (
+        <section
+            className="rounded-xl border border-slate-200/90 bg-slate-50/40 px-3 py-3 sm:px-4 sm:py-3.5"
+            aria-labelledby={titleId}
+        >
+            <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+                <h4 id={titleId} className="text-sm font-semibold text-slate-900">
+                    Enabled for this folder
+                </h4>
+                <p className="text-xs tabular-nums text-slate-600" aria-live="polite">
+                    {isFieldRegistryLoading ? (
+                        'Loading…'
+                    ) : total === 0 ? (
+                        'No fields on'
+                    ) : (
+                        <>
+                            {total} {total === 1 ? 'field' : 'fields'} on{' '}
+                            <span className="text-slate-500">
+                                ({enabledCustomRows.length} custom, {enabledSystemRows.length} system)
+                            </span>
+                            {anyRowVisibilityLoading ? (
+                                <span className="text-slate-500"> · Updating</span>
+                            ) : null}
+                        </>
+                    )}
+                </p>
+            </div>
+            {!isFieldRegistryLoading && !anyRowVisibilityLoading && total === 0 ? (
+                <p className="mt-2 text-xs leading-snug text-slate-600">
+                    Turn on fields below so they appear on upload, quick view, or filters.
+                </p>
+            ) : null}
+            {!isFieldRegistryLoading && total > 0 ? (
+                <div className="mt-2.5 space-y-2">
+                    {enabledCustomRows.length > 0 ? (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Custom</p>
+                            <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Enabled custom fields">
+                                {enabledCustomRows.map((row) => renderChip(row, false))}
+                            </ul>
+                        </div>
+                    ) : null}
+                    {enabledSystemRows.length > 0 ? (
+                        <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">System</p>
+                            <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Enabled system fields">
+                                {enabledSystemRows.map((row) => renderChip(row, true))}
+                            </ul>
+                        </div>
+                    ) : null}
+                    {!anyRowVisibilityLoading &&
+                    systemFieldCountInFolder > 0 &&
+                    enabledSystemRows.length === 0 ? (
+                        <p className="text-xs leading-snug text-slate-600">
+                            No system fields on. Open <span className="font-medium text-slate-700">Advanced fields</span>{' '}
+                            below to enable built-in fields.
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
+        </section>
+    )
+}
+
 function FieldListRow({
     field,
     isAutomated,
@@ -662,11 +754,43 @@ export default function ManageFieldsWorkspace({
         return { customRows: custom, systemRows: system }
     }, [rowsAfterFilter, tenantFieldIdSet])
 
+    const { enabledCustomRows, enabledSystemRows } = useMemo(() => {
+        const custom = []
+        const system = []
+        rowsAfterFilter.forEach((row) => {
+            if (!row.isEnabled || row.visibilityLoading) return
+            if (tenantFieldIdSet.has(row.field.id)) custom.push(row)
+            else system.push(row)
+        })
+        return { enabledCustomRows: custom, enabledSystemRows: system }
+    }, [rowsAfterFilter, tenantFieldIdSet])
+
+    const anyRowVisibilityLoading = useMemo(
+        () => rowsAfterFilter.some((r) => r.visibilityLoading),
+        [rowsAfterFilter]
+    )
+
     const advancedPanelId = useId()
     const [advancedFieldsOpen, setAdvancedFieldsOpen] = useState(false)
     useEffect(() => {
         setAdvancedFieldsOpen(false)
     }, [selectedCategoryId])
+
+    const goToFieldRow = useCallback((rowKey, isSystemRow) => {
+        if (isSystemRow) {
+            setAdvancedFieldsOpen(true)
+        }
+        const run = () => {
+            document.getElementById(`manage-field-row-${rowKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
+        if (isSystemRow) {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(run)
+            })
+        } else {
+            run()
+        }
+    }, [])
 
     const showAllFieldsOffBanner = useMemo(() => {
         if (!selectedCategoryId || isFieldRegistryLoading || fieldFilter === 'low_coverage') return false
@@ -938,6 +1062,17 @@ export default function ManageFieldsWorkspace({
                         </header>
 
                         <div className="space-y-5 px-4 py-5 sm:px-5 sm:py-6">
+                            {rowsAfterFilter.length > 0 ? (
+                                <EnabledFieldsSummary
+                                    enabledCustomRows={enabledCustomRows}
+                                    enabledSystemRows={enabledSystemRows}
+                                    primaryTypeKey={selectedCategory?.type_field?.field_key ?? null}
+                                    systemFieldCountInFolder={systemRows.length}
+                                    isFieldRegistryLoading={isFieldRegistryLoading}
+                                    anyRowVisibilityLoading={anyRowVisibilityLoading}
+                                    onGoToRow={goToFieldRow}
+                                />
+                            ) : null}
                             {selectedCategory && (canToggleEbi || canToggleAiLibRef) ? (
                                 <div className="space-y-3 rounded-xl border border-[color:color-mix(in_srgb,var(--wb-accent)_26%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_6%,white)] p-4 shadow-sm sm:p-5">
                                     {canToggleEbi ? (
@@ -1093,7 +1228,7 @@ export default function ManageFieldsWorkspace({
                                         {customRows.length > 0 ? (
                                             <ul className="space-y-2" aria-label="Custom folder fields">
                                                 {customRows.map((row) => (
-                                                    <li key={row.key}>
+                                                    <li key={row.key} id={`manage-field-row-${row.key}`}>
                                                         <FieldListRow
                                                             field={row.field}
                                                             isAutomated={row.isAutomated}
@@ -1175,8 +1310,8 @@ export default function ManageFieldsWorkspace({
                                                 >
                                                     <span>
                                                         {advancedFieldsOpen
-                                                            ? 'Hide system fields'
-                                                            : `Show ${systemRows.length} system fields`}
+                                                            ? `Hide system fields (${enabledSystemRows.length} on)`
+                                                            : `Show ${systemRows.length} system fields (${enabledSystemRows.length} on)`}
                                                     </span>
                                                     <ChevronDownIcon
                                                         className={`h-5 w-5 shrink-0 text-slate-500 transition-transform duration-200 ${
@@ -1193,7 +1328,7 @@ export default function ManageFieldsWorkspace({
                                                 >
                                                     <ul className="space-y-2" aria-label="System-managed folder fields">
                                                         {systemRows.map((row) => (
-                                                            <li key={row.key}>
+                                                            <li key={row.key} id={`manage-field-row-${row.key}`}>
                                                                 <FieldListRow
                                                                     field={row.field}
                                                                     isAutomated={row.isAutomated}
