@@ -318,6 +318,16 @@ return [
              * styles resize from that base image (see ThumbnailGenerationService::generateOfficeThumbnail).
              */
             'convert_once' => filter_var(env('OFFICE_PREVIEW_CONVERT_ONCE', 'true'), FILTER_VALIDATE_BOOL),
+            /*
+             * Extra environment variables for `soffice` headless conversion. Defaults reduce
+             * SIGABRT (Signal 6) crashes on minimal Linux workers (no GPU / no real display) by
+             * forcing the software VCL plugin and disabling OpenCL in the SAL layer.
+             * Omit a key by setting the env var to an empty string in .env if you must override.
+             */
+            'headless_extra_env' => array_filter([
+                'SAL_USE_VPLUGIN' => (string) env('OFFICE_PREVIEW_SAL_USE_VPLUGIN', 'svp'),
+                'SAL_DISABLE_OPENCL' => (string) env('OFFICE_PREVIEW_SAL_DISABLE_OPENCL', '1'),
+            ], static fn (string $v): bool => $v !== ''),
         ],
 
         /*

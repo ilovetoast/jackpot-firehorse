@@ -131,13 +131,12 @@ final class LibreOfficeDocumentPreviewService
         @mkdir($runtime, 0700, true);
 
         $profileUrl = $this->profileDirToFileUrl($profileDir);
-        // Use "-env:UserInstallation=..." (single dash). LibreOffice 7.x rejects "--env:UserInstallation"
-        // and prints "Error in option: --env:UserInstallation=..." then exits without converting.
+        $envAssignments = $this->sofficeHeadlessEnvAssignments($home, $runtime);
+        // Put -env:UserInstallation immediately after the binary (LibreOffice expects bootstrap env early).
         $cmd = sprintf(
-            'timeout %d env HOME=%s XDG_RUNTIME_DIR=%s %s --headless --nologo --norestore --nodefault -env:UserInstallation=%s --convert-to pdf --outdir %s %s 2>&1',
+            'timeout %d env %s %s -env:UserInstallation=%s --headless --nologo --norestore --nodefault --convert-to pdf --outdir %s %s 2>&1',
             $timeout,
-            escapeshellarg($home),
-            escapeshellarg($runtime),
+            $envAssignments,
             escapeshellarg($binary),
             escapeshellarg($profileUrl),
             escapeshellarg($workDir),
@@ -167,6 +166,7 @@ final class LibreOfficeDocumentPreviewService
             'work_dir' => $workDir,
             'profile_dir' => $profileDir,
             'user_installation_url' => $profileUrl,
+            'soffice_headless_env' => $envAssignments,
             'output_dir' => $workDir,
             'command' => $cmd,
             'timeout_seconds' => $timeout,
@@ -276,6 +276,48 @@ final class LibreOfficeDocumentPreviewService
         }
 
         return $base;
+    }
+
+    /**
+     * Build the `env KEY=value ...` segment for headless LibreOffice.
+     *
+     * HOME and XDG_RUNTIME_DIR isolate profile and IPC paths. Extra vars from
+     * config `assets.thumbnail.office.headless_extra_env` default to software rendering
+     * (SAL_USE_VPLUGIN=svp) and disable OpenCL, which avoids many SIGABRT crashes on workers
+     * without a GPU or real display.
+     */
+    private function sofficeHeadlessEnvAssignments(string $home, string $runtimeDir): string
+    {
+        $vars = [
+            'HOME' => $home,
+            'XDG_RUNTIME_DIR' => $runtimeDir,
+        ];
+        $extra = config('assets.thumbnail.office.headless_extra_env');
+        if (is_array($extra)) {
+            foreach ($extra as $key => $value) {
+                if (! is_string($key) || $key === '') {
+                    continue;
+                }
+                if ($key === 'HOME' || $key === 'XDG_RUNTIME_DIR') {
+                    continue;
+                }
+                if (! is_scalar($value)) {
+                    continue;
+                }
+                $s = trim((string) $value);
+                if ($s === '') {
+                    continue;
+                }
+                $vars[$key] = $s;
+            }
+        }
+
+        $parts = [];
+        foreach ($vars as $k => $v) {
+            $parts[] = $k.'='.escapeshellarg($v);
+        }
+
+        return implode(' ', $parts);
     }
 
     private function abbreviateLoOutput(string $raw): string

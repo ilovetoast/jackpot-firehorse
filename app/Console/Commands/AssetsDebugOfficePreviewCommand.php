@@ -155,6 +155,9 @@ final class AssetsDebugOfficePreviewCommand extends Command
             $binary = (string) ($loDiag['libreoffice_binary'] ?? '');
             $this->line('LibreOffice binary: '.($binary !== '' ? $binary : '(none)'));
             $this->line('LibreOffice version: '.(($lv = trim((string) ($loDiag['libreoffice_version_line'] ?? ''))) !== '' ? $lv : '(unknown)'));
+            if (! empty($loDiag['soffice_headless_env'])) {
+                $this->line('Headless env: '.(string) $loDiag['soffice_headless_env']);
+            }
             $this->line('Command: '.($loDiag['command'] ?? ''));
             $this->line('Exit code: '.(string) ($loDiag['exit_code'] ?? ''));
             $this->line('PDF exists: '.((($loDiag['pdf_exists'] ?? false) === true) ? 'yes' : 'no'));
@@ -233,6 +236,7 @@ final class AssetsDebugOfficePreviewCommand extends Command
                 'file_size_bytes' => $sizeBytes,
                 'libreoffice_binary' => $loDiag['libreoffice_binary'] ?? null,
                 'libreoffice_version_line' => $loDiag['libreoffice_version_line'] ?? null,
+                'soffice_headless_env' => $loDiag['soffice_headless_env'] ?? null,
                 'command' => $loDiag['command'] ?? null,
                 'exit_code' => $loDiag['exit_code'] ?? null,
                 'stdout' => $loDiag['stdout'] ?? null,
