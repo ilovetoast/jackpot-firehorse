@@ -45,6 +45,25 @@ final class LibreOfficeDocumentPreviewService
         return null;
     }
 
+    /**
+     * First line of `soffice --version` for diagnostics (null if binary missing or command fails).
+     */
+    public function readSofficeVersionLine(?string $binary = null): ?string
+    {
+        $binary ??= $this->findBinary();
+        if ($binary === null || ! is_executable($binary)) {
+            return null;
+        }
+        $out = [];
+        $rc = 0;
+        @exec(escapeshellarg($binary).' --version 2>&1', $out, $rc);
+        if ($rc !== 0 || $out === []) {
+            return null;
+        }
+
+        return trim((string) ($out[0] ?? '')) ?: null;
+    }
+
     public function isAvailable(): bool
     {
         return $this->findBinary() !== null
@@ -53,13 +72,12 @@ final class LibreOfficeDocumentPreviewService
     }
 
     /**
-     * Convert an Office document on disk to PDF (all sheets / pages collapsed per LibreOffice rules).
+     * Run LibreOffice headless conversion and return structured diagnostics (does not throw on conversion failure).
      *
-     * @return array{pdf_path: string, work_dir: string} Absolute paths; caller must delete {@code work_dir} when finished.
-     *
-     * @throws \RuntimeException When the binary is missing, source is too large, or conversion fails.
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
      */
-    public function convertToPdf(string $sourcePath): array
+    public function convertToPdfWithDiagnostics(string $sourcePath, array $context = [], bool $deleteWorkDirWhenUnsuccessful = true): array
     {
         if (! is_readable($sourcePath) || ! is_file($sourcePath)) {
             throw new \RuntimeException("Office source file is not readable: {$sourcePath}");
@@ -78,7 +96,7 @@ final class LibreOfficeDocumentPreviewService
             );
         }
 
-        $maxBytes = (int) config('assets.thumbnail.office.max_source_bytes', 52_428_800);
+        $maxBytes = (int) config('assets.thumbnail.office.max_source_bytes', 262_144_000);
         if ($maxBytes > 0) {
             $size = (int) filesize($sourcePath);
             if ($size > $maxBytes) {
@@ -88,9 +106,16 @@ final class LibreOfficeDocumentPreviewService
             }
         }
 
+        $memBefore = memory_get_usage(true);
         $workDir = sys_get_temp_dir().'/jp_lo_'.bin2hex(random_bytes(8));
         if (! @mkdir($workDir, 0700, true) && ! is_dir($workDir)) {
             throw new \RuntimeException("Unable to create LibreOffice work directory: {$workDir}");
+        }
+
+        $profileDir = $workDir.'/lo-user-profile';
+        if (! @mkdir($profileDir, 0700, true) && ! is_dir($profileDir)) {
+            File::deleteDirectory($workDir);
+            throw new \RuntimeException("Unable to create LibreOffice user profile directory: {$profileDir}");
         }
 
         $safeBase = $this->safeBasename($sourcePath);
@@ -105,12 +130,14 @@ final class LibreOfficeDocumentPreviewService
         $runtime = $workDir.'/xdg-run';
         @mkdir($runtime, 0700, true);
 
+        $profileUrl = $this->profileDirToFileUrl($profileDir);
         $cmd = sprintf(
-            'timeout %d env HOME=%s XDG_RUNTIME_DIR=%s %s --headless --nologo --norestore --nodefault --convert-to pdf --outdir %s %s 2>&1',
+            'timeout %d env HOME=%s XDG_RUNTIME_DIR=%s %s --headless --nologo --norestore --nodefault --env:UserInstallation=%s --convert-to pdf --outdir %s %s 2>&1',
             $timeout,
             escapeshellarg($home),
             escapeshellarg($runtime),
             escapeshellarg($binary),
+            escapeshellarg($profileUrl),
             escapeshellarg($workDir),
             escapeshellarg($localSource),
         );
@@ -118,27 +145,124 @@ final class LibreOfficeDocumentPreviewService
         $output = [];
         $exitCode = 0;
         @exec($cmd, $output, $exitCode);
-        $tail = implode("\n", array_slice($output, 0, 40));
+        $stdout = implode("\n", $output);
+        $stderr = '';
 
         $stem = pathinfo($safeBase, PATHINFO_FILENAME);
         $pdfPath = $workDir.'/'.$stem.'.pdf';
 
-        if ($exitCode !== 0 || ! is_file($pdfPath) || filesize($pdfPath) === 0) {
-            File::deleteDirectory($workDir);
-            Log::warning('[LibreOfficeDocumentPreviewService] LibreOffice conversion failed', [
-                'exit_code' => $exitCode,
-                'output_tail' => $tail,
-                'source' => $sourcePath,
-            ]);
-            throw new \RuntimeException(
-                'LibreOffice failed to produce a PDF preview. '.$this->abbreviateLoOutput($tail),
-            );
+        $dirListing = $this->safeListDirBasenames($workDir);
+        $memAfter = memory_get_usage(true);
+
+        $this->cleanupUserProfileDir($profileDir);
+
+        $pdfExists = is_file($pdfPath);
+        $pdfSize = $pdfExists ? (int) filesize($pdfPath) : null;
+        $success = $exitCode === 0 && $pdfExists && $pdfSize !== null && $pdfSize > 0;
+
+        $base = array_merge($context, [
+            'local_input_path' => $sourcePath,
+            'work_dir' => $workDir,
+            'profile_dir' => $profileDir,
+            'user_installation_url' => $profileUrl,
+            'output_dir' => $workDir,
+            'command' => $cmd,
+            'timeout_seconds' => $timeout,
+            'exit_code' => $exitCode,
+            'stdout' => $stdout,
+            'stderr' => $stderr,
+            'output_dir_files' => $dirListing,
+            'memory_bytes_before' => $memBefore,
+            'memory_bytes_after' => $memAfter,
+            'pdf_path_expected' => $pdfPath,
+            'pdf_exists' => $pdfExists,
+            'pdf_size' => $pdfSize,
+            'libreoffice_binary' => $binary,
+            'libreoffice_version_line' => $this->readSofficeVersionLine($binary),
+            'success' => $success,
+        ]);
+
+        if (! $success) {
+            $base['error_message'] = 'LibreOffice failed to produce a PDF preview. '.$this->abbreviateLoOutput($stdout);
+            Log::warning('[LibreOfficeDocumentPreviewService] LibreOffice conversion failed', $base);
+            if ($deleteWorkDirWhenUnsuccessful) {
+                try {
+                    File::deleteDirectory($workDir);
+                } catch (\Throwable) {
+                }
+            }
+            $base['pdf_path'] = null;
+
+            return $base;
+        }
+
+        Log::info('[LibreOfficeDocumentPreviewService] LibreOffice conversion succeeded', $base);
+        $base['pdf_path'] = $pdfPath;
+
+        return $base;
+    }
+
+    /**
+     * Convert an Office document on disk to PDF (all sheets / pages collapsed per LibreOffice rules).
+     *
+     * @param  array<string, mixed>  $context  Optional diagnostics: asset_id, asset_version_id, original_filename, mime_type, job_temp_dir
+     * @return array{pdf_path: string, work_dir: string} Absolute paths; caller must delete {@code work_dir} when finished.
+     *
+     * @throws \RuntimeException When the binary is missing, source is too large, or conversion fails.
+     */
+    public function convertToPdf(string $sourcePath, array $context = []): array
+    {
+        $d = $this->convertToPdfWithDiagnostics($sourcePath, $context, true);
+        if (! ($d['success'] ?? false)) {
+            throw new \RuntimeException((string) ($d['error_message'] ?? 'LibreOffice failed to produce a PDF preview.'));
         }
 
         return [
-            'pdf_path' => $pdfPath,
-            'work_dir' => $workDir,
+            'pdf_path' => (string) $d['pdf_path'],
+            'work_dir' => (string) $d['work_dir'],
         ];
+    }
+
+    private function profileDirToFileUrl(string $absoluteDir): string
+    {
+        $normalized = str_replace('\\', '/', $absoluteDir);
+        if ($normalized === '') {
+            return 'file:///';
+        }
+        if (! str_starts_with($normalized, '/')) {
+            $normalized = '/'.$normalized;
+        }
+        $segments = array_values(array_filter(explode('/', $normalized), static fn (string $s): bool => $s !== ''));
+        $encoded = array_map(static fn (string $segment): string => rawurlencode($segment), $segments);
+
+        return 'file:///'.implode('/', $encoded);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function safeListDirBasenames(string $dir): array
+    {
+        if (! is_dir($dir)) {
+            return [];
+        }
+        $names = @scandir($dir);
+        if ($names === false) {
+            return [];
+        }
+
+        return array_values(array_filter($names, static fn (string $n): bool => $n !== '.' && $n !== '..'));
+    }
+
+    private function cleanupUserProfileDir(string $profileDir): void
+    {
+        if ($profileDir !== '' && is_dir($profileDir)) {
+            try {
+                File::deleteDirectory($profileDir);
+            } catch (\Throwable) {
+                // best-effort
+            }
+        }
     }
 
     private function safeBasename(string $path): string

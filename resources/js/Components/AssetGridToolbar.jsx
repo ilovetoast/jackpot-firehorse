@@ -88,7 +88,7 @@ export default function AssetGridToolbar({
     onGridImageFitChange = null,
     /** Optional: subtle copy when many grid tiles are still on server preview pipeline */
     thumbnailPipelineSummary = null,
-    /** When set with attention > 0, "N assets need attention" scrolls to the first matching card on this page. */
+    /** When set with attention > 0, "N assets need attention" scrolls the first matching grid cell into view (scoped to the asset grid). */
     onPipelineAttentionClick = null,
 }) {
     const inertiaPage = usePage()
@@ -563,7 +563,7 @@ export default function AssetGridToolbar({
                             type="button"
                             onClick={onPipelineAttentionClick}
                             className="inline max-w-full text-left font-inherit text-inherit underline decoration-gray-400/80 underline-offset-2 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/80 focus-visible:ring-offset-1 rounded-sm"
-                            aria-label="Scroll to asset that needs attention in this grid"
+                            aria-label="Scroll to the first asset in this grid that needs attention"
                         >
                             {thumbnailPipelineSummary.attention}{' '}
                             {thumbnailPipelineSummary.attention === 1 ? 'asset needs' : 'assets need'} attention

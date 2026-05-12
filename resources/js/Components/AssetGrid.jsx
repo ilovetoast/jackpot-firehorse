@@ -42,6 +42,7 @@ import {
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
 import { dedupeAssetsById } from '../utils/assetUtils'
+import { assetNeedsThumbnailPipelineAttention } from '../utils/assetGridPipelineSummary'
 
 const MARQUEE_DRAG_THRESHOLD_PX = 5
 /** Matches Tailwind `gap-7` (1.75rem) for column width math */
@@ -416,6 +417,7 @@ export default function AssetGrid({
                 ref={(el) => setItemRef(asset.id, el)}
                 data-asset-card
                 data-asset-id={asset.id}
+                {...(assetNeedsThumbnailPipelineAttention(asset) ? { 'data-pipeline-attention': '1' } : {})}
                 className={`transition-all duration-300 ease-out ${
                     isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-2 scale-[0.98]'
                 }`}

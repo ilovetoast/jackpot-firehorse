@@ -298,8 +298,26 @@ return [
          */
         'office' => [
             'soffice_binary' => env('OFFICE_LIBREOFFICE_BINARY', ''),
-            'timeout_seconds' => (int) env('THUMBNAIL_OFFICE_TIMEOUT_SECONDS', 120),
-            'max_source_bytes' => (int) env('THUMBNAIL_OFFICE_MAX_SOURCE_BYTES', 52_428_800),
+            /*
+             * LibreOffice headless timeout (seconds). OFFICE_PREVIEW_* is the preferred env prefix;
+             * THUMBNAIL_OFFICE_TIMEOUT_SECONDS remains as a backward-compatible fallback.
+             */
+            'timeout_seconds' => (int) env(
+                'OFFICE_PREVIEW_TIMEOUT_SECONDS',
+                env('THUMBNAIL_OFFICE_TIMEOUT_SECONDS', 120)
+            ),
+            /*
+             * Max Office source size for conversion. Prefer OFFICE_PREVIEW_MAX_FILE_MB (default 250);
+             * THUMBNAIL_OFFICE_MAX_SOURCE_BYTES overrides when set (bytes, explicit).
+             */
+            'max_source_bytes' => env('THUMBNAIL_OFFICE_MAX_SOURCE_BYTES') !== null && env('THUMBNAIL_OFFICE_MAX_SOURCE_BYTES') !== ''
+                ? (int) env('THUMBNAIL_OFFICE_MAX_SOURCE_BYTES')
+                : (int) round((float) env('OFFICE_PREVIEW_MAX_FILE_MB', 250) * 1024 * 1024),
+            /*
+             * When true: one LibreOffice PDF conversion and one PDF page-1 raster per asset run; all
+             * styles resize from that base image (see ThumbnailGenerationService::generateOfficeThumbnail).
+             */
+            'convert_once' => filter_var(env('OFFICE_PREVIEW_CONVERT_ONCE', 'true'), FILTER_VALIDATE_BOOL),
         ],
 
         /*

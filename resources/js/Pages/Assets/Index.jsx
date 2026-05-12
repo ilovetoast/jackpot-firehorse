@@ -15,7 +15,10 @@ import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
-import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
+import {
+    computeThumbnailPipelineGridSummary,
+    scrollToFirstPipelineAttentionAssetInGrid,
+} from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
     revokeUploadPreviewIfServerRasterPresent,
@@ -254,9 +257,8 @@ export default function AssetsIndex({
         [safeAssetsList],
     )
     const scrollToPipelineAttentionAsset = useCallback(() => {
-        if (typeof document === 'undefined') return
-        document.querySelector('[data-pipeline-attention="1"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, [])
+        scrollToFirstPipelineAttentionAssetInGrid((assetsList || []).filter(Boolean))
+    }, [assetsList])
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array

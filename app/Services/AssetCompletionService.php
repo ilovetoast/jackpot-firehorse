@@ -5,8 +5,6 @@ namespace App\Services;
 use App\Enums\AssetStatus;
 use App\Enums\ThumbnailStatus;
 use App\Models\Asset;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Asset Completion Service
@@ -85,5 +83,51 @@ class AssetCompletionService
 
         // All criteria met
         return true;
+    }
+
+    /**
+     * Whether {@see \App\Jobs\PromoteAssetJob} may promote storage: either full completion rules, or a visible
+     * asset whose version pipeline finished, analysis completed, metadata gates passed, and thumbnails were
+     * materialized in metadata while {@see ThumbnailStatus::FAILED} reflects a derivative-only failure.
+     */
+    public function mayPromoteProcessedAsset(Asset $asset): bool
+    {
+        if ($this->meetsCompletionCriteria($asset)) {
+            return true;
+        }
+
+        $asset->loadMissing('currentVersion');
+        $version = $asset->currentVersion;
+        if ($version === null || (string) $version->pipeline_status !== 'complete') {
+            return false;
+        }
+
+        if ($asset->status !== AssetStatus::VISIBLE) {
+            return false;
+        }
+
+        if (($asset->analysis_status ?? '') !== 'complete') {
+            return false;
+        }
+
+        $metadata = $asset->metadata ?? [];
+        if (empty($metadata['ai_tagging_completed']) || empty($metadata['metadata_extracted'])) {
+            return false;
+        }
+
+        if (isset($metadata['preview_generated']) && ! $metadata['preview_generated']
+            && empty($metadata['preview_skipped'])) {
+            return false;
+        }
+
+        $thumb = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status
+            : ThumbnailStatus::tryFrom((string) ($asset->thumbnail_status ?? ''));
+
+        if ($thumb === ThumbnailStatus::FAILED && ! empty($metadata['thumbnails_generated'])) {
+            return true;
+        }
+
+        return false;
     }
 }

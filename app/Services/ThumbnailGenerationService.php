@@ -93,6 +93,21 @@ class ThumbnailGenerationService
 
     protected ?string $officeIntermediatePdfPath = null;
 
+    /**
+     * Shared page-1 raster for all Office thumbnail styles when {@see config('assets.thumbnail.office.convert_once')} is true.
+     */
+    protected ?string $officeBaseRasterPath = null;
+
+    /**
+     * When Office convert-once mode hits a hard failure, subsequent styles short-circuit without re-invoking LibreOffice or PDF raster.
+     */
+    protected ?string $officePipelineTerminalFailureMessage = null;
+
+    protected bool $officePdfConversionExplicitFailed = false;
+
+    /** @var null|string Version UUID while {@see generateThumbnails} runs (LibreOffice logging). */
+    protected ?string $thumbnailGenerationContextVersionId = null;
+
     /** @var array<string, mixed>|null First raster orientation profile for this generateThumbnails run (profiling). */
     protected ?array $rasterOrientationProfile = null;
 
@@ -462,6 +477,28 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Rasterize PDF page 1 for diagnostics (same implementation as the thumbnail pipeline).
+     *
+     * @internal {@see \App\Console\Commands\AssetsDebugOfficePreviewCommand}
+     */
+    public function diagnosticExtractPdfFirstPage(string $pdfPath): string
+    {
+        return $this->extractPdfFirstPageToTempImage($pdfPath);
+    }
+
+    /**
+     * Resize a PDF page-1 raster to a thumbnail style for diagnostics (same GD path as PDF thumbnails).
+     *
+     * @param  array<string, mixed>  $styleConfig
+     *
+     * @internal {@see \App\Console\Commands\AssetsDebugOfficePreviewCommand}
+     */
+    public function diagnosticResizePdfRasterToThumbnail(string $rasterPath, array $styleConfig, string $logSourcePath): string
+    {
+        return $this->resizeRasterToThumbnailFromPageExtract($rasterPath, $styleConfig, $logSourcePath, true);
+    }
+
+    /**
      * Align internal generation state with {@see generateThumbnails} before preferred-crop / raster steps (diagnostics only).
      */
     public function resetDiagnosticsGenerationState(string $mode): void
@@ -472,6 +509,10 @@ class ThumbnailGenerationService
         $this->preferredVideoRasterCachePath = null;
         $this->officeLibreOfficeWorkDir = null;
         $this->officeIntermediatePdfPath = null;
+        $this->officeBaseRasterPath = null;
+        $this->officePipelineTerminalFailureMessage = null;
+        $this->officePdfConversionExplicitFailed = false;
+        $this->thumbnailGenerationContextVersionId = null;
     }
 
     /**
@@ -691,6 +732,10 @@ class ThumbnailGenerationService
         $this->preferredVideoRasterCachePath = null;
         $this->officeLibreOfficeWorkDir = null;
         $this->officeIntermediatePdfPath = null;
+        $this->officeBaseRasterPath = null;
+        $this->officePipelineTerminalFailureMessage = null;
+        $this->officePdfConversionExplicitFailed = false;
+        $this->thumbnailGenerationContextVersionId = $version?->id;
 
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
@@ -1267,6 +1312,7 @@ class ThumbnailGenerationService
                 'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
                 'pdf_page_count' => $pdfPageCount,
                 'office_preview_pdf_path' => $officePreviewPdfPath,
+                'office_pdf_conversion_failed' => $this->officePdfConversionExplicitFailed,
                 'thumbnail_engine_diagnostics' => $thumbnailEngineDiagnostics,
                 'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
@@ -1419,6 +1465,14 @@ class ThumbnailGenerationService
             @unlink($this->preferredVideoRasterCachePath);
         }
         $this->preferredVideoRasterCachePath = null;
+
+        if ($this->officeBaseRasterPath !== null && is_file($this->officeBaseRasterPath)) {
+            @unlink($this->officeBaseRasterPath);
+        }
+        $this->officeBaseRasterPath = null;
+        $this->officePipelineTerminalFailureMessage = null;
+        $this->officePdfConversionExplicitFailed = false;
+        $this->thumbnailGenerationContextVersionId = null;
 
         if ($this->officeLibreOfficeWorkDir !== null && is_dir($this->officeLibreOfficeWorkDir)) {
             try {
@@ -1847,6 +1901,9 @@ class ThumbnailGenerationService
         }
 
         $styleConfig['_asset_id'] = $asset->id;
+        $styleConfig['_asset_version_id'] = $this->thumbnailGenerationContextVersionId;
+        $styleConfig['_original_filename'] = $asset->original_filename;
+        $styleConfig['_mime_type'] = $asset->mime_type;
 
         return $this->$handler($sourcePath, $styleConfig);
     }
@@ -3020,6 +3077,292 @@ class ThumbnailGenerationService
     }
 
     /**
+     * Rasterize page 1 of a local PDF to a temporary image file (PNG/JPEG per spatie/pdf-to-image).
+     *
+     * @throws \RuntimeException
+     */
+    protected function extractPdfFirstPageToTempImage(string $pdfPath): string
+    {
+        if (! is_readable($pdfPath)) {
+            throw new \RuntimeException("PDF file is not readable: {$pdfPath}");
+        }
+
+        $pdfSize = filesize($pdfPath);
+        if ($pdfSize === false) {
+            throw new \RuntimeException("Unable to read PDF file size: {$pdfPath}");
+        }
+        $maxSize = config('assets.thumbnail.pdf.max_size_bytes', 150 * 1024 * 1024);
+        if ($pdfSize > $maxSize) {
+            throw new \RuntimeException(
+                "PDF file size ({$pdfSize} bytes) exceeds maximum allowed size ({$maxSize} bytes). ".
+                'Large PDFs may cause memory exhaustion or processing timeouts.'
+            );
+        }
+
+        try {
+            $pdf = new \Spatie\PdfToImage\Pdf($pdfPath);
+        } catch (\Exception $pdfInitException) {
+            Log::error('[ThumbnailGenerationService] Failed to initialize PDF object', [
+                'source_path' => $pdfPath,
+                'error' => $pdfInitException->getMessage(),
+                'exception_class' => get_class($pdfInitException),
+            ]);
+            throw new \RuntimeException("Failed to initialize PDF: {$pdfInitException->getMessage()}", 0, $pdfInitException);
+        }
+
+        $maxPage = config('assets.thumbnail.pdf.max_page', 1);
+        $targetPage = min(1, $maxPage);
+
+        if (method_exists($pdf, 'setResolution')) {
+            $pdf->setResolution(300);
+        }
+
+        $timeout = config('assets.thumbnail.pdf.timeout_seconds', 60);
+        if (method_exists($pdf, 'setTimeout')) {
+            $pdf->setTimeout($timeout);
+        }
+
+        $requestedImagePath = tempnam(sys_get_temp_dir(), 'pdf_thumb_').'.png';
+        $tempDir = dirname($requestedImagePath);
+        if (! is_writable($tempDir)) {
+            throw new \RuntimeException("Temporary directory is not writable: {$tempDir}");
+        }
+
+        Log::info('[ThumbnailGenerationService] Attempting PDF to image conversion', [
+            'source_path' => $pdfPath,
+            'target_page' => $targetPage,
+            'requested_image_path' => $requestedImagePath,
+            'temp_dir_writable' => is_writable($tempDir),
+        ]);
+
+        $saveResult = null;
+        $actualImagePath = null;
+
+        try {
+            $saveResult = $pdf->selectPage($targetPage)
+                ->save($requestedImagePath);
+
+            if (is_array($saveResult)) {
+                if (empty($saveResult)) {
+                    throw new \RuntimeException('PDF save() returned empty array');
+                }
+                $actualImagePath = $saveResult[0];
+                Log::info('[ThumbnailGenerationService] PDF save() returned multiple paths, using first', [
+                    'returned_paths' => $saveResult,
+                    'using_path' => $actualImagePath,
+                ]);
+            } elseif (is_string($saveResult)) {
+                $actualImagePath = $saveResult;
+                if ($actualImagePath !== $requestedImagePath) {
+                    Log::info('[ThumbnailGenerationService] PDF save() returned different path than requested', [
+                        'requested_path' => $requestedImagePath,
+                        'returned_path' => $actualImagePath,
+                    ]);
+                }
+            } else {
+                throw new \RuntimeException('PDF save() returned unexpected type: '.gettype($saveResult));
+            }
+
+            Log::info('[ThumbnailGenerationService] PDF save() completed', [
+                'source_path' => $pdfPath,
+                'requested_path' => $requestedImagePath,
+                'actual_image_path' => $actualImagePath,
+                'save_result_type' => gettype($saveResult),
+            ]);
+        } catch (\Exception $saveException) {
+            Log::error('[ThumbnailGenerationService] PDF save() method threw exception', [
+                'source_path' => $pdfPath,
+                'requested_image_path' => $requestedImagePath,
+                'exception' => $saveException->getMessage(),
+                'exception_class' => get_class($saveException),
+                'trace' => $saveException->getTraceAsString(),
+            ]);
+            throw new \RuntimeException("PDF to image conversion failed: {$saveException->getMessage()}", 0, $saveException);
+        }
+
+        if (! $actualImagePath || ! file_exists($actualImagePath)) {
+            Log::error('[ThumbnailGenerationService] PDF conversion output file does not exist at returned path', [
+                'source_path' => $pdfPath,
+                'requested_path' => $requestedImagePath,
+                'actual_image_path' => $actualImagePath,
+                'temp_dir' => $tempDir,
+                'save_result' => $saveResult,
+            ]);
+            throw new \RuntimeException('PDF to image conversion failed - output file was not created at returned path');
+        }
+
+        $tempImagePath = $actualImagePath;
+        $outputFileSize = filesize($tempImagePath);
+        if ($outputFileSize === 0) {
+            Log::error('[ThumbnailGenerationService] PDF conversion output file is empty', [
+                'source_path' => $pdfPath,
+                'actual_image_path' => $tempImagePath,
+                'file_size' => $outputFileSize,
+            ]);
+            @unlink($tempImagePath);
+            throw new \RuntimeException('PDF to image conversion failed - output file is empty (0 bytes)');
+        }
+
+        Log::info('[ThumbnailGenerationService] PDF page 1 extracted to image', [
+            'source_path' => $pdfPath,
+            'temp_image_path' => $tempImagePath,
+            'image_size_bytes' => filesize($tempImagePath),
+        ]);
+
+        return $tempImagePath;
+    }
+
+    /**
+     * Resize an extracted PDF page raster (PNG/JPEG) to a configured thumbnail style.
+     *
+     * @param  string  $logSourcePath  Log context only (e.g. original PDF path).
+     */
+    protected function resizeRasterToThumbnailFromPageExtract(
+        string $rasterPath,
+        array $styleConfig,
+        string $logSourcePath,
+        bool $unlinkRasterWhenDone
+    ): string {
+        if (! extension_loaded('gd')) {
+            throw new \RuntimeException('GD extension is required for PDF thumbnail resizing');
+        }
+
+        $imageExtension = strtolower(pathinfo($rasterPath, PATHINFO_EXTENSION));
+        $sourceImage = null;
+
+        if ($imageExtension === 'png') {
+            $sourceImage = imagecreatefrompng($rasterPath);
+        } elseif (in_array($imageExtension, ['jpg', 'jpeg'], true)) {
+            $sourceImage = imagecreatefromjpeg($rasterPath);
+        } else {
+            $imageInfo = @getimagesize($rasterPath);
+            if ($imageInfo === false) {
+                throw new \RuntimeException("Failed to detect image format for extracted PDF page: {$rasterPath}");
+            }
+
+            $imageType = $imageInfo[2];
+            if ($imageType === IMAGETYPE_PNG) {
+                $sourceImage = imagecreatefrompng($rasterPath);
+            } elseif ($imageType === IMAGETYPE_JPEG) {
+                $sourceImage = imagecreatefromjpeg($rasterPath);
+            } else {
+                throw new \RuntimeException("Unsupported image format for extracted PDF page (type: {$imageType})");
+            }
+        }
+
+        if ($sourceImage === false) {
+            throw new \RuntimeException("Failed to load extracted PDF page image from: {$rasterPath}");
+        }
+
+        try {
+            $sourceWidth = imagesx($sourceImage);
+            $sourceHeight = imagesy($sourceImage);
+
+            if ($sourceWidth === 0 || $sourceHeight === 0) {
+                throw new \RuntimeException('Extracted PDF page image has invalid dimensions');
+            }
+
+            $targetWidth = $styleConfig['width'];
+            $targetHeight = $styleConfig['height'];
+            $fit = $styleConfig['fit'] ?? 'contain';
+
+            [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+                $sourceWidth,
+                $sourceHeight,
+                $targetWidth,
+                $targetHeight,
+                $fit
+            );
+
+            $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
+            if ($thumbImage === false) {
+                throw new \RuntimeException('Failed to create thumbnail image resource');
+            }
+
+            $preserveTransparency = ! empty($styleConfig['preserve_transparency']);
+            $needsDarkBackground = ! $preserveTransparency
+                && $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
+
+            if ($needsDarkBackground) {
+                $darkGray = imagecolorallocate($thumbImage, 156, 163, 175);
+                imagefill($thumbImage, 0, 0, $darkGray);
+            } else {
+                $white = imagecolorallocate($thumbImage, 255, 255, 255);
+                imagefill($thumbImage, 0, 0, $white);
+            }
+
+            $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
+            $resizeFn(
+                $thumbImage,
+                $sourceImage,
+                0, 0, 0, 0,
+                $thumbWidth,
+                $thumbHeight,
+                $sourceWidth,
+                $sourceHeight
+            );
+
+            if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                for ($i = 0; $i < 2; $i++) {
+                    imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
+                }
+            }
+
+            $outputFormat = config('assets.thumbnail.output_format', 'webp');
+            $quality = $styleConfig['quality'] ?? 85;
+
+            if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
+                if (! imagewebp($thumbImage, $thumbPath, $quality)) {
+                    throw new \RuntimeException('Failed to save PDF thumbnail image as WebP');
+                }
+            } else {
+                $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.jpg';
+                if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
+                    throw new \RuntimeException('Failed to save PDF thumbnail image as JPEG');
+                }
+            }
+
+            Log::info('[ThumbnailGenerationService] PDF thumbnail generated successfully', [
+                'source_path' => $logSourcePath,
+                'thumb_path' => $thumbPath,
+                'thumb_width' => $thumbWidth,
+                'thumb_height' => $thumbHeight,
+                'thumb_size_bytes' => filesize($thumbPath),
+            ]);
+
+            return $thumbPath;
+        } finally {
+            imagedestroy($sourceImage);
+            if (isset($thumbImage)) {
+                imagedestroy($thumbImage);
+            }
+            if ($unlinkRasterWhenDone
+                && is_file($rasterPath)
+                && $rasterPath !== $this->preferredPdfRasterCachePath
+                && $rasterPath !== $this->officeBaseRasterPath) {
+                @unlink($rasterPath);
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $styleConfig
+     * @return array<string, mixed>
+     */
+    private function officeConversionLogContext(string $localInputPath, array $styleConfig): array
+    {
+        return [
+            'asset_id' => $styleConfig['_asset_id'] ?? null,
+            'asset_version_id' => $styleConfig['_asset_version_id'] ?? $this->thumbnailGenerationContextVersionId,
+            'original_filename' => $styleConfig['_original_filename'] ?? null,
+            'mime_type' => $styleConfig['_mime_type'] ?? null,
+            'local_input_path' => $localInputPath,
+            'job_temp_dir' => sys_get_temp_dir(),
+        ];
+    }
+
+    /**
      * Generate thumbnail for PDF files (first page only).
      *
      * Uses spatie/pdf-to-image to extract page 1 of the PDF and convert it to an image.
@@ -3063,16 +3406,8 @@ class ThumbnailGenerationService
             throw new \RuntimeException("Imagick extension error: {$imagickException->getMessage()}", 0, $imagickException);
         }
 
-        // Safety guard: Check PDF file size
-        $pdfSize = filesize($sourcePath);
-        $maxSize = config('assets.thumbnail.pdf.max_size_bytes', 150 * 1024 * 1024); // 150MB default
-
-        if ($pdfSize > $maxSize) {
-            throw new \RuntimeException(
-                "PDF file size ({$pdfSize} bytes) exceeds maximum allowed size ({$maxSize} bytes). ".
-                'Large PDFs may cause memory exhaustion or processing timeouts.'
-            );
-        }
+        $pdfSize = is_file($sourcePath) ? (int) filesize($sourcePath) : 0;
+        $maxSize = config('assets.thumbnail.pdf.max_size_bytes', 150 * 1024 * 1024);
 
         Log::info('[ThumbnailGenerationService] Generating PDF thumbnail from page 1', [
             'source_path' => $sourcePath,
@@ -3082,150 +3417,7 @@ class ThumbnailGenerationService
         ]);
 
         try {
-            // Verify PDF file is readable before attempting conversion
-            if (! is_readable($sourcePath)) {
-                throw new \RuntimeException("PDF file is not readable: {$sourcePath}");
-            }
-
-            // Create PDF instance using spatie/pdf-to-image (sourcePath has .pdf extension for ImageMagick delegate)
-            try {
-                $pdf = new \Spatie\PdfToImage\Pdf($sourcePath);
-            } catch (\Exception $pdfInitException) {
-                Log::error('[ThumbnailGenerationService] Failed to initialize PDF object', [
-                    'source_path' => $sourcePath,
-                    'error' => $pdfInitException->getMessage(),
-                    'exception_class' => get_class($pdfInitException),
-                ]);
-                throw new \RuntimeException("Failed to initialize PDF: {$pdfInitException->getMessage()}", 0, $pdfInitException);
-            }
-
-            // Safety guard: Enforce page limit (always page 1)
-            // This is a hard requirement - only first page is used for thumbnails
-            $maxPage = config('assets.thumbnail.pdf.max_page', 1);
-            $targetPage = min(1, $maxPage); // Always use page 1, never exceed max_page
-
-            // Note: spatie/pdf-to-image v3.x does not provide getNumberOfPages() method
-            // We rely on the library to handle invalid page numbers gracefully
-            // If page 1 doesn't exist, the save() method will fail, which we catch below
-
-            // Set resolution to 300 DPI for high-quality rasterization before conversion
-            if (method_exists($pdf, 'setResolution')) {
-                $pdf->setResolution(300);
-            }
-
-            // Set timeout for PDF processing (prevents stuck jobs)
-            $timeout = config('assets.thumbnail.pdf.timeout_seconds', 60);
-            if (method_exists($pdf, 'setTimeout')) {
-                $pdf->setTimeout($timeout);
-            }
-
-            // Extract page 1 as image (PNG format for best quality)
-            // The PDF library will use ImageMagick to convert the PDF page to an image
-            // Note: spatie/pdf-to-image v3.x uses selectPage() and save() methods
-            // IMPORTANT: The output format may be changed by the library (e.g., .png -> .jpg)
-            // We must use the ACTUAL path returned by save(), not the requested path
-            $requestedImagePath = tempnam(sys_get_temp_dir(), 'pdf_thumb_').'.png';
-
-            // Ensure temp directory is writable
-            $tempDir = dirname($requestedImagePath);
-            if (! is_writable($tempDir)) {
-                throw new \RuntimeException("Temporary directory is not writable: {$tempDir}");
-            }
-
-            Log::info('[ThumbnailGenerationService] Attempting PDF to image conversion', [
-                'source_path' => $sourcePath,
-                'target_page' => $targetPage,
-                'requested_image_path' => $requestedImagePath,
-                'temp_dir_writable' => is_writable($tempDir),
-            ]);
-
-            $saveResult = null;
-            $actualImagePath = null;
-
-            try {
-                // Attempt conversion - save() returns path(s) or throws exception
-                // IMPORTANT: save() may return a different path than requested (e.g., .jpg instead of .png)
-                // Always use the ACTUAL returned path, not the requested path
-                $saveResult = $pdf->selectPage($targetPage)
-                    ->save($requestedImagePath);
-
-                // CRITICAL: Use the ACTUAL path returned by save(), not the requested path
-                // The library may change the extension (e.g., .png -> .jpg) or return a different path
-                if (is_array($saveResult)) {
-                    // Multiple pages returned - use first one
-                    if (empty($saveResult)) {
-                        throw new \RuntimeException('PDF save() returned empty array');
-                    }
-                    $actualImagePath = $saveResult[0];
-                    Log::info('[ThumbnailGenerationService] PDF save() returned multiple paths, using first', [
-                        'returned_paths' => $saveResult,
-                        'using_path' => $actualImagePath,
-                    ]);
-                } elseif (is_string($saveResult)) {
-                    // Single path returned - use it (may differ from requested path)
-                    $actualImagePath = $saveResult;
-                    if ($actualImagePath !== $requestedImagePath) {
-                        Log::info('[ThumbnailGenerationService] PDF save() returned different path than requested', [
-                            'requested_path' => $requestedImagePath,
-                            'returned_path' => $actualImagePath,
-                        ]);
-                    }
-                } else {
-                    throw new \RuntimeException('PDF save() returned unexpected type: '.gettype($saveResult));
-                }
-
-                Log::info('[ThumbnailGenerationService] PDF save() completed', [
-                    'source_path' => $sourcePath,
-                    'requested_path' => $requestedImagePath,
-                    'actual_image_path' => $actualImagePath,
-                    'save_result_type' => gettype($saveResult),
-                ]);
-            } catch (\Exception $saveException) {
-                Log::error('[ThumbnailGenerationService] PDF save() method threw exception', [
-                    'source_path' => $sourcePath,
-                    'requested_image_path' => $requestedImagePath,
-                    'exception' => $saveException->getMessage(),
-                    'exception_class' => get_class($saveException),
-                    'trace' => $saveException->getTraceAsString(),
-                ]);
-                throw new \RuntimeException("PDF to image conversion failed: {$saveException->getMessage()}", 0, $saveException);
-            }
-
-            // Verify the image was created successfully using the ACTUAL returned path
-            // Check immediately after save() call
-            if (! $actualImagePath || ! file_exists($actualImagePath)) {
-                Log::error('[ThumbnailGenerationService] PDF conversion output file does not exist at returned path', [
-                    'source_path' => $sourcePath,
-                    'requested_path' => $requestedImagePath,
-                    'actual_image_path' => $actualImagePath,
-                    'temp_dir' => $tempDir,
-                    'temp_dir_exists' => is_dir($tempDir),
-                    'temp_dir_writable' => is_writable($tempDir),
-                    'save_result' => $saveResult,
-                ]);
-                throw new \RuntimeException('PDF to image conversion failed - output file was not created at returned path');
-            }
-
-            // Use the actual path for the rest of the processing
-            $tempImagePath = $actualImagePath;
-
-            $outputFileSize = filesize($tempImagePath);
-            if ($outputFileSize === 0) {
-                Log::error('[ThumbnailGenerationService] PDF conversion output file is empty', [
-                    'source_path' => $sourcePath,
-                    'actual_image_path' => $tempImagePath,
-                    'file_size' => $outputFileSize,
-                ]);
-                // Clean up empty file
-                @unlink($tempImagePath);
-                throw new \RuntimeException('PDF to image conversion failed - output file is empty (0 bytes)');
-            }
-
-            Log::info('[ThumbnailGenerationService] PDF page 1 extracted to image', [
-                'source_path' => $sourcePath,
-                'temp_image_path' => $tempImagePath,
-                'image_size_bytes' => filesize($tempImagePath),
-            ]);
+            $tempImagePath = $this->extractPdfFirstPageToTempImage($sourcePath);
 
             if ($this->generationMode === ThumbnailMode::Preferred->value) {
                 if ($this->preferredPdfRasterCachePath !== null) {
@@ -3242,143 +3434,7 @@ class ThumbnailGenerationService
                 }
             }
 
-            // Resize the extracted image to match thumbnail style dimensions
-            // Use GD library to resize (same as image thumbnails for consistency)
-            if (! extension_loaded('gd')) {
-                throw new \RuntimeException('GD extension is required for PDF thumbnail resizing');
-            }
-
-            // Load the extracted PDF page image
-            // The library may return PNG or JPG, so detect format from file extension
-            $imageExtension = strtolower(pathinfo($tempImagePath, PATHINFO_EXTENSION));
-            $sourceImage = null;
-
-            if ($imageExtension === 'png') {
-                $sourceImage = imagecreatefrompng($tempImagePath);
-            } elseif (in_array($imageExtension, ['jpg', 'jpeg'])) {
-                $sourceImage = imagecreatefromjpeg($tempImagePath);
-            } else {
-                // Try to auto-detect format
-                $imageInfo = @getimagesize($tempImagePath);
-                if ($imageInfo === false) {
-                    throw new \RuntimeException("Failed to detect image format for extracted PDF page: {$tempImagePath}");
-                }
-
-                $imageType = $imageInfo[2];
-                if ($imageType === IMAGETYPE_PNG) {
-                    $sourceImage = imagecreatefrompng($tempImagePath);
-                } elseif ($imageType === IMAGETYPE_JPEG) {
-                    $sourceImage = imagecreatefromjpeg($tempImagePath);
-                } else {
-                    throw new \RuntimeException("Unsupported image format for extracted PDF page (type: {$imageType})");
-                }
-            }
-
-            if ($sourceImage === false) {
-                throw new \RuntimeException("Failed to load extracted PDF page image from: {$tempImagePath}");
-            }
-
-            try {
-                // Get source image dimensions
-                $sourceWidth = imagesx($sourceImage);
-                $sourceHeight = imagesy($sourceImage);
-
-                if ($sourceWidth === 0 || $sourceHeight === 0) {
-                    throw new \RuntimeException('Extracted PDF page image has invalid dimensions');
-                }
-
-                // Calculate thumbnail dimensions (maintain aspect ratio)
-                $targetWidth = $styleConfig['width'];
-                $targetHeight = $styleConfig['height'];
-                $fit = $styleConfig['fit'] ?? 'contain';
-
-                [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
-                    $sourceWidth,
-                    $sourceHeight,
-                    $targetWidth,
-                    $targetHeight,
-                    $fit
-                );
-
-                // Create thumbnail image
-                $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
-                if ($thumbImage === false) {
-                    throw new \RuntimeException('Failed to create thumbnail image resource');
-                }
-
-                // Check if extracted PDF page has white content
-                // When preserve_transparency: skip gray fill for logo display
-                $preserveTransparency = ! empty($styleConfig['preserve_transparency']);
-                $needsDarkBackground = ! $preserveTransparency
-                    && $this->hasWhiteContentOnTransparent($sourceImage, $sourceWidth, $sourceHeight);
-
-                // Use darker background if white content detected, otherwise white
-                if ($needsDarkBackground) {
-                    // Use gray-400 (#9CA3AF) for strong contrast with white logos
-                    $darkGray = imagecolorallocate($thumbImage, 156, 163, 175);
-                    imagefill($thumbImage, 0, 0, $darkGray);
-                } else {
-                    // Fill with white background (PDFs may have transparency)
-                    $white = imagecolorallocate($thumbImage, 255, 255, 255);
-                    imagefill($thumbImage, 0, 0, $white);
-                }
-
-                // Resize image — use nearest-neighbor for small sources (icons, favicons) for crisp upscaling
-                $resizeFn = $this->isSmallSource($sourceWidth, $sourceHeight) ? 'imagecopyresized' : 'imagecopyresampled';
-                $resizeFn(
-                    $thumbImage,
-                    $sourceImage,
-                    0, 0, 0, 0,
-                    $thumbWidth,
-                    $thumbHeight,
-                    $sourceWidth,
-                    $sourceHeight
-                );
-
-                // Apply blur for preview thumbnails (LQIP effect)
-                if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
-                    for ($i = 0; $i < 2; $i++) {
-                        imagefilter($thumbImage, IMG_FILTER_GAUSSIAN_BLUR);
-                    }
-                }
-
-                // Determine output format based on config (default to WebP for better compression)
-                $outputFormat = config('assets.thumbnail.output_format', 'webp'); // 'webp' or 'jpeg'
-                $quality = $styleConfig['quality'] ?? 85;
-
-                // Save thumbnail to temporary file
-                if ($outputFormat === 'webp' && function_exists('imagewebp')) {
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.webp';
-                    if (! imagewebp($thumbImage, $thumbPath, $quality)) {
-                        throw new \RuntimeException('Failed to save PDF thumbnail image as WebP');
-                    }
-                } else {
-                    // Fallback to JPEG if WebP not available or not configured
-                    $thumbPath = tempnam(sys_get_temp_dir(), 'thumb_gen_').'.jpg';
-                    if (! imagejpeg($thumbImage, $thumbPath, $quality)) {
-                        throw new \RuntimeException('Failed to save PDF thumbnail image as JPEG');
-                    }
-                }
-
-                Log::info('[ThumbnailGenerationService] PDF thumbnail generated successfully', [
-                    'source_path' => $sourcePath,
-                    'thumb_path' => $thumbPath,
-                    'thumb_width' => $thumbWidth,
-                    'thumb_height' => $thumbHeight,
-                    'thumb_size_bytes' => filesize($thumbPath),
-                ]);
-
-                return $thumbPath;
-            } finally {
-                imagedestroy($sourceImage);
-                if (isset($thumbImage)) {
-                    imagedestroy($thumbImage);
-                }
-                // Clean up temporary extracted image (retain shared preferred-mode cache file)
-                if (file_exists($tempImagePath) && $tempImagePath !== $this->preferredPdfRasterCachePath) {
-                    @unlink($tempImagePath);
-                }
-            }
+            return $this->resizeRasterToThumbnailFromPageExtract($tempImagePath, $styleConfig, $sourcePath, true);
         } catch (\Spatie\PdfToImage\Exceptions\PdfDoesNotExist $e) {
             // User-friendly error message
             throw new \RuntimeException('The PDF file could not be found or accessed.', 0, $e);
@@ -3798,8 +3854,9 @@ class ThumbnailGenerationService
     /**
      * Generate thumbnail for Office files (Word, Excel, PowerPoint).
      *
-     * Pipeline: LibreOffice headless converts the document to PDF once per {@see generateThumbnails}
-     * run, then {@see generatePdfThumbnail} rasterizes page 1 for each style (shared raster cache in preferred mode).
+     * Default pipeline ({@see config('assets.thumbnail.office.convert_once')}): LibreOffice converts to PDF once,
+     * page 1 is rasterized once, then each style is produced via GD resize from that base image (no repeated soffice).
+     * When convert_once is false, delegates to {@see generatePdfThumbnail} per style (legacy; more LibreOffice stress).
      *
      * @return string Path to generated thumbnail image (WebP/JPEG per config)
      *
@@ -3812,14 +3869,64 @@ class ThumbnailGenerationService
         }
 
         $converter = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
+        $convertOnce = (bool) config('assets.thumbnail.office.convert_once', true);
 
-        if ($this->officeIntermediatePdfPath === null || ! is_file($this->officeIntermediatePdfPath)) {
-            $result = $converter->convertToPdf($sourcePath);
-            $this->officeLibreOfficeWorkDir = $result['work_dir'];
-            $this->officeIntermediatePdfPath = $result['pdf_path'];
+        if (! $convertOnce) {
+            if ($this->officeIntermediatePdfPath === null || ! is_file($this->officeIntermediatePdfPath)) {
+                $result = $converter->convertToPdf($sourcePath, $this->officeConversionLogContext($sourcePath, $styleConfig));
+                $this->officeLibreOfficeWorkDir = $result['work_dir'];
+                $this->officeIntermediatePdfPath = $result['pdf_path'];
+            }
+
+            return $this->generatePdfThumbnail($this->officeIntermediatePdfPath, $styleConfig);
         }
 
-        return $this->generatePdfThumbnail($this->officeIntermediatePdfPath, $styleConfig);
+        if ($this->officePipelineTerminalFailureMessage !== null) {
+            throw new \RuntimeException($this->officePipelineTerminalFailureMessage);
+        }
+
+        try {
+            if ($this->officeIntermediatePdfPath === null || ! is_file($this->officeIntermediatePdfPath)) {
+                $result = $converter->convertToPdf($sourcePath, $this->officeConversionLogContext($sourcePath, $styleConfig));
+                $this->officeLibreOfficeWorkDir = $result['work_dir'];
+                $this->officeIntermediatePdfPath = $result['pdf_path'];
+            }
+        } catch (\Throwable $e) {
+            $this->officePdfConversionExplicitFailed = true;
+            $this->officePipelineTerminalFailureMessage = $e->getMessage();
+            throw $e;
+        }
+
+        try {
+            if ($this->officeBaseRasterPath === null || ! is_file($this->officeBaseRasterPath)) {
+                $raster = $this->extractPdfFirstPageToTempImage($this->officeIntermediatePdfPath);
+                if ($this->generationMode === ThumbnailMode::Preferred->value) {
+                    if ($this->preferredPdfRasterCachePath !== null) {
+                        @unlink($raster);
+                        $raster = $this->copyRasterToTemp($this->preferredPdfRasterCachePath);
+                    } else {
+                        $cropResult = $this->applyPreferredSmartOrPrintCrop($raster);
+                        $this->preferredCropSummary = $cropResult;
+                        if (($cropResult['path'] ?? $raster) !== $raster && is_file((string) $cropResult['path'])) {
+                            @unlink($raster);
+                            $raster = $cropResult['path'];
+                        }
+                        $this->preferredPdfRasterCachePath = $raster;
+                    }
+                }
+                $this->officeBaseRasterPath = $raster;
+            }
+
+            return $this->resizeRasterToThumbnailFromPageExtract(
+                $this->officeBaseRasterPath,
+                $styleConfig,
+                $this->officeIntermediatePdfPath,
+                false
+            );
+        } catch (\Throwable $e) {
+            $this->officePipelineTerminalFailureMessage ??= $e->getMessage();
+            throw $e;
+        }
     }
 
     /**

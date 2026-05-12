@@ -22,7 +22,10 @@ import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
-import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
+import {
+    computeThumbnailPipelineGridSummary,
+    scrollToFirstPipelineAttentionAssetInGrid,
+} from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
     revokeUploadPreviewIfServerRasterPresent,
@@ -185,9 +188,8 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
         [safeAssetsList],
     )
     const scrollToPipelineAttentionAsset = useCallback(() => {
-        if (typeof document === 'undefined') return
-        document.querySelector('[data-pipeline-attention="1"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, [])
+        scrollToFirstPipelineAttentionAssetInGrid((assetsList || []).filter(Boolean))
+    }, [assetsList])
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array

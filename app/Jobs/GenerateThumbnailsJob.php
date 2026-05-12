@@ -890,13 +890,27 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // Clear thumbnail_started_at when failed (no longer needed)
                 // Record failure: version gets metadata; asset gets status + merged engine diagnostics
                 $assetMetaMerged = array_merge($asset->metadata ?? [], $enginePatch);
+                $officeTerminalPreviewPatch = [];
+                if ($isOffice && ($thumbnailGenResult['office_pdf_conversion_failed'] ?? false)) {
+                    $officeTerminalPreviewPatch = [
+                        'preview_skipped' => true,
+                        'preview_skipped_reason' => 'office_pdf_conversion_failed',
+                    ];
+                    $snippet = (string) ($enginePatch['thumbnail_engine_error_summary'] ?? '');
+                    if ($snippet !== '') {
+                        $officeTerminalPreviewPatch['office_thumbnail_conversion_summary'] = \Illuminate\Support\Str::limit($snippet, 500);
+                    }
+                }
+                if ($officeTerminalPreviewPatch !== []) {
+                    $assetMetaMerged = array_merge($assetMetaMerged, $officeTerminalPreviewPatch);
+                }
                 if ($version) {
                     $version->update([
                         'metadata' => array_merge($version->metadata ?? [], [
                             'thumbnail_generation_failed' => true,
                             'thumbnail_generation_failed_at' => now()->toIso8601String(),
                             'thumbnail_generation_error' => $errorMessage,
-                        ], $enginePatch),
+                        ], $enginePatch, $officeTerminalPreviewPatch),
                         'pipeline_status' => 'complete',
                     ]);
                 } else {

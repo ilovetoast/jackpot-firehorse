@@ -36,7 +36,6 @@ import {
     subscribeUploadPreviewRegistry,
 } from '../utils/uploadPreviewRegistry'
 import { getAssetCardVisualState } from '../utils/assetCardVisualState'
-import { assetNeedsThumbnailPipelineAttention } from '../utils/assetGridPipelineSummary'
 
 /** Grid video tile: same m:ss (or h:mm:ss) chip as {@link AudioCardVisual} duration overlay. */
 function formatVideoDurationForCard(seconds) {
@@ -671,7 +670,6 @@ export default function AssetCard({
             onMouseLeave={() => setIsCardHovering(false)}
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
-            {...(assetNeedsThumbnailPipelineAttention(asset) ? { 'data-pipeline-attention': '1' } : {})}
             className={`group relative select-none ${cardBgClass} rounded-2xl transition-all duration-200 cursor-pointer overflow-visible flex flex-col ${
                 !isGuidelines && !isCinematic ? '' : isGuidelines || showOuterCinematicChrome ? `border ${cardBorderClass} ${cardShadowClass}` : ''
             }`}

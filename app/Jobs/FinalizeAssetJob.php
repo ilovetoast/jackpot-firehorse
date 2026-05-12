@@ -180,7 +180,7 @@ class FinalizeAssetJob implements ShouldQueue
         if ($currentVersion) {
             $finalizeContext['version_id'] = $currentVersion->id;
             $finalizeContext['version_pipeline_status'] = $currentVersion->pipeline_status;
-            $finalizeContext['note'] = 'Version pipeline row is complete; asset thumbnail_status may still be failed — PromoteAssetJob waits for COMPLETED or SKIPPED (see AssetCompletionService).';
+            $finalizeContext['note'] = 'Version pipeline row is complete; asset thumbnail_status may still be failed — PromoteAssetJob uses AssetCompletionService::mayPromoteProcessedAsset() (relaxed when thumbnails_generated is set).';
         }
         Log::info('[FinalizeAssetJob] Asset pipeline finalized', $finalizeContext);
         \App\Services\UploadDiagnosticLogger::jobComplete('FinalizeAssetJob', $asset->id);

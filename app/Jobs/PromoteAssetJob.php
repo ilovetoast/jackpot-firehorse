@@ -104,13 +104,13 @@ class PromoteAssetJob implements ShouldQueue
         // Only promote assets with completed processing pipeline
         // Check processing completion state, not status (status is visibility only)
         $completionService = app(\App\Services\AssetCompletionService::class);
-        if (! $completionService->isComplete($asset)) {
+        if (! $completionService->mayPromoteProcessedAsset($asset)) {
             Log::debug('Asset promotion skipped - asset processing not completed yet', [
                 'asset_id' => $asset->id,
                 'visibility_status' => $asset->status->value,
                 'thumbnail_status' => $asset->thumbnail_status?->value ?? (string) $asset->thumbnail_status,
                 'analysis_status' => $asset->analysis_status,
-                'reason' => 'AssetCompletionService::isComplete() is false (e.g. thumbnail_status must be completed or skipped, not failed/processing)',
+                'reason' => 'AssetCompletionService::mayPromoteProcessedAsset() is false (see isComplete + version-pipeline relaxed thumbnail rule)',
             ]);
             \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'processing_not_complete');
 
