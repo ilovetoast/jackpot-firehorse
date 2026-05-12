@@ -319,6 +319,16 @@ return [
              */
             'convert_once' => filter_var(env('OFFICE_PREVIEW_CONVERT_ONCE', 'true'), FILTER_VALIDATE_BOOL),
             /*
+             * Wrap LibreOffice in `xvfb-run` when available (or when forced). Many headless hosts
+             * still abort (Signal 6) during Impress PDF export without a virtual X server even with
+             * SAL_USE_VPLUGIN=svp. Values: auto | true | false (see LibreOfficeDocumentPreviewService).
+             */
+            'use_xvfb' => strtolower(trim((string) env('OFFICE_PREVIEW_USE_XVFB', 'auto'))),
+            /** Optional explicit path to `xvfb-run` when not on PATH. */
+            'xvfb_run_binary' => env('OFFICE_PREVIEW_XVFB_RUN_BINARY', ''),
+            /** Passed to `xvfb-run -s` (quoted as one argument). */
+            'xvfb_server_args' => (string) env('OFFICE_PREVIEW_XVFB_SERVER_ARGS', '-screen 0 1280x1024x24'),
+            /*
              * Extra environment variables for `soffice` headless conversion. Defaults reduce
              * SIGABRT (Signal 6) crashes on minimal Linux workers (no GPU / no real display) by
              * forcing the software VCL plugin and disabling OpenCL in the SAL layer.
@@ -327,6 +337,7 @@ return [
             'headless_extra_env' => array_filter([
                 'SAL_USE_VPLUGIN' => (string) env('OFFICE_PREVIEW_SAL_USE_VPLUGIN', 'svp'),
                 'SAL_DISABLE_OPENCL' => (string) env('OFFICE_PREVIEW_SAL_DISABLE_OPENCL', '1'),
+                'SAL_DISABLE_OPENGL' => (string) env('OFFICE_PREVIEW_SAL_DISABLE_OPENGL', '1'),
             ], static fn (string $v): bool => $v !== ''),
         ],
 

@@ -133,15 +133,16 @@ final class LibreOfficeDocumentPreviewService
         $profileUrl = $this->profileDirToFileUrl($profileDir);
         $envAssignments = $this->sofficeHeadlessEnvAssignments($home, $runtime);
         // Put -env:UserInstallation immediately after the binary (LibreOffice expects bootstrap env early).
-        $cmd = sprintf(
-            'timeout %d env %s %s -env:UserInstallation=%s --headless --nologo --norestore --nodefault --convert-to pdf --outdir %s %s 2>&1',
-            $timeout,
+        $sofficeInvocation = sprintf(
+            'env %s %s -env:UserInstallation=%s --headless --nologo --norestore --nodefault --convert-to pdf --outdir %s %s',
             $envAssignments,
             escapeshellarg($binary),
             escapeshellarg($profileUrl),
             escapeshellarg($workDir),
             escapeshellarg($localSource),
         );
+
+        [$cmd, $xvfbUsed, $xvfbBinary] = $this->wrapSofficeCommandWithTimeout($timeout, $sofficeInvocation);
 
         $output = [];
         $exitCode = 0;
@@ -167,6 +168,8 @@ final class LibreOfficeDocumentPreviewService
             'profile_dir' => $profileDir,
             'user_installation_url' => $profileUrl,
             'soffice_headless_env' => $envAssignments,
+            'xvfb_used' => $xvfbUsed,
+            'xvfb_binary' => $xvfbBinary,
             'output_dir' => $workDir,
             'command' => $cmd,
             'timeout_seconds' => $timeout,
@@ -276,6 +279,79 @@ final class LibreOfficeDocumentPreviewService
         }
 
         return $base;
+    }
+
+    /**
+     * @return array{0: string, 1: bool, 2: string|null} Shell command, whether xvfb-run wrapped it, xvfb path when used
+     */
+    private function wrapSofficeCommandWithTimeout(int $timeout, string $sofficeInvocation): array
+    {
+        $mode = $this->resolveXvfbMode();
+        $xvfbPath = $this->findXvfbRunBinary();
+        if ($mode === 'required' && $xvfbPath === null) {
+            throw new \RuntimeException(
+                'Office PDF conversion requires xvfb-run (OFFICE_PREVIEW_USE_XVFB is enabled) but it was not found. Install the `xvfb` package on workers (see docs/environments/PRODUCTION_WORKER_SOFTWARE.md).',
+            );
+        }
+        $useWrap = ($mode === 'required') || ($mode === 'auto' && $xvfbPath !== null);
+        if ($useWrap && $xvfbPath !== null) {
+            $screenSpec = trim((string) config('assets.thumbnail.office.xvfb_server_args', '-screen 0 1280x1024x24'));
+            if ($screenSpec === '') {
+                $screenSpec = '-screen 0 1280x1024x24';
+            }
+
+            return [
+                sprintf(
+                    'timeout %d %s -a -s %s %s 2>&1',
+                    $timeout,
+                    escapeshellarg($xvfbPath),
+                    escapeshellarg($screenSpec),
+                    $sofficeInvocation
+                ),
+                true,
+                $xvfbPath,
+            ];
+        }
+
+        return [
+            sprintf('timeout %d %s 2>&1', $timeout, $sofficeInvocation),
+            false,
+            null,
+        ];
+    }
+
+    private function resolveXvfbMode(): string
+    {
+        $raw = strtolower(trim((string) config('assets.thumbnail.office.use_xvfb', 'auto')));
+        if (in_array($raw, ['1', 'true', 'yes', 'on', 'required', 'force'], true)) {
+            return 'required';
+        }
+        if (in_array($raw, ['0', 'false', 'no', 'off', 'none', 'disabled'], true)) {
+            return 'off';
+        }
+
+        return 'auto';
+    }
+
+    private function findXvfbRunBinary(): ?string
+    {
+        $configured = config('assets.thumbnail.office.xvfb_run_binary');
+        if (is_string($configured) && $configured !== '' && is_executable($configured)) {
+            return $configured;
+        }
+        foreach (['/usr/bin/xvfb-run', '/bin/xvfb-run'] as $path) {
+            if (is_file($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+        $out = [];
+        $rc = 0;
+        @exec('command -v xvfb-run 2>/dev/null', $out, $rc);
+        if ($rc === 0 && ! empty($out[0]) && is_executable($out[0])) {
+            return $out[0];
+        }
+
+        return null;
     }
 
     /**

@@ -158,6 +158,9 @@ final class AssetsDebugOfficePreviewCommand extends Command
             if (! empty($loDiag['soffice_headless_env'])) {
                 $this->line('Headless env: '.(string) $loDiag['soffice_headless_env']);
             }
+            $xvfbUsed = ($loDiag['xvfb_used'] ?? false) === true;
+            $xvfbBin = trim((string) ($loDiag['xvfb_binary'] ?? ''));
+            $this->line('xvfb-run: '.($xvfbUsed ? 'yes'.($xvfbBin !== '' ? ' ('.$xvfbBin.')' : '') : 'no'));
             $this->line('Command: '.($loDiag['command'] ?? ''));
             $this->line('Exit code: '.(string) ($loDiag['exit_code'] ?? ''));
             $this->line('PDF exists: '.((($loDiag['pdf_exists'] ?? false) === true) ? 'yes' : 'no'));
@@ -237,6 +240,8 @@ final class AssetsDebugOfficePreviewCommand extends Command
                 'libreoffice_binary' => $loDiag['libreoffice_binary'] ?? null,
                 'libreoffice_version_line' => $loDiag['libreoffice_version_line'] ?? null,
                 'soffice_headless_env' => $loDiag['soffice_headless_env'] ?? null,
+                'xvfb_used' => $loDiag['xvfb_used'] ?? null,
+                'xvfb_binary' => $loDiag['xvfb_binary'] ?? null,
                 'command' => $loDiag['command'] ?? null,
                 'exit_code' => $loDiag['exit_code'] ?? null,
                 'stdout' => $loDiag['stdout'] ?? null,

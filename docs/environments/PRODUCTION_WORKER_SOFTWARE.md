@@ -142,6 +142,7 @@ Thumbnails and grid previews for **Office** uploads use **LibreOffice** in headl
 | Package | Purpose |
 |---------|---------|
 | **libreoffice-nogui** | Provides `soffice` for `--headless --convert-to pdf` without a desktop stack |
+| **xvfb** (recommended when Signal 6 persists) | Supplies **`xvfb-run`** so the app can wrap **`soffice`** with a virtual X display (`OFFICE_PREVIEW_USE_XVFB`, default `auto`) |
 
 **Basic font pack (recommended):** Minimal worker/container images often ship without fonts referenced by Office and PDF pipelines. Install a small set of common families so substitutions and missing-glyph boxes are less likely:
 
@@ -159,7 +160,7 @@ command -v soffice && soffice --version
 
 If `soffice` is missing, the app **skips** Office thumbnails (placeholder UX) and records a **system incident** on the admin reliability dashboard so operators can install the package.
 
-**Headless crashes (exit 134 / “Fatal exception: Signal 6”):** On minimal servers (no GPU, no X11), LibreOffice may abort while loading Impress/Draw backends. The app sets **`SAL_USE_VPLUGIN=svp`** (software VCL) and **`SAL_DISABLE_OPENCL=1`** for conversions by default (see `config/assets.php` → `assets.thumbnail.office.headless_extra_env`). Override with **`OFFICE_PREVIEW_SAL_USE_VPLUGIN`** / **`OFFICE_PREVIEW_SAL_DISABLE_OPENCL`** in `.env` if needed. If conversion still aborts, install **`xvfb`** and run conversions under **`xvfb-run -a`** (document in your worker image — not wired in PHP by default).
+**Headless crashes (exit 134 / “Fatal exception: Signal 6”):** On minimal servers (no GPU, no X11), LibreOffice may abort while loading Impress/Draw backends. The app sets **`SAL_USE_VPLUGIN=svp`** (software VCL), **`SAL_DISABLE_OPENCL=1`**, and **`SAL_DISABLE_OPENGL=1`** for conversions by default (see `config/assets.php` → `assets.thumbnail.office.headless_extra_env`). Override with **`OFFICE_PREVIEW_SAL_*`** env vars in `.env` if needed. If conversion still aborts, install **`xvfb`** (`apt install xvfb`) so **`xvfb-run`** is available: with **`OFFICE_PREVIEW_USE_XVFB=auto`** (default), the worker wraps **`soffice`** in **`xvfb-run -a`** when that binary exists; use **`true`** to require it (conversion fails fast if missing) or **`false`** to never wrap.
 
 ### Retrofit (SVG thumbnails missing)
 

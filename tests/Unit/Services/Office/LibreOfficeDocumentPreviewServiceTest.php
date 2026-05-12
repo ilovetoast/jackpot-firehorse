@@ -74,7 +74,10 @@ final class LibreOfficeDocumentPreviewServiceTest extends TestCase
         file_put_contents($src, 'x');
 
         try {
-            config(['assets.thumbnail.office.soffice_binary' => $soffice]);
+            config([
+                'assets.thumbnail.office.soffice_binary' => $soffice,
+                'assets.thumbnail.office.use_xvfb' => 'false',
+            ]);
             $svc = app(LibreOfficeDocumentPreviewService::class);
             try {
                 $svc->convertToPdf($src, ['asset_id' => 'asset-1', 'asset_version_id' => 'ver-1']);
@@ -90,7 +93,10 @@ final class LibreOfficeDocumentPreviewServiceTest extends TestCase
             @unlink($soffice);
             @unlink($argfile);
             $this->recursiveDelete($dir);
-            config(['assets.thumbnail.office.soffice_binary' => '']);
+            config([
+                'assets.thumbnail.office.soffice_binary' => '',
+                'assets.thumbnail.office.use_xvfb' => 'auto',
+            ]);
         }
     }
 
