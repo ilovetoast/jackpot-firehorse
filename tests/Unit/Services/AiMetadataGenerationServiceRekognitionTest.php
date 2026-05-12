@@ -231,6 +231,7 @@ class AiMetadataGenerationServiceRekognitionTest extends TestCase
 
         $this->assertSame(0, $results['tags_created']);
         $this->assertSame('attempted_empty', $results['ai_tag_inference_status']);
+        $this->assertStringStartsWith('rekognition_error:', (string) ($results['ai_tag_inference_detail'] ?? ''));
 
         $run = DB::table('ai_agent_runs')
             ->where('agent_id', 'metadata_image_tags_rekognition')

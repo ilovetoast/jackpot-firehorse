@@ -169,7 +169,20 @@ export default function AssetGridSecondaryFilters({
 }) {
     const page = usePage()
     const pageProps = page.props
-    const { auth, available_file_types = [] } = pageProps
+    const { auth } = pageProps
+    const gridFileTypeGroups = useMemo(() => {
+        const g = pageProps?.dam_file_types?.grid_file_type_filter_options?.grouped
+        return Array.isArray(g) ? g : []
+    }, [pageProps?.dam_file_types?.grid_file_type_filter_options])
+    const fileTypeFilterLabelByKey = useMemo(() => {
+        const m = new Map()
+        for (const grp of gridFileTypeGroups) {
+            for (const t of grp.types || []) {
+                if (t?.key) m.set(String(t.key), String(t.label || t.key))
+            }
+        }
+        return m
+    }, [gridFileTypeGroups])
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
 
     const partialReloadKeys = useMemo(
@@ -878,10 +891,11 @@ export default function AssetGridSecondaryFilters({
                             : layoutCustom.slice(0, 5)
                         const otherSlice = otherFieldsExpanded ? layoutOther : layoutOther.slice(0, 5)
 
+                        const hasFileTypeFilterUi = gridFileTypeGroups.length > 0
                         const hasAssetSection =
                             layoutBuckets.assetProps.length > 0 ||
                             (showComplianceFilter && onComplianceFilterChange) ||
-                            (available_file_types && available_file_types.length > 0)
+                            hasFileTypeFilterUi
 
                         return (
                             <>
@@ -945,7 +959,8 @@ export default function AssetGridSecondaryFilters({
                                             )}
                                             {fileTypeFilter && fileTypeFilter !== 'all' && (
                                                 <span className="inline-flex items-center gap-1 rounded-full border border-gray-200/80 bg-white px-2.5 py-1 text-xs text-gray-800 shadow-sm">
-                                                    File type: {fileTypeFilter.toUpperCase()}
+                                                    File type:{' '}
+                                                    {fileTypeFilterLabelByKey.get(fileTypeFilter) || fileTypeFilter}
                                                     <button
                                                         type="button"
                                                         onClick={() => handleFileTypeFilterChange('all')}
@@ -1271,7 +1286,7 @@ export default function AssetGridSecondaryFilters({
                                                         </select>
                                                     </div>
                                                 ) : null}
-                                                {available_file_types && available_file_types.length > 0 ? (
+                                                {hasFileTypeFilterUi ? (
                                                     <div className="min-w-0 space-y-1.5">
                                                         <label className="block text-xs font-medium text-gray-700">
                                                             File type
@@ -1282,10 +1297,17 @@ export default function AssetGridSecondaryFilters({
                                                             className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm focus:border-indigo-500 focus:ring-indigo-500"
                                                         >
                                                             <option value="all">All</option>
-                                                            {available_file_types.map((fileType) => (
-                                                                <option key={fileType} value={fileType}>
-                                                                    {fileType.toUpperCase()}
-                                                                </option>
+                                                            {gridFileTypeGroups.map((grp) => (
+                                                                <optgroup
+                                                                    key={grp.group_key || grp.group_label}
+                                                                    label={grp.group_label || grp.group_key}
+                                                                >
+                                                                    {(grp.types || []).map((t) => (
+                                                                        <option key={t.key} value={t.key}>
+                                                                            {t.label}
+                                                                        </option>
+                                                                    ))}
+                                                                </optgroup>
                                                             ))}
                                                         </select>
                                                     </div>

@@ -14,6 +14,7 @@ use App\Services\AI\Vision\Contracts\VisionTagCandidateProvider;
 use App\Services\AI\Vision\VisionTagCandidate;
 use App\Services\AI\Vision\VisionTagCandidateResult;
 use App\Services\BrandIntelligence\PdfBrandIntelligencePageRasterCatalog;
+use App\Services\PlanService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -238,10 +239,16 @@ class AiMetadataGenerationService
             if ($rekognitionRunInfo !== null) {
                 $tags = $rekognitionRunInfo['tags'];
                 $tagParseStats = $this->mergeTagParseStats($tagParseStats, $rekognitionRunInfo['tag_parse_stats']);
-            } elseif ((bool) config('ai.metadata_tagging.rekognition_fallback_to_openai', false)) {
-                // Opt-in fallback: run a tags-only OpenAI vision call when Rekognition fails non-retryably.
-                Log::warning('[AiMetadataGenerationService] Falling back to OpenAI vision for tags after Rekognition failure', [
+            }
+            $rekognitionFailed = $rekognitionRunInfo !== null && ! empty($rekognitionRunInfo['provider_failed']);
+            $rekognitionMissing = $rekognitionRunInfo === null;
+            if ((bool) config('ai.metadata_tagging.rekognition_fallback_to_openai', false)
+                && ($rekognitionMissing || $rekognitionFailed)) {
+                // Opt-in fallback: tags-only OpenAI vision when Rekognition is off/unavailable or failed non-retryably.
+                Log::warning('[AiMetadataGenerationService] Falling back to OpenAI vision for tags after Rekognition skip/failure', [
                     'asset_id' => $asset->id,
+                    'rekognition_missing' => $rekognitionMissing,
+                    'rekognition_failed' => $rekognitionFailed,
                 ]);
                 $fallbackOpenAi = $this->runOpenAiTagsOnlyFallback($asset, $libAddendum, $lib);
                 if ($fallbackOpenAi !== null) {
@@ -252,7 +259,7 @@ class AiMetadataGenerationService
         }
 
         $candidatesCreated = $skipAiMetadataUpload ? 0 : $this->createCandidates($asset, $candidates);
-        $tagsCreated = $tagsInference ? $this->createTags($asset, $tags) : 0;
+        $tagsCreated = $tagsInference ? $this->createTags($asset, $this->capVisionTagCandidatesForPlan($asset, $tags)) : 0;
 
         $primaryOpenAiTokensIn = (int) ($openAiResponse['tokens_in'] ?? 0);
         $primaryOpenAiTokensOut = (int) ($openAiResponse['tokens_out'] ?? 0);
@@ -294,7 +301,10 @@ class AiMetadataGenerationService
             $tagInferenceDesired,
             $skipAiTaggingUpload,
             $tagsCreated,
-            $tagParseStats
+            $tagParseStats,
+            (is_array($rekognitionRunInfo) && ! empty($rekognitionRunInfo['provider_failed']))
+                ? (string) ($rekognitionRunInfo['provider_failure_class'] ?? '')
+                : null,
         );
 
         return [
@@ -319,6 +329,8 @@ class AiMetadataGenerationService
                 'source_bucket' => $rekognitionRunInfo['source_bucket'],
                 'source_key' => $rekognitionRunInfo['source_key'],
                 'features' => $rekognitionRunInfo['features'],
+                'provider_failed' => (bool) ($rekognitionRunInfo['provider_failed'] ?? false),
+                'provider_failure_class' => $rekognitionRunInfo['provider_failure_class'] ?? null,
             ],
         ];
     }
@@ -342,8 +354,9 @@ class AiMetadataGenerationService
      * pipeline used by the OpenAI vision path. Records an AIAgentRun + ai_usage row with
      * tokens=0 and unit_type=image (Rekognition is per-call billed).
      *
-     * Returns null when Rekognition is disabled, unavailable, or fails non-fatally
-     * (so the OpenAI fields-only path still runs and the caller can fall back if configured).
+     * Returns null when Rekognition is disabled or the provider cannot be resolved
+     * (OpenAI fields-only path still runs; caller may fall back to OpenAI tags if configured).
+     * On non-retryable API failures returns an empty tag set with `provider_failed` set (distinct from null).
      *
      * @return array{
      *   tags: list<array{value: string, confidence: float}>,
@@ -353,6 +366,8 @@ class AiMetadataGenerationService
      *   source_bucket: string,
      *   source_key: string,
      *   features: list<string>,
+     *   provider_failed?: bool,
+     *   provider_failure_class?: string,
      * }|null
      */
     protected function runRekognitionForTagCandidates(Asset $asset, ?Category $category): ?array
@@ -411,7 +426,29 @@ class AiMetadataGenerationService
                 throw $e;
             }
 
-            return null;
+            // Non-retryable failure: return an empty run shape (not null) so callers can distinguish
+            // "Rekognition never configured" (null) from "API failed" — metadata + UI can show the
+            // real reason instead of mislabeling as `empty_model`, and OpenAI fallback can still run.
+            $emptyStats = [
+                'raw_tag_count' => 0,
+                'passed_confidence_count' => 0,
+                'rejected_low_confidence_count' => 0,
+                'rejected_blocklist_count' => 0,
+                'rejected_sanitizer_count' => 0,
+                'rejected_duplicate_count' => 0,
+            ];
+
+            return [
+                'tags' => [],
+                'tag_parse_stats' => $emptyStats,
+                'cost' => 0.0,
+                'raw_label_count' => 0,
+                'source_bucket' => '',
+                'source_key' => '',
+                'features' => ['GENERAL_LABELS'],
+                'provider_failed' => true,
+                'provider_failure_class' => class_basename($e),
+            ];
         }
 
         $detectedAssetType = null;
@@ -621,7 +658,8 @@ class AiMetadataGenerationService
         bool $tagInferenceDesired,
         bool $skipAiTaggingUpload,
         int $tagsCreated,
-        ?array $tagParseStats
+        ?array $tagParseStats,
+        ?string $rekognitionFailureClass = null,
     ): array {
         if (! $tagsInference) {
             if ($tagInferenceDesired && $skipAiTaggingUpload) {
@@ -633,6 +671,10 @@ class AiMetadataGenerationService
 
         if ($tagsCreated > 0) {
             return ['attempted_ok', null];
+        }
+
+        if ($rekognitionFailureClass !== null && $rekognitionFailureClass !== '') {
+            return ['attempted_empty', 'rekognition_error:'.strtolower($rekognitionFailureClass)];
         }
 
         $raw = (int) ($tagParseStats['raw_tag_count'] ?? 0);
@@ -2216,6 +2258,34 @@ class AiMetadataGenerationService
         }
 
         return $out;
+    }
+
+    /**
+     * Cap how many vision-derived tag candidates we persist so review UI aligns with plan headroom.
+     * Tags are sorted by confidence (highest first). Approved `asset_tags` are unchanged — this only
+     * limits new candidate rows from Rekognition/OpenAI.
+     *
+     * @param  list<array{value: string, confidence?: float}>  $tags
+     * @return list<array{value: string, confidence?: float}>
+     */
+    protected function capVisionTagCandidatesForPlan(Asset $asset, array $tags): array
+    {
+        if ($tags === []) {
+            return [];
+        }
+        $raw = config('ai.metadata_tagging.max_stored_vision_tag_candidates');
+        if ($raw !== null && $raw !== '' && is_numeric($raw)) {
+            $cap = max(1, (int) $raw);
+        } else {
+            $tenant = Tenant::find($asset->tenant_id);
+            $planMax = $tenant ? app(PlanService::class)->getMaxTagsPerAsset($tenant) : 10;
+            $cap = min(20, max(10, $planMax * 2));
+        }
+        usort($tags, static function (array $a, array $b): int {
+            return ((float) ($b['confidence'] ?? 0)) <=> ((float) ($a['confidence'] ?? 0));
+        });
+
+        return array_values(array_slice($tags, 0, $cap));
     }
 
     /**

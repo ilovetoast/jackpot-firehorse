@@ -28,6 +28,7 @@ use App\Services\Assets\StagedFiledAssetAiService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\BrandLibraryCategoryCountService;
 use App\Services\FeatureGate;
+use App\Services\FileTypeService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\Metadata\MetadataValueNormalizer;
 use App\Services\MetadataFilterService;
@@ -73,7 +74,8 @@ class AssetController extends Controller
         protected AssetSearchService $assetSearchService,
         protected AssetSortService $assetSortService,
         protected UploadInitiationService $uploadInitiationService,
-        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService
+        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService,
+        protected FileTypeService $fileTypeService
     ) {}
 
     /**
@@ -675,6 +677,12 @@ class AssetController extends Controller
                 $assetsQuery->where('assets.user_id', $uploadedById);
                 $baseQueryForFilterVisibility->where('assets.user_id', $uploadedById);
             }
+        }
+
+        $gridFileType = $request->input('file_type');
+        if (is_string($gridFileType) && trim($gridFileType) !== '' && strtolower(trim($gridFileType)) !== 'all') {
+            $this->fileTypeService->applyGridFileTypeFilterToAssetQuery($assetsQuery, $gridFileType);
+            $this->fileTypeService->applyGridFileTypeFilterToAssetQuery($baseQueryForFilterVisibility, $gridFileType);
         }
 
         if ($tenant && app(FeatureGate::class)->creatorModuleEnabled($tenant)) {
@@ -1843,7 +1851,7 @@ class AssetController extends Controller
                 ->whereIn('id', $assetIds)
                 ->whereNull('deleted_at')
                 ->with('storageBucket')
-                ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata', 'storage_bucket_id'])
+                ->get(['id', 'thumbnail_status', 'thumbnail_error', 'metadata', 'storage_bucket_id', 'analysis_status'])
                 ->map(function ($asset) use ($includeEnhancedOutputFreshness) {
                     $thumbnailStatus = $asset->thumbnail_status instanceof \App\Enums\ThumbnailStatus
                         ? $asset->thumbnail_status->value
@@ -1933,6 +1941,7 @@ class AssetController extends Controller
 
                     return [
                         'asset_id' => $asset->id,
+                        'analysis_status' => $asset->analysis_status ?? 'uploading',
                         'thumbnail_status' => $verifiedStatus, // Use verified status, not raw status
                         'thumbnail_version' => $thumbnailVersion,
                         'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (available even when pending/processing)

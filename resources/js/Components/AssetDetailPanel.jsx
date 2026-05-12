@@ -77,6 +77,13 @@ function formatAiTagInferenceSummary(meta) {
         s += ' (model returned no tags)'
     } else if (status === 'attempted_empty' && meta.ai_tag_inference_detail === 'no_tags_passed_filters') {
         s += ' (below confidence or filtered)'
+    } else if (
+        status === 'attempted_empty' &&
+        typeof meta.ai_tag_inference_detail === 'string' &&
+        meta.ai_tag_inference_detail.startsWith('rekognition_error:')
+    ) {
+        const kind = meta.ai_tag_inference_detail.replace(/^rekognition_error:/, '')
+        s += ` (AWS Rekognition: ${kind})`
     }
     const st = meta.ai_tag_parse_stats
     if (st && typeof st === 'object' && (st.raw !== undefined || st.passed !== undefined)) {

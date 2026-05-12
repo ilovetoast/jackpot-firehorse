@@ -42,6 +42,13 @@ export function switchCompanyWorkspace({ companyId, brandId = null, redirect = '
             } catch {
                 /* non-JSON error body */
             }
+            if (!res.ok && typeof console !== 'undefined' && console.warn) {
+                console.warn('[workspaceCompanySwitch] company switch failed', {
+                    status: res.status,
+                    companyId,
+                    message: data?.message ?? data?.error ?? null,
+                })
+            }
             const target =
                 res.ok &&
                 typeof data.redirect === 'string' &&

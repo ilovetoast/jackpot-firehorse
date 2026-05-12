@@ -139,8 +139,9 @@ class CompanyController extends Controller
     }
 
     /**
-     * Agency-capable users may only switch among their agency tenant, tenant_agencies-linked clients,
-     * and incubated clients (tenant_user.is_agency_managed + agency_tenant_id).
+     * Agency-capable users may switch among: their agency tenant, tenant_agencies-linked clients,
+     * incubated clients (tenant_user.is_agency_managed + agency_tenant_id), and any other workspace
+     * where their membership is not an agency-managed client row (e.g. a personal company).
      * Other members (no agency home tenant) are unrestricted here.
      */
     protected function agencyPortfolioAllowsTenantSwitch(User $user, Tenant $tenant): bool
@@ -164,8 +165,15 @@ class CompanyController extends Controller
         $user->loadMissing('tenants');
         $pivot = $user->tenants->firstWhere('id', $tenant->id)?->pivot;
 
-        return (bool) ($pivot->is_agency_managed ?? false)
-            && (int) ($pivot->agency_tenant_id ?? 0) === (int) $agency->id;
+        // Incubated / agency-provisioned client row for this agency (pivot flags).
+        if ((bool) ($pivot->is_agency_managed ?? false)
+            && (int) ($pivot->agency_tenant_id ?? 0) === (int) $agency->id) {
+            return true;
+        }
+
+        // Any other membership that is *not* an agency-managed client row is an independent
+        // workspace (e.g. the user's own company) and must remain switchable from the agency.
+        return $pivot !== null && ! (bool) ($pivot->is_agency_managed ?? false);
     }
 
     /**

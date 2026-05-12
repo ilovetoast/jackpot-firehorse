@@ -140,10 +140,10 @@ class AgencyContextPickerAndPortfolioSwitchTest extends TestCase
     }
 
     #[Test]
-    public function agency_capable_user_cannot_switch_to_unlinked_tenant(): void
+    public function agency_user_can_switch_to_non_agency_managed_workspace_they_belong_to(): void
     {
         [$agency, $agBrand] = $this->tenantWithBrand(['is_agency' => true]);
-        [$stray, $strayBrand] = $this->tenantWithBrand(['is_agency' => false]);
+        [$personal, $personalBrand] = $this->tenantWithBrand(['is_agency' => false]);
 
         $user = User::create([
             'email' => 'mix-'.uniqid().'@example.com',
@@ -152,17 +152,20 @@ class AgencyContextPickerAndPortfolioSwitchTest extends TestCase
             'last_name' => 'X',
         ]);
         $user->tenants()->attach($agency->id, ['role' => 'member', 'is_agency_managed' => false]);
-        $user->tenants()->attach($stray->id, ['role' => 'member', 'is_agency_managed' => false]);
+        $user->tenants()->attach($personal->id, ['role' => 'member', 'is_agency_managed' => false]);
         $user->brands()->attach($agBrand->id, ['role' => 'viewer', 'removed_at' => null]);
-        $user->brands()->attach($strayBrand->id, ['role' => 'viewer', 'removed_at' => null]);
+        $user->brands()->attach($personalBrand->id, ['role' => 'viewer', 'removed_at' => null]);
 
         $this->actingAs($user)
             ->withSession(['tenant_id' => $agency->id, 'brand_id' => $agBrand->id])
-            ->post(route('companies.switch', $stray), [
-                'brand_id' => $strayBrand->id,
+            ->post(route('companies.switch', $personal), [
+                'brand_id' => $personalBrand->id,
                 'redirect' => '/app/overview',
             ])
-            ->assertForbidden();
+            ->assertRedirect();
+
+        $this->assertSame($personal->id, session('tenant_id'));
+        $this->assertSame($personalBrand->id, session('brand_id'));
     }
 
     #[Test]

@@ -52,6 +52,17 @@ export default function AssetFilterChipsBar({
 }) {
     const { url, props: pageProps } = usePage()
     const uploadedByUsers = pageProps?.uploaded_by_users || []
+    const gridFileTypeLabelByKey = useMemo(() => {
+        const m = new Map()
+        const grouped = pageProps?.dam_file_types?.grid_file_type_filter_options?.grouped
+        if (!Array.isArray(grouped)) return m
+        for (const grp of grouped) {
+            for (const t of grp.types || []) {
+                if (t?.key) m.set(String(t.key), String(t.label || t.key))
+            }
+        }
+        return m
+    }, [pageProps?.dam_file_types?.grid_file_type_filter_options])
 
     const schemaByKey = useMemo(() => {
         const m = new Map()
@@ -123,6 +134,11 @@ export default function AssetFilterChipsBar({
             }
             if (sk === 'lifecycle' && v === 'pending_publication') label = 'Pending publication'
             if (sk === 'compliance_filter') label = `Compliance: ${truncate(v, 24)}`
+            if (sk === 'file_type') {
+                const human = gridFileTypeLabelByKey.get(String(v))
+                if (human) label = `File type: ${truncate(human, 28)}`
+                else label = `File type: ${truncate(v, 24)}`
+            }
             out.push({
                 id: `${sk}:${v}`,
                 label,
@@ -145,7 +161,7 @@ export default function AssetFilterChipsBar({
         }
 
         return out
-    }, [url, filterKeys, schemaByKey, uploadedByUsers, collectionsView, available_values])
+    }, [url, filterKeys, schemaByKey, uploadedByUsers, collectionsView, available_values, gridFileTypeLabelByKey])
 
     const applyParams = useCallback(
         (nextParams) => {

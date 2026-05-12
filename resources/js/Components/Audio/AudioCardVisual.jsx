@@ -140,6 +140,47 @@ function sampleAnalyser(buffer, count) {
     return out
 }
 
+/**
+ * Synthetic "bouncing" levels used when the live AnalyserNode is unavailable
+ * (e.g. cross-origin audio without CORS headers, the common production path).
+ * Several sine waves at different frequencies + per-bar phase offsets give
+ * each bar an independent, organic-looking bounce instead of every bar
+ * pulsing in lock-step. Modulated by a slow envelope so the whole waveform
+ * occasionally swells and dips, mimicking a real song's dynamics.
+ *
+ * Important: amplitudes are scaled against the bar's idle envelope so taller
+ * bars stay taller and shorter bars stay shorter — the silhouette still reads
+ * as the track's signature waveform, just animated.
+ *
+ * @param {number} t          performance.now() in ms
+ * @param {Array<{top:number, bot:number}>} bars  idle bar envelope
+ * @returns {Array<number>}   normalized [0..1] amplitudes per bar
+ */
+function syntheticBounceLevels(t, bars) {
+    if (!bars || bars.length === 0) return null
+    const tt = t / 1000
+    // Slow whole-card "breathing" — 0.55..1.0 over ~3s. Keeps the floor up
+    // so even quiet beats still register a visible bounce.
+    const breathing = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(tt * 2.05))
+    const out = new Array(bars.length)
+    for (let i = 0; i < bars.length; i++) {
+        // Per-bar phase derived from index — gives a traveling-wave feel
+        // rather than a metronome. Three layered sines at different
+        // frequencies prevent the motion from looking periodic.
+        const phase = i * 0.37
+        const a = Math.sin(tt * 7.2 + phase) * 0.5 + 0.5
+        const b = Math.sin(tt * 11.7 + phase * 1.6 + 1.3) * 0.5 + 0.5
+        const c = Math.sin(tt * 4.1 + phase * 0.5 + 2.1) * 0.5 + 0.5
+        const mix = (a * 0.5 + b * 0.3 + c * 0.2)
+        // Anchor against the idle envelope so the silhouette is preserved:
+        // tall bars bounce taller, short bars bounce shorter.
+        const idleAmp = (bars[i].top + bars[i].bot) / 2
+        const lifted = idleAmp * (0.55 + 0.55 * mix) * breathing
+        out[i] = Math.min(1, Math.max(0.12, lifted))
+    }
+    return out
+}
+
 function formatDuration(seconds) {
     if (!Number.isFinite(seconds) || seconds <= 0) return null
     const total = Math.round(seconds)
@@ -248,8 +289,17 @@ export default function AudioCardVisual({
         }
         let lastPulseAt = 0
         const tick = () => {
+            const now = performance.now()
+            // Prefer real frequency data when the analyser is wired in
+            // (config: audio.live_analyser_enabled). When it isn't — the
+            // common production path because cross-origin audio without
+            // CORS headers can't be routed through Web Audio without
+            // silencing the output — fall back to a synthetic bouncing
+            // envelope so the bars still come alive on play. Without this
+            // fallback the card was visually frozen during playback even
+            // though the audio was clearly playing.
             const data = getFrequencyData()
-            const sampled = sampleAnalyser(data, barCount)
+            const sampled = sampleAnalyser(data, barCount) || syntheticBounceLevels(now, baseBars)
             if (sampled) {
                 setLevels(sampled)
                 // Mean energy across the spectrum — when it spikes above the
@@ -260,7 +310,6 @@ export default function AudioCardVisual({
                 for (let i = 0; i < sampled.length; i++) sum += sampled[i]
                 const mean = sum / sampled.length
                 peakRef.current = peakRef.current * 0.92 + mean * 0.08
-                const now = performance.now()
                 if (mean > peakRef.current * 1.4 && now - lastPulseAt > 120) {
                     lastPulseAt = now
                     setPayLinePulse(1)
@@ -274,7 +323,7 @@ export default function AudioCardVisual({
             if (rafRef.current) cancelAnimationFrame(rafRef.current)
             rafRef.current = null
         }
-    }, [isPlaying, barCount, getFrequencyData])
+    }, [isPlaying, barCount, baseBars, getFrequencyData])
 
     // Progress: prefer live duration from <audio>, fall back to FFprobe metadata.
     const effectiveDuration = liveDuration || audioMeta?.duration_seconds || 0

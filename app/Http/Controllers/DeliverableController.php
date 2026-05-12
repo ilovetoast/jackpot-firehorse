@@ -11,6 +11,7 @@ use App\Services\AiMetadataConfidenceService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\BrandLibraryCategoryCountService;
+use App\Services\FileTypeService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
@@ -41,7 +42,8 @@ class DeliverableController extends Controller
         protected LifecycleResolver $lifecycleResolver,
         protected AssetSearchService $assetSearchService,
         protected AssetSortService $assetSortService,
-        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService
+        protected BrandLibraryCategoryCountService $brandLibraryCategoryCountService,
+        protected FileTypeService $fileTypeService
     ) {}
 
     /**
@@ -438,6 +440,12 @@ class DeliverableController extends Controller
                 $assetsQuery->where('assets.user_id', $uploadedById);
                 $baseQueryForFilterVisibility->where('assets.user_id', $uploadedById);
             }
+        }
+
+        $gridFileType = $request->input('file_type');
+        if (is_string($gridFileType) && trim($gridFileType) !== '' && strtolower(trim($gridFileType)) !== 'all') {
+            $this->fileTypeService->applyGridFileTypeFilterToAssetQuery($assetsQuery, $gridFileType);
+            $this->fileTypeService->applyGridFileTypeFilterToAssetQuery($baseQueryForFilterVisibility, $gridFileType);
         }
 
         // Phase L: Centralized sort (after search/filters, before pagination)

@@ -74,6 +74,13 @@ return [
     'metadata_tagging' => [
         'min_confidence' => (float) env('AI_METADATA_TAGGING_MIN_CONFIDENCE', 0.90),
 
+        /**
+         * Hard cap on vision tag candidates persisted to `asset_tag_candidates` per asset (after sanitizer).
+         * When null/unset/non-numeric env: derive from plan — min(20, max(10, 2 × plan max_tags_per_asset))
+         * so low tiers see fewer suggestions than Rekognition's raw label count.
+         */
+        'max_stored_vision_tag_candidates' => env('AI_METADATA_MAX_STORED_VISION_TAG_CANDIDATES'),
+
         /*
          * Active provider for free-form image tag candidates (asset_tag_candidates).
          *

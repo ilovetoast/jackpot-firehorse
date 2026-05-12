@@ -21,6 +21,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { XMarkIcon, TagIcon } from '@heroicons/react/24/outline'
 import { normalizeTagString } from '../utils/tagInputNormalize'
+import AiTagPlanLimitBanner from './AiTagPlanLimitBanner'
 
 const TagInputUnified = forwardRef(function TagInputUnified({ 
     // Mode configuration
@@ -62,7 +63,8 @@ const TagInputUnified = forwardRef(function TagInputUnified({
     const [loading, setLoading] = useState(false)
     const [localTags, setLocalTags] = useState(value) // For upload/filter mode
     const [pendingTagHint, setPendingTagHint] = useState(null) // upload/filter: invalid text that didn't become a tag
-    
+    const [tagPlanLimitNotice, setTagPlanLimitNotice] = useState(null)
+
     const inputRef = useRef(null)
     const suggestionsRef = useRef(null)
 
@@ -166,8 +168,11 @@ const TagInputUnified = forwardRef(function TagInputUnified({
                         // Tag already exists - just clear input
                         clearInput()
                     } else if (response.status === 403 && errorData.limit_type === 'tags_per_asset') {
-                        // Plan limit exceeded - show detailed message with upgrade suggestion
-                        alert(`${errorData.message}\n\nUpgrade your plan to add more tags per asset. Visit the billing page to see available plans.`)
+                        setTagPlanLimitNotice({
+                            message: errorData.message || 'Plan tag limit reached.',
+                            maxAllowed: errorData.max_allowed,
+                            currentCount: errorData.current_count,
+                        })
                     } else {
                         alert(errorData.message || 'Failed to add tag')
                     }
@@ -334,6 +339,7 @@ const TagInputUnified = forwardRef(function TagInputUnified({
 
     return (
         <div className={className}>
+            <AiTagPlanLimitBanner notice={tagPlanLimitNotice} onDismiss={() => setTagPlanLimitNotice(null)} />
             {/* Title */}
             {showTitle && (
                 <div className="flex items-center gap-2 mb-2">

@@ -230,6 +230,9 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 const finalNowAvailable = !!updatedAssetData.final_thumbnail_url && !currentAsset.final_thumbnail_url
                 const previewNowAvailable = !!updatedAssetData.preview_thumbnail_url && !currentAsset.preview_thumbnail_url
                 const statusChanged = updatedAssetData.thumbnail_status !== thumbnailStatus
+                const analysisStatusChanged =
+                    String(updatedAssetData.analysis_status ?? '') !==
+                    String(currentAsset.analysis_status ?? '')
                 const errorChanged = updatedAssetData.thumbnail_error !== currentAsset.thumbnail_error
                 const nextModesMeta = updatedAssetData.thumbnail_modes_meta
                 const mergedModeUrls = mergeThumbnailModeUrlsPreserveCache(
@@ -253,6 +256,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                     finalNowAvailable ||
                     previewNowAvailable ||
                     statusChanged ||
+                    analysisStatusChanged ||
                     errorChanged ||
                     modeUrlsEffectivelyChanged ||
                     modeMetaChanged ||
@@ -264,6 +268,7 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                     // Note: updatedAssetData has asset_id, but we keep id from currentAsset
                     const updatedAsset = {
                         ...currentAsset,
+                        analysis_status: updatedAssetData.analysis_status ?? currentAsset.analysis_status,
                         preview_thumbnail_url: updatedAssetData.preview_thumbnail_url ?? currentAsset.preview_thumbnail_url,
                         final_thumbnail_url: updatedAssetData.final_thumbnail_url ?? currentAsset.final_thumbnail_url,
                         thumbnail_status: updatedAssetData.thumbnail_status ?? currentAsset.thumbnail_status,

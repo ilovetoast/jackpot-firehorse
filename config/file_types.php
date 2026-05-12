@@ -25,6 +25,7 @@ return [
     |
     | Top-level keys:
     |   - types               : allowed types, with capabilities/handlers/upload settings
+    |   - grid_filter         : optional grouping for the Assets / Executions ?file_type= filter
     |   - blocked             : security-blocked groups (executables, scripts, archives, ...)
     |   - thumbnail_skip      : registered for thumbnail-skip messaging only (no upload effect)
     |   - supported_thumbnail_extensions : reference list (kept for back-compat)
@@ -698,6 +699,55 @@ return [
                 'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Grid file-type filter (Assets + Executions)
+    |--------------------------------------------------------------------------
+    |
+    | Single place to group registered `types` keys for the library grid
+    | ?file_type= filter. Each key under `type_group` must exist in `types`.
+    | `type_order` controls ordering within a group (lower first). Omit a
+    | type to fall back to alphabetical by display name after ordered keys.
+    |
+    */
+    'grid_filter' => [
+        'groups' => [
+            ['key' => 'images', 'label' => 'Images', 'order' => 10],
+            ['key' => 'documents', 'label' => 'Documents', 'order' => 20],
+            ['key' => 'design', 'label' => 'Design', 'order' => 30],
+            ['key' => 'video_audio', 'label' => 'Video & audio', 'order' => 40],
+            ['key' => 'other', 'label' => 'Other', 'order' => 999],
+        ],
+        'type_group' => [
+            'image' => 'images',
+            'tiff' => 'images',
+            'cr2' => 'images',
+            'avif' => 'images',
+            'heic' => 'images',
+            'svg' => 'images',
+            'pdf' => 'documents',
+            'office' => 'documents',
+            'psd' => 'design',
+            'ai' => 'design',
+            'video' => 'video_audio',
+            'audio' => 'video_audio',
+        ],
+        'type_order' => [
+            'image' => 10,
+            'svg' => 15,
+            'tiff' => 20,
+            'avif' => 30,
+            'heic' => 40,
+            'cr2' => 50,
+            'pdf' => 10,
+            'office' => 20,
+            'psd' => 10,
+            'ai' => 20,
+            'video' => 10,
+            'audio' => 20,
         ],
     ],
 

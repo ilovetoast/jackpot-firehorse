@@ -101,4 +101,31 @@ class FileTypeRegistryConsistencyTest extends TestCase
                 json_encode($leaked, JSON_UNESCAPED_SLASHES),
         );
     }
+
+    public function test_grid_filter_type_group_maps_only_to_registered_types_and_defined_groups(): void
+    {
+        $types = array_keys((array) config('file_types.types', []));
+        $grid = (array) config('file_types.grid_filter', []);
+        $typeGroup = (array) ($grid['type_group'] ?? []);
+        $groupKeys = [];
+        foreach ((array) ($grid['groups'] ?? []) as $row) {
+            if (is_array($row) && isset($row['key'])) {
+                $groupKeys[] = (string) $row['key'];
+            }
+        }
+        $this->assertNotSame([], $groupKeys, 'file_types.grid_filter.groups must not be empty');
+
+        foreach ($typeGroup as $typeKey => $gk) {
+            $this->assertContains(
+                (string) $typeKey,
+                $types,
+                'grid_filter.type_group references an unknown registry type',
+            );
+            $this->assertContains(
+                (string) $gk,
+                $groupKeys,
+                'grid_filter.type_group references an undefined group key',
+            );
+        }
+    }
 }

@@ -26,6 +26,8 @@
  *   blocked_mime_types?: string[],
  *   blocked_groups?: Record<string, { extensions: string[], mime_types: string[], message: string, code_suffix: string }>,
  *   coming_soon?: Record<string, { name: string, message: string, extensions: string[] }>
+ *   types_for_help?: Array<Record<string, unknown>>
+ *   grid_file_type_filter_options?: { grouped: Array<{ group_key: string, group_label: string, types: Array<{ key: string, label: string }> }> }
  * }} DamFileTypesPayload
  */
 
@@ -46,6 +48,7 @@ function emptyPayload() {
         blocked_groups: {},
         coming_soon: {},
         types_for_help: [],
+        grid_file_type_filter_options: { grouped: [] },
     }
 }
 

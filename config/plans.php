@@ -36,7 +36,7 @@ return [
             'max_download_assets' => 25,
             'max_download_zip_mb' => 250,
             'max_custom_metadata_fields' => 0,
-            'max_tags_per_asset' => 1,
+            'max_tags_per_asset' => 4,
             'max_ai_credits_per_month' => 75,
         ],
         'features' => [
@@ -108,7 +108,7 @@ return [
             'max_download_assets' => 100,
             'max_download_zip_mb' => 1024, // 1 GB
             'max_custom_metadata_fields' => 5,
-            'max_tags_per_asset' => 5,
+            'max_tags_per_asset' => 8,
             'max_ai_credits_per_month' => 300,
         ],
         'features' => [
@@ -184,7 +184,7 @@ return [
             'max_download_assets' => 500,
             'max_download_zip_mb' => 2048, // 2 GB
             'max_custom_metadata_fields' => 20,
-            'max_tags_per_asset' => 10,
+            'max_tags_per_asset' => 13,
             'max_ai_credits_per_month' => 1500,
         ],
         'features' => [
@@ -267,7 +267,7 @@ return [
             'max_download_assets' => 2000,
             'max_download_zip_mb' => 5120, // 5 GB
             'max_custom_metadata_fields' => 100,
-            'max_tags_per_asset' => 15,
+            'max_tags_per_asset' => 18,
             'max_ai_credits_per_month' => 6000,
         ],
         'features' => [
@@ -368,7 +368,7 @@ return [
             'max_download_assets' => 2000,
             'max_download_zip_mb' => 5120,
             'max_custom_metadata_fields' => 100,
-            'max_tags_per_asset' => 15,
+            'max_tags_per_asset' => 18,
             'max_ai_credits_per_month' => 6000,
         ],
         'features' => [
@@ -453,7 +453,7 @@ return [
             'max_download_assets' => 5000,
             'max_download_zip_mb' => 10240,
             'max_custom_metadata_fields' => 500,
-            'max_tags_per_asset' => 50,
+            'max_tags_per_asset' => 53,
             'max_ai_credits_per_month' => 0, // 0 = unlimited
         ],
         'features' => [

@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Asset;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * File Type Service
@@ -676,6 +678,168 @@ class FileTypeService
     }
 
     /**
+     * MIME values to match in SQL for a registered type: declared MIMEs plus
+     * sniff alias keys and values (stored mime may be non-canonical).
+     *
+     * @return list<string>
+     */
+    public function getMimeTypeMatchSetForRegisteredType(string $typeKey): array
+    {
+        $cfg = config("file_types.types.{$typeKey}", []);
+        if ($cfg === []) {
+            return [];
+        }
+        $mimes = array_map('strtolower', array_map('strval', $cfg['mime_types'] ?? []));
+        $aliases = $cfg['upload']['sniff_mime_aliases'] ?? [];
+        $extra = [];
+        if (is_array($aliases)) {
+            foreach ($aliases as $from => $to) {
+                $extra[] = strtolower((string) $from);
+                $extra[] = strtolower((string) $to);
+            }
+        }
+
+        return array_values(array_unique(array_merge($mimes, $extra)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getExtensionMatchSetForRegisteredType(string $typeKey): array
+    {
+        $cfg = config("file_types.types.{$typeKey}", []);
+        $exts = array_map('strtolower', array_map('strval', $cfg['extensions'] ?? []));
+
+        return array_values(array_unique($exts));
+    }
+
+    /**
+     * Narrow an assets query to rows whose mime_type or original_filename
+     * extension matches the registry definition for {@see $typeKey}.
+     * Uses portable extension matching (ends with .ext) for SQLite + MySQL.
+     *
+     * @param  Builder<\App\Models\Asset>  $query
+     */
+    public function applyGridFileTypeFilterToAssetQuery(Builder $query, string $typeKey): bool
+    {
+        $typeKey = strtolower(trim($typeKey));
+        if ($typeKey === '' || ! array_key_exists($typeKey, config('file_types.types', []))) {
+            return false;
+        }
+
+        $table = $query->getModel()->getTable();
+        $mimeCol = "{$table}.mime_type";
+        $fnCol = "{$table}.original_filename";
+        $mimes = $this->getMimeTypeMatchSetForRegisteredType($typeKey);
+        $exts = $this->getExtensionMatchSetForRegisteredType($typeKey);
+        if ($mimes === [] && $exts === []) {
+            return false;
+        }
+
+        $query->where(function ($outer) use ($mimes, $exts, $mimeCol, $fnCol) {
+            if ($mimes !== []) {
+                $outer->whereIn(DB::raw("LOWER(COALESCE({$mimeCol}, ''))"), $mimes);
+            }
+            if ($exts !== []) {
+                $outer->orWhere(function ($q) use ($exts, $fnCol) {
+                    foreach ($exts as $ext) {
+                        $e = strtolower((string) $ext);
+                        if ($e === '') {
+                            continue;
+                        }
+                        $q->orWhereRaw("LOWER(COALESCE({$fnCol}, '')) LIKE ?", ['%.'.$e]);
+                    }
+                });
+            }
+        });
+
+        return true;
+    }
+
+    /**
+     * Grouped options for the Assets / Executions grid ?file_type= dropdown.
+     *
+     * @return array{grouped: list<array{group_key: string, group_label: string, group_order: int, types: list<array{key: string, label: string}>}>}
+     */
+    public function buildGridFileTypeFilterOptionsPayload(): array
+    {
+        $registry = (array) config('file_types.types', []);
+        $grid = (array) config('file_types.grid_filter', []);
+        $groupRows = (array) ($grid['groups'] ?? []);
+        $typeGroup = (array) ($grid['type_group'] ?? []);
+        $typeOrder = (array) ($grid['type_order'] ?? []);
+
+        $groupMeta = [];
+        foreach ($groupRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $gk = (string) ($row['key'] ?? '');
+            if ($gk === '') {
+                continue;
+            }
+            $groupMeta[$gk] = [
+                'label' => (string) ($row['label'] ?? $gk),
+                'order' => (int) ($row['order'] ?? 500),
+            ];
+        }
+
+        $typesFlat = [];
+        foreach ($registry as $key => $typeConfig) {
+            if (! is_string($key) || $key === '' || ! is_array($typeConfig)) {
+                continue;
+            }
+            $gk = (string) ($typeGroup[$key] ?? 'other');
+            if (! isset($groupMeta[$gk])) {
+                $groupMeta[$gk] = [
+                    'label' => ucfirst(str_replace('_', ' ', $gk)),
+                    'order' => 500,
+                ];
+            }
+            $typesFlat[] = [
+                'key' => $key,
+                'label' => (string) ($typeConfig['name'] ?? ucfirst($key)),
+                'group_key' => $gk,
+                'group_order' => $groupMeta[$gk]['order'],
+                'type_order' => (int) ($typeOrder[$key] ?? 500),
+            ];
+        }
+
+        usort($typesFlat, function (array $a, array $b): int {
+            if ($a['group_order'] !== $b['group_order']) {
+                return $a['group_order'] <=> $b['group_order'];
+            }
+            if ($a['type_order'] !== $b['type_order']) {
+                return $a['type_order'] <=> $b['type_order'];
+            }
+
+            return strcasecmp($a['label'], $b['label']);
+        });
+
+        $byGroup = [];
+        foreach ($typesFlat as $row) {
+            $gk = $row['group_key'];
+            if (! isset($byGroup[$gk])) {
+                $byGroup[$gk] = [
+                    'group_key' => $gk,
+                    'group_label' => $groupMeta[$gk]['label'],
+                    'group_order' => $groupMeta[$gk]['order'],
+                    'types' => [],
+                ];
+            }
+            $byGroup[$gk]['types'][] = [
+                'key' => $row['key'],
+                'label' => $row['label'],
+            ];
+        }
+
+        $grouped = array_values($byGroup);
+        usort($grouped, fn (array $a, array $b) => ($a['group_order'] ?? 500) <=> ($b['group_order'] ?? 500));
+
+        return ['grouped' => $grouped];
+    }
+
+    /**
      * Build the payload that Inertia ships to the frontend as `dam_file_types`.
      * Exposes ONLY allowlist information (extensions + MIMEs) and the blocked
      * extension list for client-side error messaging — never the registry's
@@ -692,6 +856,7 @@ class FileTypeService
      *   blocked_mime_types: list<string>,
      *   blocked_groups: array<string, array{extensions: list<string>, mime_types: list<string>, message: string, code_suffix: string}>,
      *   coming_soon: array<string, array{name: string, message: string, extensions: list<string>}>,
+     *   grid_file_type_filter_options: array{grouped: list<array<string, mixed>>},
      * }
      */
     public function getUploadRegistryForFrontend(): array
@@ -779,6 +944,7 @@ class FileTypeService
             'blocked_groups' => $blockedGroups,
             'coming_soon' => $comingSoon,
             'types_for_help' => $typesForHelp,
+            'grid_file_type_filter_options' => $this->buildGridFileTypeFilterOptionsPayload(),
         ];
     }
 

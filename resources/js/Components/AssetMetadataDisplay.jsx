@@ -46,9 +46,9 @@ async function parseJsonResponse(res) {
 }
 
 /**
- * Lightbox + Asset Data drawer: stable section order — contextual type first (photo/audio/video/…),
- * then user custom fields (excluding type + featured + quality), Featured (starred) + Quality, Folder summary, system-automatic fields,
- * then Collection (when rendered inline).
+ * Lightbox + Asset Data drawer: stable section order — Folder summary first (where assigned),
+ * then contextual type (photo/audio/video/…), user custom fields (excluding type + featured + quality),
+ * Featured (starred) + Quality, system-automatic fields, then Collection (when rendered inline).
  */
 const METADATA_TOP_KEYS_ORDERED = ['starred', 'quality_rating']
 /** Primary “asset type” fields per folder; shown first. Order = display priority when multiple exist. */
@@ -836,10 +836,10 @@ export default function AssetMetadataDisplay({
                             }
 
                             return [
+                                ...(folderCategoryRowElement ? [folderCategoryRowElement] : []),
                                 ...contextualFields.flatMap(renderField),
                                 ...userCustomFields.flatMap(renderField),
                                 ...topFields.flatMap(renderField),
-                                ...(folderCategoryRowElement ? [folderCategoryRowElement] : []),
                                 ...autoFields.flatMap(renderField),
                                 ...(collectionElement ? [collectionElement] : []),
                             ]

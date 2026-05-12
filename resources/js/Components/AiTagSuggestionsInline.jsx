@@ -15,6 +15,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { SparklesIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { usePermission } from '../hooks/usePermission'
 import { usePage } from '@inertiajs/react'
+import AiTagPlanLimitBanner from './AiTagPlanLimitBanner'
 
 // Cache positive results only — avoids locking in an empty response while AI jobs are still running.
 const tagSuggestionsCache = new Map() // assetId -> { suggestions, timestamp }
@@ -63,6 +64,7 @@ export default function AiTagSuggestionsInline({
             : can('metadata.suggestions.apply') || (isOwnUpload && can('metadata.edit_post_upload'))
     const [processing, setProcessing] = useState(new Set())
     const [acceptAllBusy, setAcceptAllBusy] = useState(false)
+    const [tagPlanLimitNotice, setTagPlanLimitNotice] = useState(null)
 
     const runAcceptRequest = async (candidateId) => {
         const res = await fetch(`/app/assets/${assetId}/tags/suggestions/${candidateId}/accept`, {
@@ -70,10 +72,17 @@ export default function AiTagSuggestionsInline({
             headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content },
             credentials: 'same-origin',
         })
+        const data = await res.json().catch(() => ({}))
         if (!res.ok) {
-            const data = await res.json()
             if (res.status === 403 && data.limit_type === 'tags_per_asset') {
-                throw new Error(`${data.message}\n\nUpgrade your plan to add more tags per asset.`)
+                return {
+                    ok: false,
+                    tagLimit: {
+                        message: data.message || 'Plan tag limit reached.',
+                        maxAllowed: data.max_allowed,
+                        currentCount: data.current_count,
+                    },
+                }
             }
             throw new Error(data.message || 'Failed to accept tag')
         }
@@ -83,6 +92,7 @@ export default function AiTagSuggestionsInline({
             return updated
         })
         window.dispatchEvent(new CustomEvent('metadata-updated'))
+        return { ok: true }
     }
 
     // Handle accept (create tag in asset_tags) — no confirmation modal
@@ -90,10 +100,13 @@ export default function AiTagSuggestionsInline({
         if (processing.has(candidateId) || !canApply || acceptAllBusy) return
         setProcessing((prev) => new Set(prev).add(candidateId))
         try {
-            await runAcceptRequest(candidateId)
+            const outcome = await runAcceptRequest(candidateId)
+            if (outcome && outcome.ok === false && outcome.tagLimit) {
+                setTagPlanLimitNotice(outcome.tagLimit)
+            }
         } catch (err) {
             console.error('[AiTagSuggestionsInline] Failed to accept tag', err)
-            alert(err.message || 'Failed to accept tag')
+            setTagPlanLimitNotice({ message: err.message || 'Failed to accept tag' })
         } finally {
             setProcessing((prev) => { const next = new Set(prev); next.delete(candidateId); return next })
         }
@@ -108,10 +121,14 @@ export default function AiTagSuggestionsInline({
                 if (!canApply) break
                 setProcessing((prev) => new Set(prev).add(s.id))
                 try {
-                    await runAcceptRequest(s.id)
+                    const outcome = await runAcceptRequest(s.id)
+                    if (outcome && outcome.ok === false && outcome.tagLimit) {
+                        setTagPlanLimitNotice(outcome.tagLimit)
+                        break
+                    }
                 } catch (err) {
                     console.error('[AiTagSuggestionsInline] Failed to accept tag (bulk)', err)
-                    alert(err.message || 'Failed to accept tag')
+                    setTagPlanLimitNotice({ message: err.message || 'Failed to accept tag' })
                     break
                 } finally {
                     setProcessing((prev) => {
@@ -147,7 +164,7 @@ export default function AiTagSuggestionsInline({
             })
         } catch (err) {
             console.error('[AiTagSuggestionsInline] Failed to dismiss tag', err)
-            alert(err.message || 'Failed to dismiss tag')
+            setTagPlanLimitNotice({ message: err.message || 'Failed to dismiss tag' })
         } finally {
             setProcessing((prev) => { const next = new Set(prev); next.delete(candidateId); return next })
         }
@@ -286,6 +303,11 @@ export default function AiTagSuggestionsInline({
 
     const body = (
         <>
+            <AiTagPlanLimitBanner
+                notice={tagPlanLimitNotice}
+                onDismiss={() => setTagPlanLimitNotice(null)}
+                primaryColor={brandColor}
+            />
             <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                     {!unifiedDrawerReview && (
