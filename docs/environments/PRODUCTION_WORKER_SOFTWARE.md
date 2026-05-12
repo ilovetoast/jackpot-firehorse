@@ -183,6 +183,35 @@ If `soffice` is missing, the app **skips** Office thumbnails (placeholder UX) an
 
 **Still failing on `.pptx` with xvfb (Signal 6, stack in `libsdlo` / `SvpSalInstance`):** The worker environment is then usually fine; the remaining problem is often **LibreOffice’s Impress build** (Ubuntu 22.04’s **7.3.x** is a frequent offender). Prefer a **newer supported LibreOffice** (distribution updates, **`jammy-backports`**, or [TDF](https://www.libreoffice.org/download/download/) packages on a test host first). The app defaults **`OFFICE_PREVIEW_SOFFICE_EXTRA_ARGS`** to **`--invisible --nolockcheck`** to reduce view-controller crashes; override in `.env` if you need to experiment or set to empty to disable.
 
+<a id="upgrade-libreoffice-jammy-impress"></a>
+
+#### Upgrading LibreOffice when `soffice --version` is still 7.3.x and PPTX aborts
+
+If **`php artisan assets:debug-office-preview`** already shows **`xvfb-run: yes`**, **`soffice extra args`**, and the **Impress crash hint**, further PHP or env tuning will not fix a broken **Impress** binary. Move a **staging worker** to a **newer LibreOffice**, verify **`soffice --version`**, then bake the same steps into production images.
+
+1. **Distro updates first** (may bump the jammy security pocket without adding PPAs):
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get full-upgrade
+   soffice --version
+   ```
+
+2. **Newer release line** — use **one** path; test with the same failing **`.pptx`** after each:
+
+   - **LibreOffice PPA (Fresh)** — widely used to get current stable builds on LTS; third-party, so validate on staging: [LibreOffice PPA on Launchpad](https://launchpad.net/~libreoffice/+archive/ubuntu/ppa). Typical flow:
+
+     ```bash
+     sudo add-apt-repository ppa:libreoffice/ppa
+     sudo apt-get update
+     sudo apt-get install -y libreoffice-nogui
+     soffice --version
+     ```
+
+   - **Document Foundation `.deb` bundle** — download the current **Linux x86-64** `.tar.gz` from [LibreOffice download](https://www.libreoffice.org/download/download/), unpack, install **`DEBS/*.deb`** (and any dependencies the README lists). Prefer a **throwaway VM** first; mixing TDF debs with distro packages can require `apt -f install` to resolve conflicts.
+
+3. **Restart queue workers** (Horizon / `supervisor`) so all processes pick up the new **`soffice`**, then rerun **`assets:debug-office-preview`**. Success means **`LibreOffice version`** is **clearly newer than 7.3.7** and **`PDF exists: yes`**. Optionally set **`OFFICE_LIBREOFFICE_BINARY=`** in `.env` if **`soffice`** is not under **`/usr/bin/soffice`**.
+
 ### Retrofit (SVG thumbnails missing)
 
 ```bash
