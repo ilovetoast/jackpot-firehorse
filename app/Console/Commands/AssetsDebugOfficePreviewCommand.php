@@ -161,6 +161,9 @@ final class AssetsDebugOfficePreviewCommand extends Command
             $xvfbUsed = ($loDiag['xvfb_used'] ?? false) === true;
             $xvfbBin = trim((string) ($loDiag['xvfb_binary'] ?? ''));
             $this->line('xvfb-run: '.($xvfbUsed ? 'yes'.($xvfbBin !== '' ? ' ('.$xvfbBin.')' : '') : 'no'));
+            if (! empty($loDiag['xvfb_run_missing_hint'])) {
+                $this->warn((string) $loDiag['xvfb_run_missing_hint']);
+            }
             $this->line('Command: '.($loDiag['command'] ?? ''));
             $this->line('Exit code: '.(string) ($loDiag['exit_code'] ?? ''));
             $this->line('PDF exists: '.((($loDiag['pdf_exists'] ?? false) === true) ? 'yes' : 'no'));
@@ -242,6 +245,7 @@ final class AssetsDebugOfficePreviewCommand extends Command
                 'soffice_headless_env' => $loDiag['soffice_headless_env'] ?? null,
                 'xvfb_used' => $loDiag['xvfb_used'] ?? null,
                 'xvfb_binary' => $loDiag['xvfb_binary'] ?? null,
+                'xvfb_run_missing_hint' => $loDiag['xvfb_run_missing_hint'] ?? null,
                 'command' => $loDiag['command'] ?? null,
                 'exit_code' => $loDiag['exit_code'] ?? null,
                 'stdout' => $loDiag['stdout'] ?? null,

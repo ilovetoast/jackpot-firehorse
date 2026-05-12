@@ -6,6 +6,7 @@ namespace App\Services\Office;
 
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\Process\ExecutableFinder;
 
 /**
  * Headless LibreOffice conversion of Office documents (Word / Excel / PowerPoint)
@@ -188,6 +189,13 @@ final class LibreOfficeDocumentPreviewService
         ]);
 
         if (! $success) {
+            if (! $xvfbUsed && $this->resolveXvfbMode() === 'auto') {
+                $base['xvfb_run_missing_hint'] =
+                    'xvfb-run was not used (not found for this PHP process — workers often have a minimal PATH). Install package `xvfb`, deploy current app code, and set OFFICE_PREVIEW_XVFB_RUN_BINARY=/usr/bin/xvfb-run if detection still fails.';
+            } elseif (! $xvfbUsed && $this->resolveXvfbMode() === 'off') {
+                $base['xvfb_run_missing_hint'] =
+                    'OFFICE_PREVIEW_USE_XVFB is disabled; LibreOffice runs without xvfb-run (headless Impress may abort with Signal 6).';
+            }
             $base['error_message'] = 'LibreOffice failed to produce a PDF preview. '.$this->abbreviateLoOutput($stdout);
             Log::warning('[LibreOfficeDocumentPreviewService] LibreOffice conversion failed', $base);
             if ($deleteWorkDirWhenUnsuccessful) {
@@ -336,18 +344,28 @@ final class LibreOfficeDocumentPreviewService
     private function findXvfbRunBinary(): ?string
     {
         $configured = config('assets.thumbnail.office.xvfb_run_binary');
-        if (is_string($configured) && $configured !== '' && is_executable($configured)) {
+        if (is_string($configured) && $configured !== '' && is_file($configured) && is_executable($configured)) {
             return $configured;
         }
-        foreach (['/usr/bin/xvfb-run', '/bin/xvfb-run'] as $path) {
+
+        $standardPaths = ['/usr/bin/xvfb-run', '/bin/xvfb-run', '/usr/local/bin/xvfb-run'];
+        foreach ($standardPaths as $path) {
             if (is_file($path) && is_executable($path)) {
                 return $path;
             }
         }
+
+        // Horizon / php-fpm often run with a minimal PATH; ExecutableFinder still searches common dirs.
+        $finder = new ExecutableFinder();
+        $found = $finder->find('xvfb-run', null, $standardPaths);
+        if ($found !== null && is_file($found) && is_executable($found)) {
+            return $found;
+        }
+
         $out = [];
         $rc = 0;
-        @exec('command -v xvfb-run 2>/dev/null', $out, $rc);
-        if ($rc === 0 && ! empty($out[0]) && is_executable($out[0])) {
+        @exec('PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin command -v xvfb-run 2>/dev/null', $out, $rc);
+        if ($rc === 0 && ! empty($out[0]) && is_file($out[0]) && is_executable($out[0])) {
             return $out[0];
         }
 

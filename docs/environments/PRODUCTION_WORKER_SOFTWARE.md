@@ -4,7 +4,22 @@ Use this document when **provisioning or auditing staging/production machines** 
 
 **Web tier:** Often shares the same image as workers. If web does not run workers, it still needs any CLI tool invoked on the request path; matching the worker image avoids drift.
 
+**Treat this file as the install contract** — see [Reproducible worker images](#reproducible-worker-images-aws-and-elsewhere) for how to mirror staging on AWS without drift.
+
 **Deeper behavior** (pipeline stages, formats, retries) is not duplicated here — see [MEDIA_PIPELINE.md](../MEDIA_PIPELINE.md), [UPLOAD_AND_QUEUE.md](../UPLOAD_AND_QUEUE.md), and [PRODUCTION_ARCHITECTURE_AWS.md](PRODUCTION_ARCHITECTURE_AWS.md) for architecture only.
+
+---
+
+## Reproducible worker images (AWS and elsewhere)
+
+Use **one** of these patterns so production matches staging and you can re-spin hosts next week without guesswork:
+
+1. **Container image (ECS, EKS, Fargate, or EC2 + Docker)** — Add a `RUN apt-get install …` layer (or equivalent) that duplicates the [one-shot `apt` block](#packages) plus any optional rows you use (OpenCV, Studio Playwright, etc.). Tag images (`jackpot-worker:2026-05-12`) and deploy by tag, not `:latest` only.
+2. **Golden AMI (EC2 Auto Scaling)** — Use [Packer](https://www.packer.io/) (or AWS Image Builder) with a shell provisioner that runs the same package list. Launch templates reference the AMI ID; bump the AMI when this document changes.
+3. **User-data on first boot** — Acceptable for experiments; for production prefer baked images so boot is fast and failures are visible at **build** time, not when traffic hits.
+4. **Configuration management** — Ansible / Salt / SSM documents can shell out to the same `apt-get install -y` list; keep the list in **one place** (ideally a small `scripts/worker-os-packages.sh` in your infra repo that mirrors this doc — optional follow-up).
+
+**Tracking changes:** When you add a dependency in application code (new shell binary, new PHP extension), update **this markdown file in the same PR** and bump your image/AMI pipeline. Optionally record the **Git commit** of the doc version in your internal runbook (“worker image built from jackpot@`abc1234`”).
 
 ---
 
@@ -43,6 +58,7 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | **ghostscript** | Delegate ImageMagick needs for **PDF** read/write |
 | **poppler-utils** | PDF: `pdftotext`, `pdftoppm`, `pdfinfo` (text extraction and fallbacks) |
 | **libreoffice-nogui** | **Office** → PDF for thumbnails/previews (`soffice`); see [Office documents](#office-worker-libreoffice) |
+| **xvfb** | **Required on Linux workers that run Office previews** — provides **`xvfb-run`** so headless Impress/PPT conversion does not SIGABRT on hosts without a real display; the app uses it when **`OFFICE_PREVIEW_USE_XVFB`** is `auto` (default) or `true` |
 | **fonts-dejavu**, **fonts-liberation**, **fonts-noto** | **Basic font pack** — improves LibreOffice/PDF layout and glyph coverage on minimal server images (often missing desktop fonts) |
 | **librsvg2-bin** | **SVG → raster** (`rsvg-convert`). Without it, SVG thumbnails do not generate |
 | **librsvg2-dev** | Only if you compile extensions against librsvg on the host |
@@ -60,7 +76,7 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 sudo apt-get update
 sudo apt-get install -y \
   imagemagick ghostscript poppler-utils \
-  libreoffice-nogui \
+  libreoffice-nogui xvfb \
   fonts-dejavu fonts-liberation fonts-noto \
   librsvg2-bin librsvg2-dev \
   ffmpeg \
@@ -142,7 +158,7 @@ Thumbnails and grid previews for **Office** uploads use **LibreOffice** in headl
 | Package | Purpose |
 |---------|---------|
 | **libreoffice-nogui** | Provides `soffice` for `--headless --convert-to pdf` without a desktop stack |
-| **xvfb** (recommended when Signal 6 persists) | Supplies **`xvfb-run`** so the app can wrap **`soffice`** with a virtual X display (`OFFICE_PREVIEW_USE_XVFB`, default `auto`) |
+| **xvfb** | **Required with LibreOffice** on server images — supplies **`xvfb-run`** so the app can wrap **`soffice`** with a virtual X display (`OFFICE_PREVIEW_USE_XVFB`, default `auto`) |
 
 **Basic font pack (recommended):** Minimal worker/container images often ship without fonts referenced by Office and PDF pipelines. Install a small set of common families so substitutions and missing-glyph boxes are less likely:
 
@@ -156,11 +172,12 @@ sudo apt install -y fonts-dejavu fonts-liberation fonts-noto
 
 ```bash
 command -v soffice && soffice --version
+command -v xvfb-run && xvfb-run --help >/dev/null && echo "xvfb-run ok"
 ```
 
 If `soffice` is missing, the app **skips** Office thumbnails (placeholder UX) and records a **system incident** on the admin reliability dashboard so operators can install the package.
 
-**Headless crashes (exit 134 / “Fatal exception: Signal 6”):** On minimal servers (no GPU, no X11), LibreOffice may abort while loading Impress/Draw backends. The app sets **`SAL_USE_VPLUGIN=svp`** (software VCL), **`SAL_DISABLE_OPENCL=1`**, and **`SAL_DISABLE_OPENGL=1`** for conversions by default (see `config/assets.php` → `assets.thumbnail.office.headless_extra_env`). Override with **`OFFICE_PREVIEW_SAL_*`** env vars in `.env` if needed. If conversion still aborts, install **`xvfb`** (`apt install xvfb`) so **`xvfb-run`** is available: with **`OFFICE_PREVIEW_USE_XVFB=auto`** (default), the worker wraps **`soffice`** in **`xvfb-run -a`** when that binary exists; use **`true`** to require it (conversion fails fast if missing) or **`false`** to never wrap.
+**Headless crashes (exit 134 / “Fatal exception: Signal 6”):** On minimal servers (no GPU, no X11), LibreOffice may abort while loading Impress/Draw backends without a virtual display. Install **`xvfb`** alongside **`libreoffice-nogui`** (see [Packages](#packages)) so **`xvfb-run`** is on **`PATH`**. If **`php artisan assets:debug-office-preview`** shows **`xvfb-run: no`** but **`command -v xvfb-run`** works in an SSH shell, Horizon/php-fpm may be using a minimal **`PATH`** — set **`OFFICE_PREVIEW_XVFB_RUN_BINARY=/usr/bin/xvfb-run`** in `.env` and **`php artisan config:clear`**. The app sets **`SAL_USE_VPLUGIN=svp`**, **`SAL_DISABLE_OPENCL=1`**, and **`SAL_DISABLE_OPENGL=1`** by default (`config/assets.php` → `assets.thumbnail.office.headless_extra_env`); override with **`OFFICE_PREVIEW_SAL_*`** if needed. With **`OFFICE_PREVIEW_USE_XVFB=auto`** (default), the worker wraps **`soffice`** in **`xvfb-run -a`** when **`xvfb-run`** is found; use **`true`** to require it (fails fast if missing) or **`false`** to never wrap.
 
 ### Retrofit (SVG thumbnails missing)
 
@@ -241,7 +258,7 @@ Run as the **same user** that executes queue workers.
 ### Binaries on PATH
 
 ```bash
-which convert magick pdftotext rsvg-convert ffmpeg ffprobe tesseract
+which convert magick pdftotext rsvg-convert ffmpeg ffprobe tesseract soffice xvfb-run
 ffmpeg -version
 tesseract --version
 rsvg-convert --version
