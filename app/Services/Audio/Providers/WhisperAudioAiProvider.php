@@ -25,10 +25,10 @@ use Illuminate\Support\Facades\Log;
  *     so we estimate cost from the asset's known duration before calling
  *     and short-circuit to budget_exceeded when the call would blow the cap.
  *
- * Mood / tone: Whisper itself doesn't return mood. We derive a coarse
- * mood label from the transcript using a tiny keyword classifier (kept
- * in this class to avoid pulling another model). Future: swap to a real
- * LLM call when budget allows.
+ * Mood / tone: Whisper itself doesn't return mood. For real speech we
+ * derive a coarse mood label from the transcript using a tiny keyword
+ * classifier. Instrumental or hallucinated non-speech lines are folded
+ * into `content_kind=instrumental` with mood/style tags instead.
  */
 class WhisperAudioAiProvider implements AudioAiProviderInterface
 {
@@ -127,19 +127,19 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
             }
 
             $payload = $response->json();
-            $transcript = trim((string) ($payload['text'] ?? ''));
+            $rawTranscript = trim((string) ($payload['text'] ?? ''));
             $chunks = $this->normalizeChunks($payload['segments'] ?? []);
             $detectedLanguage = (string) ($payload['language'] ?? '') ?: null;
-            $mood = $this->deriveMood($transcript);
-            $summary = $this->deriveSummary($transcript);
+            $insights = $this->buildVerbalInsights($rawTranscript, $chunks);
 
             return [
                 'success' => true,
-                'transcript' => $transcript !== '' ? $transcript : null,
-                'transcript_chunks' => $chunks,
-                'summary' => $summary,
-                'mood' => $mood,
-                'detected_language' => $detectedLanguage,
+                'transcript' => $insights['transcript'],
+                'transcript_chunks' => $insights['transcript_chunks'],
+                'summary' => $insights['summary'],
+                'mood' => $insights['mood'],
+                'content_kind' => $insights['content_kind'],
+                'detected_language' => $insights['content_kind'] === 'speech' ? $detectedLanguage : null,
                 'provider' => 'whisper',
                 'cost_cents' => $estimatedCents,
                 'analyzed_at' => now()->toIso8601String(),
@@ -199,9 +199,99 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
     }
 
     /**
-     * Tiny keyword-driven mood classifier — intentionally simple. The point
-     * is to ship *something* useful when the provider doesn't return mood
-     * directly; a real classifier can replace this method later.
+     * Turn raw Whisper text into stored transcript / summary / mood. Music
+     * and other non-verbal clips often yield an empty string or a short
+     * hallucinated outro ("thanks for watching") — treat those as
+     * instrumental so the UI can show mood/style instead of a fake transcript.
+     *
+     * @param  array<int, array{start: float, end: float, text: string}>  $chunks
+     * @return array{
+     *     content_kind: 'speech'|'instrumental',
+     *     transcript: ?string,
+     *     transcript_chunks: array<int, array{start: float, end: float, text: string}>,
+     *     summary: ?string,
+     *     mood: array<int, string>
+     * }
+     */
+    protected function buildVerbalInsights(string $rawTranscript, array $chunks): array
+    {
+        if ($rawTranscript === '' || $this->isLikelyNonVerbalOrHallucination($rawTranscript)) {
+            return [
+                'content_kind' => 'instrumental',
+                'transcript' => null,
+                'transcript_chunks' => [],
+                'summary' => 'No speech detected. This sounds like instrumental or non-verbal audio (music, ambience, or effects).',
+                'mood' => ['instrumental', 'non-verbal'],
+            ];
+        }
+
+        return [
+            'content_kind' => 'speech',
+            'transcript' => $rawTranscript,
+            'transcript_chunks' => $chunks,
+            'summary' => $this->deriveSummary($rawTranscript),
+            'mood' => $this->deriveMood($rawTranscript),
+        ];
+    }
+
+    /**
+     * Whisper often emits stock YouTube outros or bracket tags on music-only
+     * sources. When the transcript is short and dominated by those patterns,
+     * we classify as non-verbal rather than surfacing misleading "speech".
+     */
+    protected function isLikelyNonVerbalOrHallucination(string $transcript): bool
+    {
+        $norm = mb_strtolower(preg_replace('/[\[\]()♪♫]+/u', ' ', $transcript));
+        $norm = trim(preg_replace('/\s+/u', ' ', $norm));
+        if ($norm === '') {
+            return true;
+        }
+
+        $compact = preg_replace('/[^\p{L}\p{N}\s]/u', '', $norm);
+        $compact = trim(preg_replace('/\s+/u', ' ', (string) $compact));
+
+        $exactJunk = [
+            'thanks for watching',
+            'thanks for watching all',
+            'thank you for watching',
+            'thank you so much for watching',
+            'please subscribe',
+            'like and subscribe',
+            'subscribe for more',
+            'see you next time',
+            'bye bye',
+            'music',
+            'instrumental',
+            'music playing',
+            'background music',
+        ];
+        foreach ($exactJunk as $phrase) {
+            if ($compact === $phrase) {
+                return true;
+            }
+        }
+
+        if (mb_strlen($compact) <= 48) {
+            foreach ($exactJunk as $phrase) {
+                if (str_contains($compact, $phrase) && mb_strlen($compact) - mb_strlen($phrase) <= 12) {
+                    return true;
+                }
+            }
+        }
+
+        if (mb_strlen($compact) <= 36) {
+            foreach (['thanks for watching', 'thank you for watching'] as $needle) {
+                if (str_contains($compact, $needle)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Tiny keyword-driven mood classifier — intentionally simple.
      *
      * @return array<int, string>
      */

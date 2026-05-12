@@ -36,7 +36,8 @@ use Illuminate\Support\Facades\Log;
  *   - Mark `metadata.audio.ai_status` = 'queued' / 'processing' / 'pending_provider' /
  *     'failed' / 'completed' / 'budget_exceeded' / 'duration_exceeded' / 'plan_limit_exceeded'.
  *   - Persist `metadata.audio.transcript`, `metadata.audio.transcript_chunks`,
- *     `metadata.audio.summary`, `metadata.audio.mood`,
+ *     `metadata.audio.summary`, `metadata.audio.mood`, `metadata.audio.content_kind`
+ *     (`speech` vs `instrumental` when no usable speech),
  *     `metadata.audio.detected_language`, `metadata.audio.provider`,
  *     `metadata.audio.cost_cents`, `metadata.audio.credits_charged`,
  *     `metadata.audio.analyzed_at` when ready.
@@ -284,6 +285,7 @@ class AudioAiAnalysisService
             'transcript_search_blob' => $this->buildSearchBlob($result['transcript'] ?? null),
             'summary' => $result['summary'] ?? null,
             'mood' => $result['mood'] ?? null,
+            'content_kind' => $result['content_kind'] ?? null,
             'detected_language' => $result['detected_language'] ?? null,
             'provider' => $result['provider'] ?? $providerKey,
             'cost_cents' => $result['cost_cents'] ?? null,
@@ -373,6 +375,7 @@ class AudioAiAnalysisService
                     'provider' => $result['provider'] ?? null,
                     'detected_language' => $result['detected_language'] ?? null,
                     'mood' => $result['mood'] ?? null,
+                    'content_kind' => $result['content_kind'] ?? null,
                     'transcript_chunk_count' => is_array($result['transcript_chunks'] ?? null)
                         ? count($result['transcript_chunks'])
                         : 0,

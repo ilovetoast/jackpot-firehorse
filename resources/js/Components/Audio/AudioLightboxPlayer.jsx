@@ -39,12 +39,34 @@ function formatRate(rate) {
     return `${rate.toFixed(2).replace(/0$/, '')}x`
 }
 
+function formatMoodList(mood) {
+    if (mood == null) return ''
+    if (Array.isArray(mood)) return mood.filter(Boolean).join(', ')
+    return String(mood)
+}
+
 export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' }) {
     const audioMeta = asset?.metadata?.audio || {}
     const transcript = audioMeta?.transcript
     const summary = audioMeta?.summary
     const mood = audioMeta?.mood
+    const contentKind = audioMeta?.content_kind
     const aiStatus = audioMeta?.ai_status
+
+    const [aiDialog, setAiDialog] = useState(null)
+
+    useEffect(() => {
+        setAiDialog(null)
+    }, [asset?.id])
+
+    const hasTranscript =
+        typeof transcript === 'string' && transcript.trim() !== '' && contentKind !== 'instrumental'
+    const hasMoodOrSummary =
+        (typeof summary === 'string' && summary.trim() !== '') ||
+        (Array.isArray(mood) && mood.length > 0) ||
+        (typeof mood === 'string' && mood.trim() !== '')
+    const showAiCompletedStrip =
+        aiStatus === 'completed' && (hasTranscript || hasMoodOrSummary || contentKind === 'instrumental')
 
     const src = useMemo(
         () =>
@@ -135,6 +157,12 @@ export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' })
             const tag = (e.target?.tagName || '').toLowerCase()
             if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return
             if (!rootRef.current || !document.body.contains(rootRef.current)) return
+            if (aiDialog && e.key === 'Escape') {
+                e.preventDefault()
+                setAiDialog(null)
+                return
+            }
+            if (aiDialog) return
             switch (e.key) {
                 case ' ':
                 case 'k':
@@ -160,12 +188,12 @@ export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' })
         }
         document.addEventListener('keydown', handler)
         return () => document.removeEventListener('keydown', handler)
-    }, [toggle, skip])
+    }, [toggle, skip, aiDialog])
 
     return (
         <div
             ref={rootRef}
-            className="flex w-full max-w-3xl flex-col gap-4 rounded-2xl bg-slate-950 p-6 text-white shadow-2xl"
+            className="relative flex w-full max-w-3xl flex-col gap-4 rounded-2xl bg-slate-950 p-6 text-white shadow-2xl"
         >
             <div className="flex items-baseline justify-between gap-3">
                 <div className="min-w-0">
@@ -286,30 +314,92 @@ export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' })
                 </div>
             </div>
 
-            {(transcript || summary || mood) && (
-                <div className="mt-1 grid gap-3 rounded-xl bg-white/5 p-4 text-sm ring-1 ring-white/10">
-                    {summary && (
-                        <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Summary</p>
-                            <p className="mt-1 text-slate-200">{summary}</p>
+            {showAiCompletedStrip && (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm ring-1 ring-white/10">
+                    <p className="min-w-0 flex-1 text-xs text-slate-400">
+                        AI summary, mood, and transcript (when speech is detected) — same idea as PDF &quot;View&quot;
+                        extracted text.
+                    </p>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {hasMoodOrSummary && (
+                            <button
+                                type="button"
+                                onClick={() => setAiDialog('insights')}
+                                className="inline-flex items-center rounded border border-white/25 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-100 transition hover:bg-white/10"
+                            >
+                                View mood &amp; style
+                            </button>
+                        )}
+                        {hasTranscript && (
+                            <button
+                                type="button"
+                                onClick={() => setAiDialog('transcript')}
+                                className="inline-flex items-center rounded border border-white/25 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-100 transition hover:bg-white/10"
+                            >
+                                View transcript
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {aiDialog && (
+                <div
+                    className="absolute inset-0 z-50 flex items-end justify-center rounded-2xl bg-black/70 p-3 sm:items-center"
+                    role="presentation"
+                    onClick={() => setAiDialog(null)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="audio-ai-dialog-title"
+                        className="max-h-[min(72vh,520px)] w-full max-w-lg overflow-hidden rounded-xl border border-white/15 bg-slate-950 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
+                            <h3 id="audio-ai-dialog-title" className="text-sm font-semibold text-white">
+                                {aiDialog === 'transcript' ? 'Transcript' : 'Mood & style'}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setAiDialog(null)}
+                                className="rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition hover:bg-white/10 hover:text-white"
+                            >
+                                Close
+                            </button>
                         </div>
-                    )}
-                    {mood && (
-                        <div>
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Mood</p>
-                            <p className="mt-1 text-slate-200">{Array.isArray(mood) ? mood.join(', ') : mood}</p>
+                        <div className="max-h-[min(60vh,440px)] overflow-y-auto px-4 py-3 text-sm text-slate-200">
+                            {aiDialog === 'insights' && (
+                                <div className="space-y-4">
+                                    {summary && (
+                                        <div>
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                Summary
+                                            </p>
+                                            <p className="mt-1 whitespace-pre-line leading-relaxed">{summary}</p>
+                                        </div>
+                                    )}
+                                    {(Array.isArray(mood) ? mood.length > 0 : mood) ? (
+                                        <div>
+                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                Mood &amp; style
+                                            </p>
+                                            <p className="mt-1">{formatMoodList(mood)}</p>
+                                        </div>
+                                    ) : null}
+                                    {contentKind === 'instrumental' && (
+                                        <p className="text-xs text-slate-500">
+                                            No speech transcript for this file — tags describe overall character instead
+                                            of spoken words.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                            {aiDialog === 'transcript' && hasTranscript && (
+                                <p className="whitespace-pre-line leading-relaxed">{transcript}</p>
+                            )}
                         </div>
-                    )}
-                    {transcript && (
-                        <details className="text-slate-200" open={!summary}>
-                            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                Transcript
-                            </summary>
-                            <p className="mt-2 max-h-64 overflow-y-auto whitespace-pre-line text-sm leading-relaxed">
-                                {transcript}
-                            </p>
-                        </details>
-                    )}
+                    </div>
                 </div>
             )}
 

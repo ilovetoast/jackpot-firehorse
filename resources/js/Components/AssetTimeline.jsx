@@ -96,9 +96,7 @@ export default function AssetTimeline({
                 : 'Web playback MP3 generation failed',
             // Audio AI insights (Whisper transcript + mood + summary).
             'asset.audio_ai.started': 'Audio AI analysis started',
-            'asset.audio_ai.completed': metadata?.credits_charged
-                ? `Audio AI analysis completed (${metadata.credits_charged} credit${metadata.credits_charged === 1 ? '' : 's'}${metadata?.detected_language ? `, ${metadata.detected_language}` : ''})`
-                : 'Audio AI analysis completed',
+            'asset.audio_ai.completed': 'Audio AI analysis completed',
             // asset.audio_ai.skipped / .failed: handled at top of formatEventType (operator vs library user)
             'asset.audio_ai.skipped': 'Audio AI analysis skipped',
             'asset.audio_ai.failed': 'Audio AI analysis failed',

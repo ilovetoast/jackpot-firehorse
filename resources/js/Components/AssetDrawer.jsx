@@ -2603,6 +2603,21 @@ export default function AssetDrawer({
         thumbnailRetryCount,
     ])
 
+    /** Audio AI finished with transcript / summary / mood — user should open fullscreen to read them. */
+    const drawerAudioAiHasResults = useMemo(() => {
+        if (!isAudio || !displayAsset?.metadata?.audio) {
+            return false
+        }
+        const a = displayAsset.metadata.audio
+        if (String(a.ai_status || '').toLowerCase() !== 'completed') {
+            return false
+        }
+        const t = typeof a.transcript === 'string' && a.transcript.trim() !== ''
+        const s = typeof a.summary === 'string' && a.summary.trim() !== ''
+        const m = Array.isArray(a.mood) ? a.mood.length > 0 : typeof a.mood === 'string' && a.mood.trim() !== ''
+        return t || s || m
+    }, [isAudio, displayAsset?.metadata?.audio])
+
     const openDrawerLightbox = useCallback(() => {
         if (!canOpenDrawerLightbox) {
             return
@@ -2822,7 +2837,7 @@ export default function AssetDrawer({
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
-        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile)) {
+        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile || isAudio)) {
             initialZoomAppliedRef.current = true
             onInitialZoomConsumed?.()
             return
@@ -2853,6 +2868,7 @@ export default function AssetDrawer({
         isVideo,
         isVirtualGoogleFont,
         isFontFile,
+        isAudio,
         imageAssets,
         onInitialZoomConsumed,
         initialVideoSeekSeconds,
@@ -7415,6 +7431,23 @@ export default function AssetDrawer({
                         defaultExpanded={false}
                         focusRingColor={brandPrimaryOnWhite}
                     >
+                        {drawerAudioAiHasResults && (
+                            <div className="space-y-1.5 border-b border-gray-100 px-3 pb-3">
+                                <p className="text-xs leading-snug text-gray-600">
+                                    <span className="font-medium text-gray-800">AI insights</span> (summary, mood &amp; style, and transcript when there is speech) live in
+                                    fullscreen audio view — open the lightbox and use &quot;View mood &amp; style&quot; / &quot;View transcript&quot;.
+                                </p>
+                                {canOpenDrawerLightbox && (
+                                    <button
+                                        type="button"
+                                        onClick={() => openDrawerLightbox()}
+                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                                    >
+                                        Open fullscreen audio
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         <AssetTimeline 
                             events={activityEvents} 
                             loading={activityLoading}
