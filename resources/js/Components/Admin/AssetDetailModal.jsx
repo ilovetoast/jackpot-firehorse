@@ -575,6 +575,7 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                                     <thead>
                                         <tr>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Version</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Version ID</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Size</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-slate-500 uppercase">Uploaded</th>
@@ -593,6 +594,14 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                                             return (
                                                 <tr key={v.id} className={isArchived ? 'bg-slate-50' : ''}>
                                                     <td className="px-4 py-3 font-medium">v{v.version_number}</td>
+                                                    <td className="px-4 py-3">
+                                                        <code
+                                                            className="break-all rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-800"
+                                                            title="Use as --version-id for artisan (asset_versions.id)"
+                                                        >
+                                                            {v.id}
+                                                        </code>
+                                                    </td>
                                                     <td className="px-4 py-3">
                                                         <span className={`rounded px-2 py-0.5 text-xs ${statusClass}`}>{status}</span>
                                                         {isArchived && <span className="ml-1 rounded px-2 py-0.5 text-xs bg-slate-200 text-slate-700">Archived</span>}
