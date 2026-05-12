@@ -551,17 +551,18 @@ return [
     |
     | Async analysis for audio assets (transcript, summary, mood). Triggered
     | after the per-asset processing chain via RunAudioAiAnalysisJob on the
-    | `ai` queue. Provider is optional — when no provider is set the job
-    | marks `metadata.audio.ai_status = 'pending_provider'` and the rest of
-    | the pipeline still finishes cleanly (waveform + ffprobe metadata).
+    | `ai` queue. Defaults: provider `whisper` (OpenAI transcriptions, same
+    | family as `ai.agents.audio_insights` / whisper-1) and API key from
+    | `OPENAI_API_KEY` via `whisper.api_key` below. No extra .env keys are
+    | required for that path — only set env vars if you need overrides.
     |
     */
     'audio_ai' => [
         'enabled' => (bool) env('ASSET_AUDIO_AI_ENABLED', true),
         'auto_run_after_upload' => (bool) env('ASSET_AUDIO_AI_AUTO_RUN_AFTER_UPLOAD', true),
-        // Set to a registered provider key (e.g. 'whisper', 'assemblyai') to
-        // activate transcript/mood extraction inside AudioAiAnalysisService.
-        'provider' => env('ASSET_AUDIO_AI_PROVIDER', null),
+        // Registered keys: {@see \App\Services\Audio\AudioAiAnalysisService::resolveProvider}
+        // Default `whisper` = OpenAI transcriptions API (aligned with ai.agents.audio_insights).
+        'provider' => env('ASSET_AUDIO_AI_PROVIDER', 'whisper'),
         'transcription_enabled' => (bool) env('ASSET_AUDIO_AI_TRANSCRIPTION', true),
         'mood_enabled' => (bool) env('ASSET_AUDIO_AI_MOOD', true),
         // Phase 4: Whisper provider settings — only used when provider='whisper'.

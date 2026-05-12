@@ -706,31 +706,6 @@ export default function AssetDrawer({
         return () => cancelAnimationFrame(id)
     }, [asset?.id])
 
-    // Fetch activity events when asset is set
-    useEffect(() => {
-        if (externalCollectionGuest || !asset || !asset.id || asset.is_virtual_google_font) {
-            setActivityEvents([])
-            setActivityLoading(false)
-            return
-        }
-
-        setActivityLoading(true)
-        window.axios.get(`/app/assets/${asset.id}/activity`)
-            .then(response => {
-                if (response.data && response.data.events) {
-                    setActivityEvents(response.data.events)
-                } else {
-                    setActivityEvents([])
-                }
-                setActivityLoading(false)
-            })
-            .catch(error => {
-                console.error('Error fetching activity events:', error)
-                setActivityEvents([])
-                setActivityLoading(false)
-            })
-    }, [asset?.id, externalCollectionGuest])
-
     // C5: Fetch collections this asset is in (for "In X collections")
     // C9.1: Always fetch collections if asset exists (not dependent on collectionContext)
     useEffect(() => {
@@ -909,6 +884,33 @@ export default function AssetDrawer({
     // CRITICAL: Drawer must tolerate undefined asset during async updates
     // Asset may be temporarily undefined while localAssets array is being updated
     const displayAsset = drawerAsset || asset || null
+
+    const fetchActivityEvents = useCallback(async () => {
+        const aid = displayAsset?.id
+        if (externalCollectionGuest || !aid || displayAsset?.is_virtual_google_font) {
+            setActivityEvents([])
+            setActivityLoading(false)
+            return
+        }
+        setActivityLoading(true)
+        try {
+            const response = await window.axios.get(`/app/assets/${aid}/activity`)
+            if (response.data?.events) {
+                setActivityEvents(response.data.events)
+            } else {
+                setActivityEvents([])
+            }
+        } catch (error) {
+            console.error('Error fetching activity events:', error)
+            setActivityEvents([])
+        } finally {
+            setActivityLoading(false)
+        }
+    }, [displayAsset?.id, displayAsset?.is_virtual_google_font, externalCollectionGuest])
+
+    useEffect(() => {
+        void fetchActivityEvents()
+    }, [fetchActivityEvents])
 
     const drawerUploadPreviewSnapshot = useSyncExternalStore(
         subscribeUploadPreviewRegistry,
@@ -3773,6 +3775,9 @@ export default function AssetDrawer({
                 setToastType('success')
                 setTimeout(() => setToastMessage(null), 5000)
             }
+            void fetchActivityEvents()
+            setTimeout(() => void fetchActivityEvents(), 2500)
+            setTimeout(() => void fetchActivityEvents(), 10000)
             refetchProcessingGuardStatus()
             router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
         } finally {
