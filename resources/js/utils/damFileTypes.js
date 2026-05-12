@@ -28,6 +28,7 @@
  *   coming_soon?: Record<string, { name: string, message: string, extensions: string[] }>
  *   types_for_help?: Array<Record<string, unknown>>
  *   grid_file_type_filter_options?: { grouped: Array<{ group_key: string, group_label: string, types: Array<{ key: string, label: string }> }> }
+ *   registry_reference?: { canonical_config: string, worker_preview_doc: string }
  * }} DamFileTypesPayload
  */
 
@@ -49,6 +50,10 @@ function emptyPayload() {
         coming_soon: {},
         types_for_help: [],
         grid_file_type_filter_options: { grouped: [] },
+        registry_reference: {
+            canonical_config: 'config/file_types.php',
+            worker_preview_doc: 'docs/environments/PRODUCTION_WORKER_SOFTWARE.md#office-worker-libreoffice',
+        },
     }
 }
 

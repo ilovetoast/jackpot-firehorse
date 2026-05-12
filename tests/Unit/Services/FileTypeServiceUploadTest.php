@@ -158,4 +158,12 @@ class FileTypeServiceUploadTest extends TestCase
         $this->assertTrue($this->svc->matchesRegistryType('application/pdf', 'pdf', 'pdf'));
         $this->assertFalse($this->svc->matchesRegistryType('application/pdf', 'pdf', 'office'));
     }
+
+    public function test_get_upload_registry_for_frontend_includes_registry_reference(): void
+    {
+        $payload = $this->svc->getUploadRegistryForFrontend();
+        $this->assertArrayHasKey('registry_reference', $payload);
+        $this->assertSame('config/file_types.php', $payload['registry_reference']['canonical_config']);
+        $this->assertStringContainsString('PRODUCTION_WORKER_SOFTWARE.md', $payload['registry_reference']['worker_preview_doc']);
+    }
 }

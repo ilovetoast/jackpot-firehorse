@@ -866,6 +866,7 @@ class FileTypeService
      *   blocked_groups: array<string, array{extensions: list<string>, mime_types: list<string>, message: string, code_suffix: string}>,
      *   coming_soon: array<string, array{name: string, message: string, extensions: list<string>}>,
      *   grid_file_type_filter_options: array{grouped: list<array<string, mixed>>},
+     *   registry_reference: array{canonical_config: string, worker_preview_doc: string},
      * }
      */
     public function getUploadRegistryForFrontend(): array
@@ -954,6 +955,11 @@ class FileTypeService
             'coming_soon' => $comingSoon,
             'types_for_help' => $typesForHelp,
             'grid_file_type_filter_options' => $this->buildGridFileTypeFilterOptionsPayload(),
+            // Single source for preview/thumbnail policy + worker deps (paths for operators / UI).
+            'registry_reference' => [
+                'canonical_config' => 'config/file_types.php',
+                'worker_preview_doc' => 'docs/environments/PRODUCTION_WORKER_SOFTWARE.md#office-worker-libreoffice',
+            ],
         ];
     }
 

@@ -383,8 +383,8 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             // Dynamic timeout and pixel guardrails (before any heavy work)
             // Require dimensions for plain raster images (safety: avoid melting worker on huge unknown-size images).
-            // PDF/video/SVG/PSD/PSB: dimensions often missing on the row until we decode; ThumbnailGenerationService
-            // gets width/height from the renderer (or Imagick for PSD).
+            // PDF/video/SVG/PSD/PSB/office/HEIC: dimensions often missing on the row until we decode (or LibreOffice
+            // converts Office → PDF → raster); ThumbnailGenerationService gets width/height from the renderer.
             // HEIC: width/height often missing when EXIF/getimagesize did not run or Imagick could not probe during
             // metadata extraction (e.g. worker without HEIF delegate); ThumbnailGenerationService still reads size
             // via Imagick at decode time when HEIF support is present — do not soft-skip as dimensions_unknown first.
@@ -392,7 +392,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             $mime = $version ? $version->mime_type : $asset->mime_type;
             $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
             $fileType = $fileTypeService->detectFileType($mime, $ext);
-            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic'], true);
+            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic', 'office'], true);
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;

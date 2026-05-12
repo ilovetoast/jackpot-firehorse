@@ -2916,6 +2916,13 @@ export default function AssetDrawer({
     /** Disables processing actions while the asset is actively running server-side pipeline work */
     const isProcessingDrawerBusy = thumbnailStatus === 'processing' || isAssetAnalysisPipelineRunning
 
+    useEffect(() => {
+        if (!displayAsset?.id || isVirtualGoogleFont) return
+        if (thumbnailStatus === 'skipped' || thumbnailStatus === 'failed') {
+            setPreviewSidebarActionsExpanded(true)
+        }
+    }, [displayAsset?.id, thumbnailStatus, isVirtualGoogleFont])
+
     // Status badge uses Asset.status (visibility only: VISIBLE, HIDDEN, FAILED)
     // If status is VISIBLE, asset was uploaded correctly (not processing)
     // Asset.status represents visibility only, not processing state
@@ -3362,8 +3369,8 @@ export default function AssetDrawer({
             return false
         }
         
-        // Show for PENDING (e.g. after Remove Preview) or SKIPPED (was unsupported)
-        if (thumbnailStatus !== 'skipped' && thumbnailStatus !== 'pending') {
+        // Show for PENDING (e.g. after Remove Preview), SKIPPED (pipeline skipped), or FAILED (retry)
+        if (thumbnailStatus !== 'skipped' && thumbnailStatus !== 'pending' && thumbnailStatus !== 'failed') {
             return false
         }
         
@@ -3373,19 +3380,20 @@ export default function AssetDrawer({
     }, [displayAsset, thumbnailStatus, canRetryThumbnails, generateLoading])
 
     const canRegeneratePreviewInProcessingSection = useMemo(() => {
-        if (!displayAsset || !canRetryThumbnails) return false
-        if (canGenerateThumbnail) return true
-        if (
-            canRegenerateThumbnailsAdmin &&
-            supportsThumbnail(
-                (displayAsset.mime_type || '').toLowerCase(),
-                displayAsset.file_extension || displayAsset.original_filename?.split?.('.')?.pop() || '',
-            )
-        ) {
-            return true
+        if (!displayAsset) return false
+        const mime = (displayAsset.mime_type || '').toLowerCase()
+        const ext =
+            displayAsset.file_extension || displayAsset.original_filename?.split?.('.')?.pop() || ''
+        if (!supportsThumbnail(mime, ext)) {
+            return false
         }
+        // Retry: skipped/pending path. Admin: style refresh on completed assets. Either permission is enough
+        // to show Preview & Styles actions — do not require retry_thumbnails before checking admin (was hiding
+        // Office/sheet recoveries for admins who only had regenerate_thumbnails_admin).
+        if (canGenerateThumbnail) return true
+        if (canRegenerateThumbnailsAdmin) return true
         return false
-    }, [displayAsset, canGenerateThumbnail, canRegenerateThumbnailsAdmin, canRetryThumbnails])
+    }, [displayAsset, canGenerateThumbnail, canRegenerateThumbnailsAdmin])
 
     const showDrawerFocalEditorControls = useMemo(
         () =>
@@ -3613,7 +3621,14 @@ export default function AssetDrawer({
             return null
         }
         if (st.state === 'NOT_SUPPORTED' || st.state === 'SKIPPED' || st.state === 'FAILED') {
-            return 'Preview was unable to generate.'
+            const meta = displayAsset.metadata || {}
+            const detail =
+                (typeof meta.thumbnail_skip_message === 'string' && meta.thumbnail_skip_message.trim()) ||
+                (typeof displayAsset.thumbnail_error === 'string' && displayAsset.thumbnail_error.trim()) ||
+                (typeof meta.preview_unavailable_user_message === 'string' &&
+                    meta.preview_unavailable_user_message.trim()) ||
+                (typeof meta.thumbnail_skip_reason === 'string' && meta.thumbnail_skip_reason.trim())
+            return detail || 'Preview was unable to generate.'
         }
         return null
     }, [
@@ -6880,7 +6895,7 @@ export default function AssetDrawer({
                                                 </p>
                                             </div>
                                         )}
-                                        {generateError && canGenerateThumbnail && (
+                                        {generateError && (canGenerateThumbnail || canRetryThumbnails) && (
                                             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
                                                 <p className="text-xs text-red-800">{generateError}</p>
                                             </div>

@@ -28,17 +28,18 @@ final class LibreOfficeDocumentPreviewService
             return $configured;
         }
 
-        foreach (['soffice', '/usr/bin/soffice', '/usr/lib/libreoffice/program/soffice'] as $candidate) {
-            if ($candidate === 'soffice') {
-                $out = [];
-                $rc = 0;
-                @exec('command -v soffice 2>/dev/null', $out, $rc);
-                if ($rc === 0 && ! empty($out[0]) && is_executable($out[0])) {
-                    return $out[0];
-                }
-            } elseif (is_file($candidate) && is_executable($candidate)) {
-                return $candidate;
+        // Prefer known Ubuntu/Debian paths first (queue workers may have a minimal PATH).
+        foreach (['/usr/bin/soffice', '/usr/lib/libreoffice/program/soffice', '/usr/bin/libreoffice'] as $path) {
+            if (is_file($path) && is_executable($path)) {
+                return $path;
             }
+        }
+
+        $out = [];
+        $rc = 0;
+        @exec('command -v soffice 2>/dev/null', $out, $rc);
+        if ($rc === 0 && ! empty($out[0]) && is_executable($out[0])) {
+            return $out[0];
         }
 
         return null;

@@ -45,6 +45,7 @@ import { useSelectionOptional } from '../contexts/SelectionContext'
 import { router, usePage } from '@inertiajs/react'
 import { resolveTrackedSingleAssetFileUrl, saveUrlAsDownload } from '../utils/singleAssetDownload'
 import { resolve, isExcludedFromGenericLoop, hasCollectionField, CONTEXT, WIDGET } from '../utils/widgetResolver'
+import { hexToRgba } from '../utils/colorUtils'
 
 const GROUP_LABELS = {
     classification: 'Classification',
@@ -788,10 +789,19 @@ export default function AssetDetailPanel({
                                 <span
                                     className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${
                                         lb
-                                            ? 'bg-neutral-900/80 border-neutral-600'
+                                            ? 'backdrop-blur-sm shadow-sm'
                                             : 'bg-green-100 text-green-700 border-green-300'
                                     }`}
-                                    style={lb ? { color: brandPrimary } : undefined}
+                                    style={
+                                        lb
+                                            ? {
+                                                  backgroundColor: hexToRgba(brandPrimary, 0.22),
+                                                  borderColor: hexToRgba(brandPrimary, 0.5),
+                                                  color: hexToRgba('#f5f3ff', 0.98),
+                                                  boxShadow: `0 0 0 1px ${hexToRgba(brandPrimary, 0.12)} inset`,
+                                              }
+                                            : undefined
+                                    }
                                 >
                                     Published
                                 </span>

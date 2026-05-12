@@ -103,6 +103,8 @@ RUN apt-get update \
         ghostscript \
         poppler-utils \
         libreoffice-nogui \
+    && (command -v soffice >/dev/null 2>&1 || test -x /usr/lib/libreoffice/program/soffice) \
+    && (soffice --version || /usr/lib/libreoffice/program/soffice --version) \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

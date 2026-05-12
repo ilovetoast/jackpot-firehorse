@@ -10,6 +10,7 @@ use App\Models\Collection;
 use App\Models\Download;
 use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\FeatureGate;
+use App\Services\FileTypeService;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Support\PipelineQueueResolver;
 use App\Support\ThumbnailMetadata;
@@ -1003,6 +1004,14 @@ class AssetThumbnailController extends Controller
             } elseif ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') {
                 $isSupported = true;
                 $supportReason = $extension === 'psb' ? 'PSB' : 'PSD';
+            }
+        }
+
+        // Office (Word / Excel / PowerPoint): LibreOffice → PDF → raster — must match {@see FileTypeService::isOfficeDocument} / pipeline.
+        if (! $isSupported && class_exists(\Spatie\PdfToImage\Pdf::class) && extension_loaded('imagick')) {
+            if (app(FileTypeService::class)->isOfficeDocument($mimeType, $extension)) {
+                $isSupported = true;
+                $supportReason = 'Office';
             }
         }
 
