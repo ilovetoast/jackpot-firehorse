@@ -414,7 +414,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
             <AppHead title="Admin Dashboard" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-8">
                         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Admin Dashboard</h1>

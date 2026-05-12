@@ -220,7 +220,7 @@ export default function BrandIntelligenceShow({
             <AppHead title={`EBI: ${asset.name}`} suffix="Admin" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-slate-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     <div className="mb-6">
                         <Link href="/app/admin/brand-intelligence" className="text-sm font-medium text-slate-500 hover:text-slate-700">
                             ← Brand Intelligence

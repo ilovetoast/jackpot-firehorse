@@ -18,12 +18,12 @@ export default function AdminShell({
     return (
         <div>
             <div className="border-b border-slate-800 bg-slate-900">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div className="mx-auto w-full max-w-admin-shell px-4 sm:px-6 lg:px-8">
                     <AdminGlobalNav activeCenter={centerKey} />
                 </div>
             </div>
             <div className="bg-slate-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+                <div className="mx-auto w-full max-w-admin-shell px-4 sm:px-6 lg:px-8 py-6">
                     <AdminBreadcrumbs items={breadcrumbs} />
                     <header className="mb-6">
                         <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{title}</h1>

@@ -85,7 +85,7 @@ export default function DefaultsReview({ groups, options_by_field_id, meta }) {
             <AppHead title="Onboarding: default categories and fields" suffix="Admin" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-slate-50">
-                <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-admin-shell px-4 py-8 sm:px-6 lg:px-8">
                     <div className="mb-6">
                         <Link
                             href="/app/admin"

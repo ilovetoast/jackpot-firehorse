@@ -699,7 +699,7 @@ export default function SystemCategories({ templates, asset_types, admin_metadat
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-8">
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4">

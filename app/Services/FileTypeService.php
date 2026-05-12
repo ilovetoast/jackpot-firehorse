@@ -76,9 +76,21 @@ class FileTypeService
 
     /**
      * Word / Excel / PowerPoint (legacy and OpenXML) as registered under the `office` type.
+     *
+     * Extension is authoritative when it matches `file_types.types.office.extensions`: {@see detectFileType}
+     * returns the first MIME match in registry order, so a wrong MIME (e.g. image/jpeg on a stored .pptx)
+     * would otherwise resolve to `image` and this method would incorrectly return false.
      */
     public function isOfficeDocument(?string $mimeType = null, ?string $extension = null): bool
     {
+        $extension = $extension ? strtolower($extension) : null;
+        if ($extension !== null && $extension !== '') {
+            $officeExtensions = config('file_types.types.office.extensions', []);
+            if (in_array($extension, $officeExtensions, true)) {
+                return true;
+            }
+        }
+
         return $this->matchesRegistryType($mimeType, $extension, 'office');
     }
 

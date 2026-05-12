@@ -108,7 +108,7 @@ export default function DeletionErrors({ auth, errors, filters, errorTypeCounts 
             <AppHead title="Deletion Errors" suffix="Admin" />
 
             <div className="py-12">
-                <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
+                <div className="max-w-admin-shell mx-auto sm:px-6 lg:px-8">
                     {/* Filters */}
                     <div className="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-6">
                         <div className="p-6 border-b border-gray-200">

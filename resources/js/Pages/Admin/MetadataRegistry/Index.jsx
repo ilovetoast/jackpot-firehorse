@@ -369,7 +369,7 @@ export default function MetadataRegistryIndex({
         <div className="min-h-full">
             <AppNav brand={auth?.activeBrand ?? null} tenant={null} />
             <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                <div className="mx-auto max-w-admin-shell px-4 py-8 sm:px-6 lg:px-8">
                     <div className="mb-8">
                         <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
                             <Link

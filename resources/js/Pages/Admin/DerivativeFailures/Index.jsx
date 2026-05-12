@@ -83,7 +83,7 @@ export default function DerivativeFailuresIndex({
             <AppHead title="Derivative Failures" suffix="Admin" />
 
             <div className="py-12">
-                <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
+                <div className="max-w-admin-shell mx-auto sm:px-6 lg:px-8">
                     {/* Stats */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">

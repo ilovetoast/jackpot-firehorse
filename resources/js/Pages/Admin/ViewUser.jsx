@@ -128,7 +128,7 @@ export default function ViewUser({ user, companies, brand_assignments, activitie
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     {/* Back Button */}
                     <div className="mb-6">
                         <Link

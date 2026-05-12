@@ -61,7 +61,7 @@ export default function StripeManagement({
         <div className="min-h-full">
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-gray-50">
-                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     {/* Header */}
                     <div className="mb-8">
                         <Link href="/app/admin" className="text-sm font-medium text-gray-500 hover:text-gray-700 mb-4 inline-block">

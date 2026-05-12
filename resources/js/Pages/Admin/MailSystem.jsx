@@ -41,7 +41,7 @@ export default function MailSystem({
             <AppHead title="Mail system" suffix="Admin" />
             <AppNav brand={auth.activeBrand} tenant={null} />
             <main className="bg-slate-50">
-                <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     <div className="mb-6">
                         <Link
                             href="/app/admin"

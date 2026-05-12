@@ -39,6 +39,10 @@ export default {
         secondary: 'var(--secondary)',
         accent: 'var(--accent)',
       },
+      maxWidth: {
+        /** Site admin: ~1600px cap, centered — not full-bleed on ultra-wide; respects small viewports. */
+        'admin-shell': 'min(1600px, calc(100vw - 2rem))',
+      },
       keyframes: {
         'fade-slide-in': {
           '0%': { opacity: '0', transform: 'translateY(2px)' },

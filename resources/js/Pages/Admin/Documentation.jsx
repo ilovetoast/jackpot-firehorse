@@ -84,7 +84,7 @@ export default function Documentation() {
         <div className="min-h-full">
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-slate-100/80">
-                <div className="mx-auto max-w-[90rem] px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mx-auto max-w-admin-shell px-4 sm:px-6 lg:px-8 py-8">
                     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <div className="flex items-center gap-3 mb-2">

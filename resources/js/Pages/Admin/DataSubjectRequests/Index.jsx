@@ -34,7 +34,7 @@ export default function DataSubjectRequestsIndex({ requests = [] }) {
         <div className="min-h-full bg-gray-50">
             <AppHead title="Data subject requests" />
             <AppNav brand={auth?.activeBrand} tenant={auth?.activeCompany} />
-            <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            <main className="mx-auto max-w-admin-shell px-4 py-8 sm:px-6 lg:px-8">
                 <div className="mb-6">
                     <h1 className="text-2xl font-bold text-gray-900">Data subject requests</h1>
                     <p className="mt-1 text-sm text-gray-600">

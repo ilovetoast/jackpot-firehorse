@@ -4209,8 +4209,11 @@ class ThumbnailGenerationService
             // Legacy (Starter): use asset only. No mixed fallback.
             $mime = $asset->mime_type;
             $ext = $asset->storage_root_path
-                ? strtolower(pathinfo($asset->storage_root_path, PATHINFO_EXTENSION))
+                ? strtolower(pathinfo((string) $asset->storage_root_path, PATHINFO_EXTENSION))
                 : '';
+            if ($ext === '' && $asset->original_filename) {
+                $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
+            }
         }
         $ext = $ext ?: '';
         $fileType = $fileTypeService->detectFileType($mime, $ext);
