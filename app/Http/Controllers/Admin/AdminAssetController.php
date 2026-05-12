@@ -772,9 +772,10 @@ class AdminAssetController extends Controller
 
         $asset->loadMissing('currentVersion');
         $queue = \App\Support\PipelineQueueResolver::imagesQueueForAsset($asset);
+        $thumbnailJobId = $asset->currentVersion?->id ?? $asset->id;
 
         Bus::chain([
-            new GenerateThumbnailsJob($asset->id),
+            new GenerateThumbnailsJob($thumbnailJobId),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
         ])
@@ -1254,7 +1255,8 @@ class AdminAssetController extends Controller
                 break;
             case 'regenerate_thumbnails':
                 $asset->loadMissing('currentVersion');
-                \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(\App\Support\PipelineQueueResolver::imagesQueueForAsset($asset));
+                $thumbId = $asset->currentVersion?->id ?? $asset->id;
+                \App\Jobs\GenerateThumbnailsJob::dispatch($thumbId)->onQueue(\App\Support\PipelineQueueResolver::imagesQueueForAsset($asset));
                 break;
             case 'generate_video_previews':
                 $this->adminQueueHoverVideoPreviewRegeneration($asset);

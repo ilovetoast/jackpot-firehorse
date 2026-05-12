@@ -1603,9 +1603,10 @@ class AssetMetadataController extends Controller
 
         $asset->loadMissing('currentVersion');
         $rerunQueue = \App\Support\PipelineQueueResolver::imagesQueueForAsset($asset);
+        $thumbnailJobId = $asset->currentVersion?->id ?? $asset->id;
 
         Bus::chain([
-            new GenerateThumbnailsJob($asset->id),
+            new GenerateThumbnailsJob($thumbnailJobId),
             new PopulateAutomaticMetadataJob($asset->id),
             new GenerateAssetEmbeddingJob($asset->id),
         ])
