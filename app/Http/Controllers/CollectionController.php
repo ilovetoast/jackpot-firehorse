@@ -23,6 +23,7 @@ use App\Services\FeatureGate;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataVisibilityResolver;
 use App\Support\Roles\RoleRegistry;
+use App\Support\DerivativeFailureUserMessaging;
 use App\Support\Typography\CampaignBannerFontEnricher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1652,7 +1653,7 @@ class CollectionController extends Controller
             'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status,
             'size_bytes' => $asset->size_bytes,
             'created_at' => $asset->created_at?->toIso8601String(),
-            'metadata' => $asset->metadata,
+            'metadata' => DerivativeFailureUserMessaging::workspaceMetadata($asset->metadata),
             'category' => $categoryName ? ['id' => $categoryId, 'name' => $categoryName] : null,
             'user_id' => $asset->user_id, // For delete-own permission check
             'uploaded_by' => $uploadedBy,
@@ -1661,7 +1662,7 @@ class CollectionController extends Controller
             'thumbnail_version' => $thumbnailVersion,
             'thumbnail_url' => $finalThumbnailUrl ?? null,
             'thumbnail_status' => $thumbnailStatus,
-            'thumbnail_error' => $asset->thumbnail_error,
+            'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error),
             'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null,
             'preview_url' => null,
             'url' => null,

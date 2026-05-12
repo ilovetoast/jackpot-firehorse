@@ -24,6 +24,7 @@ use App\Support\Logging\PipelineStepTimer;
 use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\PipelineQueueResolver;
 use App\Support\ProcessingMetrics;
+use App\Support\DerivativeFailureUserMessaging;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailMode;
 use Aws\S3\Exception\S3Exception;
@@ -919,9 +920,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $assetMetaMerged['thumbnail_generation_error'] = $errorMessage;
                 }
 
+                $assetMetaMerged['thumbnail_error_technical'] = $fullThumbnailError;
+
                 $asset->update([
                     'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $fullThumbnailError,
+                    'thumbnail_error' => DerivativeFailureUserMessaging::persistedThumbnailError($errorMessage),
                     'thumbnail_started_at' => null,
                     'metadata' => $assetMetaMerged,
                 ]);
@@ -938,7 +941,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         $asset,
                         \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
                         [
-                            'error' => $fullThumbnailError,
+                            'error' => DerivativeFailureUserMessaging::persistedThumbnailError($errorMessage),
                             'reason' => 'No thumbnails were generated - all styles failed',
                         ]
                     );
@@ -1102,9 +1105,11 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $assetMetaMerged['thumbnail_generation_error'] = $errorMessage;
                 }
 
+                $assetMetaMerged['thumbnail_error_technical'] = $fullThumbnailError;
+
                 $asset->update([
                     'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $fullThumbnailError,
+                    'thumbnail_error' => DerivativeFailureUserMessaging::persistedThumbnailError($errorMessage),
                     'thumbnail_started_at' => null,
                     'metadata' => $assetMetaMerged,
                 ]);
@@ -1121,7 +1126,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         $asset,
                         \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
                         [
-                            'error' => $fullThumbnailError,
+                            'error' => DerivativeFailureUserMessaging::persistedThumbnailError($errorMessage),
                             'verification_errors' => $verificationErrors,
                         ]
                     );

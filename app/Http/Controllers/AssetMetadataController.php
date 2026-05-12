@@ -54,6 +54,7 @@ use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
 use App\Services\TenantPermissionResolver;
+use App\Support\DerivativeFailureUserMessaging;
 use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1679,7 +1680,7 @@ class AssetMetadataController extends Controller
                 'source_type' => $i->source_type,
                 'severity' => $i->severity,
                 'title' => $i->title,
-                'message' => $i->message,
+                'message' => DerivativeFailureUserMessaging::systemIncidentMessage($i->message),
                 'retryable' => $i->retryable,
                 'requires_support' => $i->requires_support,
                 'detected_at' => $i->detected_at?->toIso8601String(),
@@ -1883,7 +1884,7 @@ class AssetMetadataController extends Controller
             'promotion_status' => $asset->analysis_status ?? 'uploading',
             'has_thumbnails' => isset($asset->metadata['thumbnails']),
             'thumbnail_status' => $asset->thumbnail_status?->value ?? null,
-            'thumbnail_error' => $asset->thumbnail_error,
+            'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error),
             'metadata' => [
                 'pipeline_completed_at' => $metadata['pipeline_completed_at'] ?? null,
                 'thumbnail_timeout' => $metadata['thumbnail_timeout'] ?? null,

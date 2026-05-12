@@ -23,7 +23,7 @@ final class AssetsDebugOfficePreviewCommand extends Command
                             {--keep-temp : Keep the debug run directory under storage/app/tmp/office-debug/}
                             {--style=thumb : Thumbnail style: preview|thumb|medium|large (alias: grid → thumb)}
                             {--timeout=120 : Override assets.thumbnail.office.timeout_seconds for this run}
-                            {--version= : Asset version UUID (defaults to current version when set on asset)}
+                            {--version-id= : Asset version UUID (defaults to current version when set on asset)}
                             {--repair : After diagnostics, run GenerateThumbnailsJob (updates thumbnails + metadata; mutates asset)}';
 
     protected $description = 'Download version original, run LibreOffice→PDF and PDF→image like thumbnails, emit one local debug raster (read-only unless --repair)';
@@ -36,7 +36,7 @@ final class AssetsDebugOfficePreviewCommand extends Command
         $keepTemp = (bool) $this->option('keep-temp');
         $timeout = max(15, (int) $this->option('timeout'));
         $repair = (bool) $this->option('repair');
-        $versionOption = $this->option('version');
+        $versionOption = $this->option('version-id');
         $versionId = is_string($versionOption) && $versionOption !== '' ? $versionOption : null;
 
         $styleRaw = strtolower(trim((string) $this->option('style')));

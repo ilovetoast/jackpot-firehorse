@@ -19,6 +19,7 @@ use App\Services\PlanService;
 use App\Services\SystemCategoryService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\DerivativeFailureUserMessaging;
 use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -758,7 +759,7 @@ class DeliverableController extends Controller
                     'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status, // AssetStatus enum value
                     'size_bytes' => $asset->size_bytes,
                     'created_at' => $asset->created_at?->toIso8601String(),
-                    'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                    'metadata' => DerivativeFailureUserMessaging::workspaceMetadata($asset->metadata), // Full metadata object (internal pipeline diagnostics stripped for workspace UI)
                     'starred' => $this->assetIsStarred($metadata['starred'] ?? null), // boolean; source: assets.metadata.starred only
                     'category' => $category ? [
                         'id' => $category->id,
@@ -784,7 +785,7 @@ class DeliverableController extends Controller
                     // Legacy thumbnail_url for backward compatibility (points to final if available, otherwise null)
                     'thumbnail_url' => $finalThumbnailUrl ?? null,
                     'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
-                    'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
+                    'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error), // Error message if thumbnail generation failed or skipped
                     'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                     'preview_url' => null, // Reserved for future full-size preview endpoint
                     'url' => null, // Reserved for future download endpoint

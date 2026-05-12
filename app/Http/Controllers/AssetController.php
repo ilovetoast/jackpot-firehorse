@@ -43,6 +43,7 @@ use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\DerivativeFailureUserMessaging;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Metadata\CategoryTypeResolver;
 use App\Support\ThumbnailMetadata;
@@ -1007,7 +1008,7 @@ class AssetController extends Controller
                         'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status, // AssetStatus enum value
                         'size_bytes' => $asset->size_bytes,
                         'created_at' => $asset->created_at?->toIso8601String(),
-                        'metadata' => $asset->metadata, // Full metadata object (includes category_id and fields)
+                        'metadata' => DerivativeFailureUserMessaging::workspaceMetadata($asset->metadata), // Internal pipeline diagnostics stripped for workspace UI
                         'starred' => $this->assetIsStarred($metadata['starred'] ?? $starredFromTable[$asset->id] ?? null), // prefer assets.metadata; fallback asset_metadata for display
                         'category' => $categoryName ? [
                             'id' => $categoryId,
@@ -1036,7 +1037,7 @@ class AssetController extends Controller
                         'final_thumbnail_url' => $finalThumbnailUrl,
                         'thumbnail_url_large' => $this->thumbnailUrlLarge($asset),
                         'thumbnail_status' => $thumbnailStatus, // Thumbnail generation status (pending, processing, completed, failed, skipped)
-                        'thumbnail_error' => $asset->thumbnail_error, // Error message if thumbnail generation failed or skipped
+                        'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error), // Error message if thumbnail generation failed or skipped
                         'thumbnail_skip_reason' => $metadata['thumbnail_skip_reason'] ?? null, // Skip reason for skipped assets
                         'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
                         'pdf_page_count' => $asset->pdf_page_count,
@@ -1113,7 +1114,7 @@ class AssetController extends Controller
                         'mime_type' => $asset->mime_type,
                         'file_extension' => null,
                         'status' => 'visible',
-                        'metadata' => $asset->metadata ?? [],
+                        'metadata' => DerivativeFailureUserMessaging::workspaceMetadata($asset->metadata ?? []),
                         'starred' => false,
                         'category' => null,
                         'user_id' => $asset->user_id ?? null,
@@ -1763,7 +1764,7 @@ class AssetController extends Controller
                         'mime_type' => $asset->mime_type,
                         'source' => $asset->source,
                         'thumbnail_status' => $asset->thumbnail_status?->value ?? 'pending',
-                        'thumbnail_error' => $asset->thumbnail_error,
+                        'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error),
                         'status' => $asset->status?->value ?? 'pending',
                         'created_at' => $asset->created_at->toIso8601String(),
                         'age_minutes' => $ageMinutes,
@@ -1958,7 +1959,7 @@ class AssetController extends Controller
                         'thumbnail_version' => $thumbnailVersion,
                         'preview_thumbnail_url' => $previewThumbnailUrl, // Preview thumbnail (available even when pending/processing)
                         'final_thumbnail_url' => $finalThumbnailUrl, // Only set if file exists and is valid
-                        'thumbnail_error' => $asset->thumbnail_error,
+                        'thumbnail_error' => DerivativeFailureUserMessaging::workspaceThumbnailError($asset->thumbnail_error),
                         'thumbnail_skip_reason' => $skipReason, // Skip reason for skipped assets
                         'preview_unavailable_user_message' => $previewUnavailableMessage,
                         'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),

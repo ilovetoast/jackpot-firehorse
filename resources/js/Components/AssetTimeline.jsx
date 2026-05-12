@@ -370,10 +370,16 @@ export default function AssetTimeline({
                                             {event.metadata && Object.keys(event.metadata).length > 0 && (
                                                 <div className={`mt-1 text-xs ${isDark ? 'text-neutral-400' : 'text-gray-500'}`}>
                                                     {/* Show error for non-AI events */}
-                                                    {event.metadata.error && 
-                                                     event.event_type !== 'asset.ai_metadata.failed' && 
-                                                     event.event_type !== 'asset.ai_suggestions.failed' && (
+                                                    {event.metadata.error &&
+                                                     event.event_type !== 'asset.ai_metadata.failed' &&
+                                                     event.event_type !== 'asset.ai_suggestions.failed' &&
+                                                     event.event_type !== 'asset.thumbnail.failed' && (
                                                         <p className="text-red-600">{event.metadata.error}</p>
+                                                    )}
+                                                    {event.event_type === 'asset.thumbnail.failed' && (
+                                                        <p className="text-xs text-red-600 mt-1">
+                                                            You can retry from the actions above. Technical details are kept for support staff.
+                                                        </p>
                                                     )}
                                                     {/* Show user-friendly error for AI failures */}
                                                     {(event.event_type === 'asset.ai_metadata.failed' || 
