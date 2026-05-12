@@ -155,6 +155,8 @@ Use `php artisan pdf:verify` from the deployed app tree when the app is configur
 
 Thumbnails and grid previews for **Office** uploads use **LibreOffice** in headless mode to convert the file to **PDF**, then the same **ImageMagick + Ghostscript + spatie/pdf-to-image** stack as native PDFs (page 1 only).
 
+**Spreadsheet vs presentation:** **Excel (`.xlsx` / Calc)** conversion often works on a bare headless worker because it uses the **Calc** engine. **PowerPoint (`.pptx` / Impress)** uses the **Impress** stack and is where **exit 134 / Signal 6** and **`SvpSalInstance` / `createViewController`** crashes most often appear without **`xvfb-run`**. When troubleshooting, do not assume “Office works” from a single **Excel** test — validate at least one **`.pptx`** (or the failing asset) after changing worker packages or **`OFFICE_PREVIEW_*`** env vars.
+
 | Package | Purpose |
 |---------|---------|
 | **libreoffice-nogui** | Provides `soffice` for `--headless --convert-to pdf` without a desktop stack |
@@ -178,6 +180,8 @@ command -v xvfb-run && xvfb-run --help >/dev/null && echo "xvfb-run ok"
 If `soffice` is missing, the app **skips** Office thumbnails (placeholder UX) and records a **system incident** on the admin reliability dashboard so operators can install the package.
 
 **Headless crashes (exit 134 / “Fatal exception: Signal 6”):** On minimal servers (no GPU, no X11), LibreOffice may abort while loading Impress/Draw backends without a virtual display. Install **`xvfb`** alongside **`libreoffice-nogui`** (see [Packages](#packages)) so **`xvfb-run`** is on **`PATH`**. If **`php artisan assets:debug-office-preview`** shows **`xvfb-run: no`** but **`command -v xvfb-run`** works in an SSH shell, Horizon/php-fpm may be using a minimal **`PATH`** — set **`OFFICE_PREVIEW_XVFB_RUN_BINARY=/usr/bin/xvfb-run`** in `.env` and **`php artisan config:clear`**. The app sets **`SAL_USE_VPLUGIN=svp`**, **`SAL_DISABLE_OPENCL=1`**, and **`SAL_DISABLE_OPENGL=1`** by default (`config/assets.php` → `assets.thumbnail.office.headless_extra_env`); override with **`OFFICE_PREVIEW_SAL_*`** if needed. With **`OFFICE_PREVIEW_USE_XVFB=auto`** (default), the worker wraps **`soffice`** in **`xvfb-run -a`** when **`xvfb-run`** is found; use **`true`** to require it (fails fast if missing) or **`false`** to never wrap.
+
+**Still failing on `.pptx` with xvfb (Signal 6, stack in `libsdlo` / `SvpSalInstance`):** The worker environment is then usually fine; the remaining problem is often **LibreOffice’s Impress build** (Ubuntu 22.04’s **7.3.x** is a frequent offender). Prefer a **newer supported LibreOffice** (distribution updates, **`jammy-backports`**, or [TDF](https://www.libreoffice.org/download/download/) packages on a test host first). The app defaults **`OFFICE_PREVIEW_SOFFICE_EXTRA_ARGS`** to **`--invisible --nolockcheck`** to reduce view-controller crashes; override in `.env` if you need to experiment or set to empty to disable.
 
 ### Retrofit (SVG thumbnails missing)
 

@@ -133,12 +133,14 @@ final class LibreOfficeDocumentPreviewService
 
         $profileUrl = $this->profileDirToFileUrl($profileDir);
         $envAssignments = $this->sofficeHeadlessEnvAssignments($home, $runtime);
+        $extraArgs = $this->sofficeShellExtraArgsSegment();
         // Put -env:UserInstallation immediately after the binary (LibreOffice expects bootstrap env early).
         $sofficeInvocation = sprintf(
-            'env %s %s -env:UserInstallation=%s --headless --nologo --norestore --nodefault --convert-to pdf --outdir %s %s',
+            'env %s %s -env:UserInstallation=%s --headless%s --nologo --norestore --nodefault --convert-to pdf --outdir %s %s',
             $envAssignments,
             escapeshellarg($binary),
             escapeshellarg($profileUrl),
+            $extraArgs,
             escapeshellarg($workDir),
             escapeshellarg($localSource),
         );
@@ -169,6 +171,7 @@ final class LibreOfficeDocumentPreviewService
             'profile_dir' => $profileDir,
             'user_installation_url' => $profileUrl,
             'soffice_headless_env' => $envAssignments,
+            'soffice_extra_args' => trim((string) config('assets.thumbnail.office.soffice_extra_args', '')),
             'xvfb_used' => $xvfbUsed,
             'xvfb_binary' => $xvfbBinary,
             'output_dir' => $workDir,
@@ -195,6 +198,11 @@ final class LibreOfficeDocumentPreviewService
             } elseif (! $xvfbUsed && $this->resolveXvfbMode() === 'off') {
                 $base['xvfb_run_missing_hint'] =
                     'OFFICE_PREVIEW_USE_XVFB is disabled; LibreOffice runs without xvfb-run (headless Impress may abort with Signal 6).';
+            }
+            $ext = strtolower(pathinfo($sourcePath, PATHINFO_EXTENSION));
+            if ($xvfbUsed && str_contains($stdout, 'Signal 6') && in_array($ext, ['ppt', 'pptx', 'pps', 'ppsx', 'odp'], true)) {
+                $base['libreoffice_impress_crash_hint'] =
+                    'Impress (presentation) conversion aborted even with xvfb. Ubuntu jammy’s LibreOffice 7.3.x is often brittle here — install a newer LibreOffice build (distribution updates, jammy-backports, or packages from The Document Foundation) and retry. You can tune OFFICE_PREVIEW_SOFFICE_EXTRA_ARGS (default includes --invisible --nolockcheck).';
             }
             $base['error_message'] = 'LibreOffice failed to produce a PDF preview. '.$this->abbreviateLoOutput($stdout);
             Log::warning('[LibreOfficeDocumentPreviewService] LibreOffice conversion failed', $base);
@@ -326,6 +334,30 @@ final class LibreOfficeDocumentPreviewService
             false,
             null,
         ];
+    }
+
+    /**
+     * Whitespace-separated extra `soffice` flags from config (see OFFICE_PREVIEW_SOFFICE_EXTRA_ARGS).
+     * Each token must match /^--[a-zA-Z0-9_-]+$/ so arbitrary shell cannot be injected.
+     *
+     * @return string Leading space + escaped flags, or empty string.
+     */
+    private function sofficeShellExtraArgsSegment(): string
+    {
+        $raw = trim((string) config('assets.thumbnail.office.soffice_extra_args', ''));
+        if ($raw === '') {
+            return '';
+        }
+        $parts = preg_split('/\s+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $escaped = [];
+        foreach ($parts as $p) {
+            if (preg_match('/^--[a-zA-Z0-9_-]+$/', (string) $p) !== 1) {
+                continue;
+            }
+            $escaped[] = escapeshellarg((string) $p);
+        }
+
+        return $escaped === [] ? '' : ' '.implode(' ', $escaped);
     }
 
     private function resolveXvfbMode(): string

@@ -158,11 +158,17 @@ final class AssetsDebugOfficePreviewCommand extends Command
             if (! empty($loDiag['soffice_headless_env'])) {
                 $this->line('Headless env: '.(string) $loDiag['soffice_headless_env']);
             }
+            if (! empty($loDiag['soffice_extra_args'])) {
+                $this->line('soffice extra args (config): '.(string) $loDiag['soffice_extra_args']);
+            }
             $xvfbUsed = ($loDiag['xvfb_used'] ?? false) === true;
             $xvfbBin = trim((string) ($loDiag['xvfb_binary'] ?? ''));
             $this->line('xvfb-run: '.($xvfbUsed ? 'yes'.($xvfbBin !== '' ? ' ('.$xvfbBin.')' : '') : 'no'));
             if (! empty($loDiag['xvfb_run_missing_hint'])) {
                 $this->warn((string) $loDiag['xvfb_run_missing_hint']);
+            }
+            if (! empty($loDiag['libreoffice_impress_crash_hint'])) {
+                $this->warn((string) $loDiag['libreoffice_impress_crash_hint']);
             }
             $this->line('Command: '.($loDiag['command'] ?? ''));
             $this->line('Exit code: '.(string) ($loDiag['exit_code'] ?? ''));
@@ -242,6 +248,8 @@ final class AssetsDebugOfficePreviewCommand extends Command
                 'file_size_bytes' => $sizeBytes,
                 'libreoffice_binary' => $loDiag['libreoffice_binary'] ?? null,
                 'libreoffice_version_line' => $loDiag['libreoffice_version_line'] ?? null,
+                'soffice_extra_args' => $loDiag['soffice_extra_args'] ?? null,
+                'libreoffice_impress_crash_hint' => $loDiag['libreoffice_impress_crash_hint'] ?? null,
                 'soffice_headless_env' => $loDiag['soffice_headless_env'] ?? null,
                 'xvfb_used' => $loDiag['xvfb_used'] ?? null,
                 'xvfb_binary' => $loDiag['xvfb_binary'] ?? null,

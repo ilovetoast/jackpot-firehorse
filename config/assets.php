@@ -329,6 +329,12 @@ return [
             /** Passed to `xvfb-run -s` (quoted as one argument). */
             'xvfb_server_args' => (string) env('OFFICE_PREVIEW_XVFB_SERVER_ARGS', '-screen 0 1280x1024x24'),
             /*
+             * Extra `soffice` CLI flags (space-separated, each must look like `--flag-name`).
+             * Default `--invisible --nolockcheck` reduces Impress (PPTX) SIGABRT on some headless
+             * LibreOffice 7.x builds even under xvfb. Set to empty string to disable.
+             */
+            'soffice_extra_args' => trim((string) env('OFFICE_PREVIEW_SOFFICE_EXTRA_ARGS', '--invisible --nolockcheck')),
+            /*
              * Extra environment variables for `soffice` headless conversion. Defaults reduce
              * SIGABRT (Signal 6) crashes on minimal Linux workers (no GPU / no real display) by
              * forcing the software VCL plugin and disabling OpenCL in the SAL layer.
