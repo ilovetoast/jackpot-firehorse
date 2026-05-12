@@ -515,6 +515,8 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                                     </button>
                                 )}
                                 <button
+                                    type="button"
+                                    title="Reconciles stuck pipeline/analysis flags and may resolve an open incident. It does not re-run thumbnail generation. After fixing workers (e.g. LibreOffice/FFmpeg), use Re-run Analysis for thumbnails + metadata, or Retry Pipeline for the full upload pipeline."
                                     onClick={() => onAction(asset.id, 'repair')}
                                     className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-500"
                                 >
@@ -524,19 +526,24 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
                                 <button
                                     onClick={() => onAction(asset.id, 'reanalyze')}
                                     className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-3 py-2 text-sm text-white hover:bg-amber-500"
-                                    title="Re-run thumbnails, metadata, and embedding to fix incomplete brand data"
+                                    title="Re-runs GenerateThumbnailsJob, then metadata and embedding. Use this after fixing worker software (LibreOffice, FFmpeg) when thumbnails failed but the file is already in storage."
                                 >
                                     <ArrowPathIcon className="h-4 w-4" />
                                     Re-run Analysis
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => onAction(asset.id, 'retry-pipeline')}
                                     className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm ${
                                         asset?.visibility?.action_key === 'retry-pipeline'
                                             ? 'border-2 border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100 font-medium'
                                             : 'border border-slate-300 hover:bg-slate-50'
                                     }`}
-                                    title={asset?.visibility?.action_key === 'retry-pipeline' ? asset.visibility.recommended_action : undefined}
+                                    title={
+                                        asset?.visibility?.action_key === 'retry-pipeline' && asset?.visibility?.recommended_action
+                                            ? asset.visibility.recommended_action
+                                            : 'Clears processing flags and runs the full ProcessAssetJob chain from the start. Use when the asset never finished processing or promotion; heavier than Re-run Analysis.'
+                                    }
                                 >
                                     <ArrowPathIcon className="h-4 w-4" />
                                     Retry Pipeline

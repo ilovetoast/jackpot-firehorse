@@ -40,6 +40,8 @@ In parallel on the dedicated `ai` queue (when tenant policy allows):
 
 `GenerateThumbnailsJob` runs first because thumbnail generation does not depend on `ExtractMetadataJob` — `FileInspectionService` writes width/height/mime onto the asset before the chain dispatches, and `ThumbnailGenerationService` handles EXIF orientation while decoding. Full metadata, embedded metadata, usage-rights suggestions and AI work are scheduled as follow-up enrichment to keep time-to-first-thumbnail short. See `docs/UPLOAD_AND_QUEUE.md` for the full job order, queue routing, and `[asset_pipeline_timing]` log keys.
 
+**Video (`.mov` / QuickTime):** Phone exports are often magic-sniffed as **`audio/mp4`** even when the file is a video container; `FileTypeService` would otherwise match **`audio`** before **`video`** (MIME order in the registry). **`FileInspectionService`** maps **`audio/mp4` / `application/mp4`** on **`.mov` / `.m4v`** keys to **`video/quicktime` / `video/x-m4v`**, and **`ThumbnailGenerationService::detectFileType`** forces **`video`** when the extension is **`.mov`/`.m4v`** but resolution would still be **`audio`**, **`image`**, or **`unknown`** — so FFmpeg poster thumbnails and **`GenerateVideoPreviewJob`** still run. Workers need **FFmpeg** (see [PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md)).
+
 ## Worker profiles and processing budgets
 
 Worker safety is centralized in `App\Services\Assets\AssetProcessingBudgetService` and `config/asset_processing.php` (`worker_profile` + `profiles.*`). This is **not** a global “turn off workers” switch: Horizon queues stay enabled; each job consults the same budget rules for the current profile.

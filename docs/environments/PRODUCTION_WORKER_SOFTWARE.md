@@ -212,6 +212,8 @@ If **`php artisan assets:debug-office-preview`** already shows **`xvfb-run: yes`
 
 3. **Restart queue workers** (Horizon / `supervisor`) so all processes pick up the new **`soffice`**, then rerun **`assets:debug-office-preview`**. Success means **`LibreOffice version`** is **clearly newer than 7.3.7** and **`PDF exists: yes`**. Optionally set **`OFFICE_LIBREOFFICE_BINARY=`** in `.env` if **`soffice`** is not under **`/usr/bin/soffice`**.
 
+**Field confirmation (2026):** On Ubuntu 22.04 jammy, **stock `libreoffice-nogui` 7.3.x** plus **`xvfb`**, **`SAL_USE_VPLUGIN=svp`**, and **`--invisible --nolockcheck`** still aborted headless **`.pptx`** conversion (**exit 134 / Signal 6**, stack in **`libsdlo` / `SvpSalInstance`**). Upgrading the same host to **LibreOffice 26.x** (via the [LibreOffice PPA](https://launchpad.net/~libreoffice/+archive/ubuntu/ppa) in this case) fixed the identical file: **`soffice --version`** showed **26.2.x**, **`PDF exists: yes`**, and **`impress_pdf_Export`** in the conversion log.
+
 ### Retrofit (SVG thumbnails missing)
 
 ```bash

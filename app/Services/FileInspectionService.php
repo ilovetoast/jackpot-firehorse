@@ -164,6 +164,11 @@ class FileInspectionService
             }
         }
 
+        // Map extension from the S3 key (e.g. octet-stream → video/quicktime for …/original.mov).
+        $mime = $this->refineMimeFromPath($s3Path, $mime);
+        // iPhone / QuickTime often sniff as audio/mp4 while the object is a video container.
+        $mime = $this->coerceVideoMimeFromStoragePath($s3Path, $mime);
+
         $size = filesize($tmpPath);
 
         $width = null;
@@ -217,5 +222,23 @@ class FileInspectionService
         $types = MimeTypes::getDefault()->getMimeTypes($ext);
 
         return ($types[0] ?? null) ?: $mime;
+    }
+
+    /**
+     * When the storage key ends in .mov / .m4v but magic sniffing returns an audio or generic MP4 MIME,
+     * normalize to a video/* type so downstream {@see FileTypeService} routes to FFmpeg thumbnails.
+     */
+    private function coerceVideoMimeFromStoragePath(string $s3Path, string $mime): string
+    {
+        $mime = strtolower($mime);
+        $ext = strtolower(pathinfo($s3Path, PATHINFO_EXTENSION));
+        if ($ext !== 'mov' && $ext !== 'm4v') {
+            return $mime;
+        }
+        if (! in_array($mime, ['audio/mp4', 'audio/x-m4a', 'application/mp4'], true)) {
+            return $mime;
+        }
+
+        return $ext === 'm4v' ? 'video/x-m4v' : 'video/quicktime';
     }
 }

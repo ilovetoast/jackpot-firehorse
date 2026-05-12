@@ -65,4 +65,34 @@ class ThumbnailGenerationServiceOfficeDetectTest extends TestCase
         $svc = app(ThumbnailGenerationService::class);
         $this->assertSame('office', $svc->detectFileTypeForDiagnostics($asset, $version));
     }
+
+    public function test_mov_with_audio_mp4_mime_resolves_to_video_for_ffmpeg_thumbnails(): void
+    {
+        $asset = new Asset([
+            'mime_type' => 'audio/mp4',
+            'original_filename' => 'clip.mov',
+        ]);
+        $version = new AssetVersion([
+            'mime_type' => 'audio/mp4',
+            'file_path' => 'tenants/u/assets/a/v1/original.mov',
+        ]);
+
+        $svc = app(ThumbnailGenerationService::class);
+        $this->assertSame('video', $svc->detectFileTypeForDiagnostics($asset, $version));
+    }
+
+    public function test_mov_with_misleading_image_mime_resolves_to_video(): void
+    {
+        $asset = new Asset([
+            'mime_type' => 'image/jpeg',
+            'original_filename' => 'clip.mov',
+        ]);
+        $version = new AssetVersion([
+            'mime_type' => 'image/jpeg',
+            'file_path' => 'tenants/u/assets/a/v1/original.mov',
+        ]);
+
+        $svc = app(ThumbnailGenerationService::class);
+        $this->assertSame('video', $svc->detectFileTypeForDiagnostics($asset, $version));
+    }
 }

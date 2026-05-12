@@ -595,12 +595,9 @@ class ProcessAssetJob implements ShouldQueue
             // ai_metadata_thumbnail_max_wait_seconds) because this chain starts in parallel
             // with GenerateThumbnailsJob — slow RAW/PSD jobs can take many minutes.
 
-            // Check if asset is a video to conditionally add video preview job
-            // Version path: use version->mime_type only (from FileInspectionService). Legacy: asset->mime_type.
-            $fileTypeService = app(\App\Services\FileTypeService::class);
-            $mimeForType = $version ? $version->mime_type : $asset->mime_type;
-            $extForType = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
-            $fileType = $fileTypeService->detectFileType($mimeForType, $extForType);
+            // Same rules as {@see ThumbnailGenerationService::detectFileType} (MOV/M4V vs misleading
+            // audio/image MIME, Office vs wrong image MIME, extension fallbacks from version path).
+            $fileType = app(\App\Services\ThumbnailGenerationService::class)->detectFileTypeForDiagnostics($asset, $version);
             $isVideo = $fileType === 'video';
             $isAudio = $fileType === 'audio';
 

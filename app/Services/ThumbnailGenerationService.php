@@ -4349,10 +4349,16 @@ class ThumbnailGenerationService
         $mimeLower = $mime ? strtolower((string) $mime) : null;
         $fileType = $fileTypeService->detectFileType($mimeLower, $ext !== '' ? $ext : null);
 
-        // TIFF fallback: GD getimagesize() does not support TIFF. When MIME is wrong (e.g. from S3)
-        // or application/octet-stream, we may get 'image' or 'unknown'. For .tif/.tiff extension,
-        // route to tiff (Imagick) to avoid "Downloaded file is not a valid image" errors.
         $resolved = $fileType ?? 'unknown';
+
+        // MOV/M4V: `FileTypeService::detectFileType` checks MIME before extension; registry lists
+        // `audio/mp4` under `audio` before `video`, so iPhone QuickTime files often classify as audio
+        // and skip FFmpeg poster thumbnails. Same for rare image/* mis-sniffs on .mov keys.
+        if (in_array($ext, ['mov', 'm4v'], true) && in_array($resolved, ['audio', 'image', 'unknown'], true)) {
+            return 'video';
+        }
+
+        // TIFF: when MIME is wrong or application/octet-stream, route .tif/.tiff to Imagick pipeline.
         if (in_array($ext, ['tif', 'tiff'], true) && in_array($resolved, ['image', 'unknown'], true)) {
             return 'tiff';
         }
