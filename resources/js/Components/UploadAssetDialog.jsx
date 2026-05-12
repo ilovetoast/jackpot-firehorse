@@ -771,7 +771,6 @@ export default function UploadAssetDialog({
     const filteredCategories = (categories || []).filter(cat => {
         // Must have an ID to be selectable (exclude templates without IDs)
         if (!cat.id) {
-            console.log('[UploadDialog] Filtered out category (no ID):', cat.name, cat)
             return false
         }
         
@@ -781,7 +780,6 @@ export default function UploadAssetDialog({
             : cat.asset_type === 'deliverable'
         
         if (!matchesAssetType) {
-            console.log('[UploadDialog] Filtered out category (wrong asset type):', cat.name, 'asset_type:', cat.asset_type, 'expected:', defaultAssetType)
             return false
         }
         
@@ -790,12 +788,10 @@ export default function UploadAssetDialog({
         if (cat.is_system === true) {
             // If template_exists is explicitly false, exclude it
             if (cat.template_exists === false) {
-                console.log('[UploadDialog] Filtered out category (deleted template):', cat.name)
                 return false
             }
             // Also check deletion_available flag if present
             if (cat.deletion_available === true) {
-                console.log('[UploadDialog] Filtered out category (deletion available):', cat.name)
                 return false
             }
         }
@@ -803,16 +799,6 @@ export default function UploadAssetDialog({
         // Filter out hidden categories - hidden categories should not appear in upload dropdown
         if (cat.is_hidden === true || cat.is_hidden === 'true' || cat.is_hidden === 1) {
             return false
-        }
-        
-        // Debug: Log category properties to help diagnose permission issues
-        if (cat.is_private || cat.is_hidden) {
-            console.log('[UploadDialog] Category with restricted visibility:', cat.name, {
-                is_private: cat.is_private,
-                is_hidden: cat.is_hidden,
-                is_system: cat.is_system,
-                id: cat.id
-            })
         }
         
         // Backend already filters by is_private and is_hidden based on user permissions
@@ -831,17 +817,6 @@ export default function UploadAssetDialog({
         return base
     }, [v2Files.length])
     
-    // Debug: Log all categories received vs filtered (in useEffect to avoid render side-effects)
-    useEffect(() => {
-        if (categories && categories.length > 0) {
-            console.log('[UploadDialog] Categories received:', categories.length, 'Filtered:', filteredCategories.length)
-            const filteredOut = categories.filter(cat => !filteredCategories.find(fc => fc.id === cat.id))
-            if (filteredOut.length > 0) {
-                console.log('[UploadDialog] Categories filtered out:', filteredOut.map(c => ({ name: c.name, id: c.id, asset_type: c.asset_type, is_private: c.is_private, is_hidden: c.is_hidden })))
-            }
-        }
-    }, [categories, filteredCategories])
-
     /**
      * ═══════════════════════════════════════════════════════════════
      * CLEAN UPLOADER V2 — Upload Single File Function
@@ -856,10 +831,7 @@ export default function UploadAssetDialog({
      */
     const uploadSingleFile = useCallback(async (fileEntry) => {
         const { clientId, file } = fileEntry
-        
-        // a. Log start
-        console.log('[UPLOAD_V2] start', clientId)
-        
+
         try {
             // b. POST to /app/uploads/initiate-batch
             const buildPayload = (includePreflight) => {
@@ -976,10 +948,7 @@ export default function UploadAssetDialog({
             }
             
             const responseData = await parseUploadJsonResponse(response, 'initiate-batch')
-            
-            // c. Log session response
-            console.log('[UPLOAD_V2] session response', responseData)
-            
+
             const result = responseData.uploads[0]
             if (result.error) {
                 throw new Error(result.error)
@@ -1008,24 +977,15 @@ export default function UploadAssetDialog({
                 if (!putResponse.ok) {
                     throw new Error(`S3 upload failed: ${putResponse.status} ${putResponse.statusText}`)
                 }
-                
-                // e. Log complete
-                console.log('[UPLOAD_V2] complete', { clientId, status: putResponse.status })
             } else if (uploadType === 'chunked') {
                 // HOTFIX: Explicitly start multipart upload via UploadManager
                 // Multipart uploads are owned by UploadManager and must be started explicitly
-                console.log('[UPLOAD_V2] multipart upload delegated to UploadManager', {
-                    clientId,
-                    upload_session_id: result.upload_session_id
-                })
-                
                 // Add file to UploadManager and get the clientReference
                 const clientReferences = UploadManager.addFiles([file], {
                     brandId: auth.activeBrand?.id,
                 })
                 
                 if (clientReferences.length === 0) {
-                    console.error('[UPLOAD_V2] Failed to add file to UploadManager', { clientId })
                     throw new Error('Failed to add file to UploadManager')
                 }
                 
@@ -1040,10 +1000,6 @@ export default function UploadAssetDialog({
                 const upload = allUploads.find(u => u.clientReference === uploadManagerClientRef)
                 
                 if (!upload) {
-                    console.error('[UPLOAD_V2] Upload entry not found in UploadManager after addFiles', {
-                        clientId,
-                        uploadManagerClientRef
-                    })
                     throw new Error('Upload entry not found in UploadManager')
                 }
                 
@@ -1059,13 +1015,7 @@ export default function UploadAssetDialog({
                 // Start the multipart upload
                 // startUpload() will see uploadSessionId exists and call resumeUpload(),
                 // which will then call performMultipartUpload()
-                UploadManager.startUpload(uploadManagerClientRef).catch((error) => {
-                    console.error('[UPLOAD_V2] Failed to start multipart upload in UploadManager', {
-                        clientId,
-                        uploadManagerClientRef,
-                        error: error.message
-                    })
-                })
+                UploadManager.startUpload(uploadManagerClientRef).catch(() => {})
                 
                 // IMPORTANT:
                 // Multipart uploads are handled exclusively by UploadManager.
@@ -1090,7 +1040,6 @@ export default function UploadAssetDialog({
             setV2Files((prevFiles) => {
                 return prevFiles.map((f) => {
                     if (f.clientId === clientId) {
-                        console.log('[UPLOAD_V2] Updating file state to uploaded', { clientId, uploadKey })
                         return {
                             ...f,
                             status: 'uploaded',
@@ -1108,8 +1057,6 @@ export default function UploadAssetDialog({
                 uploadKey: uploadKey,
             }
         } catch (error) {
-            console.error('[UPLOAD_V2] error', { clientId, error: error.message })
-            
             // Phase 2.5 Step 1: Normalize error for consistent AI-ready format
             const normalizedError = normalizeUploadError(error, {
                 httpStatus: error.response?.status || error.status,
@@ -1285,10 +1232,7 @@ export default function UploadAssetDialog({
      * Does NOT reference any legacy upload logic, hooks, managers, or effects.
      */
     const handleFileSelect = useCallback((selectedFiles) => {
-        console.log('[FILE_SELECT] handler called', { fileCount: selectedFiles?.length || 0 })
-        
         if (!selectedFiles || selectedFiles.length === 0) {
-            console.log('[FILE_SELECT] No files selected, returning early')
             return
         }
 
@@ -1344,8 +1288,6 @@ export default function UploadAssetDialog({
             setBatchFileCapNotice(null)
         }
 
-        console.log('[FILE_SELECT] Processing files', { count: toAddFiles.length, fileNames: toAddFiles.map((f) => f.name) })
-        
         // Helper to derive initial resolvedFilename from filename
         const deriveInitialResolvedFilename = (filename) => {
             const lastDotIndex = filename.lastIndexOf('.')
@@ -1418,8 +1360,6 @@ export default function UploadAssetDialog({
             }
         })
 
-        console.log('[FILE_SELECT] Created file entries', { count: newV2FileEntries.length, clientIds: newV2FileEntries.map(e => e.clientId) })
-
         for (const entry of newV2FileEntries) {
             if (entry.file && !entry.error && shouldRegisterGridBlobPreview(entry.file)) {
                 try {
@@ -1429,19 +1369,15 @@ export default function UploadAssetDialog({
                         size: entry.file.size,
                         mimeType: entry.file.type || '',
                     })
-                } catch (e) {
-                    console.warn('[FILE_SELECT] Local preview registry skipped', e)
+                } catch {
+                    /* local preview optional */
                 }
             }
         }
 
         // Add new file entries to v2Files state ONLY
         // Upload coordinator useEffect will handle starting uploads automatically
-        setV2Files((prevFiles) => {
-            const updated = [...prevFiles, ...newV2FileEntries]
-            console.log('[FILE_SELECT] Updated v2Files state', { totalCount: updated.length })
-            return updated
-        })
+        setV2Files((prevFiles) => [...prevFiles, ...newV2FileEntries])
         void runUploadPreflight(newV2FileEntries)
     }, [selectedCategoryId, runUploadPreflight, uploadMaxFilesPerBatch])
     
@@ -4324,7 +4260,6 @@ export default function UploadAssetDialog({
      * Does NOT affect upload behavior.
      */
     const handleCategoryChangeV2 = useCallback((categoryId) => {
-        console.log('[CATEGORY_V2] Category changed', { categoryId })
         setSelectedCategoryId(categoryId)
     }, [])
 
@@ -4568,12 +4503,6 @@ export default function UploadAssetDialog({
             return
         }
         
-        console.log('[UPLOAD_COORDINATOR] Starting next upload', { 
-            clientId: nextFile.clientId, 
-            fileName: nextFile.file?.name || 'unknown',
-            queuePosition: v2Files.filter((f) => f.status === 'selected').length
-        })
-        
         // Update status to 'uploading' before starting upload
         setV2Files((prevFiles) => {
             return prevFiles.map((f) => {
@@ -4589,11 +4518,7 @@ export default function UploadAssetDialog({
         })
         
         // Start the upload
-        uploadSingleFile(nextFile).catch((error) => {
-            console.error('[UPLOAD_COORDINATOR] Upload failed', { 
-                clientId: nextFile.clientId, 
-                error: error.message 
-            })
+        uploadSingleFile(nextFile).catch(() => {
             // Error handling is done in uploadSingleFile (sets status to 'failed')
             // This effect will re-run and pick up the next file
         })

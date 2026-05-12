@@ -4086,18 +4086,16 @@ export default function AssetDrawer({
         if (retryCount >= maxRetries) {
             return false
         }
-        
-        const mimeType = (displayAsset.mime_type || '').toLowerCase()
-        const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        if (!supportsThumbnail(mimeType, extension)) {
-            return false
-        }
-        
+
+        // File-type eligibility is enforced on POST by ThumbnailRetryService (registry aligned with
+        // GenerateThumbnailsJob). Avoid client-side MIME lists — they can disagree with the worker
+        // (e.g. Office supported in registry but web node without local Imagick).
+
         // Must not be currently processing
         if (thumbnailStatus === 'processing') {
             return false
         }
-        
+
         return true
     }, [displayAsset, thumbnailStatus, canRetryThumbnails])
 
@@ -4112,16 +4110,10 @@ export default function AssetDrawer({
             return `Retry limit reached (${maxRetries}/${maxRetries} attempts used)`
         }
         
-        const mimeType = (displayAsset.mime_type || '').toLowerCase()
-        const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
-        if (!supportsThumbnail(mimeType, extension)) {
-            return 'Thumbnail generation is not supported for this file type'
-        }
-        
         if (thumbnailStatus === 'processing') {
             return 'Thumbnail generation is already in progress'
         }
-        
+
         return null
     }
 

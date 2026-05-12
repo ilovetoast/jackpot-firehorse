@@ -38,11 +38,11 @@ class ThumbnailRetryService
      */
     public function canRetry(Asset $asset, bool $enforceManualRetryLimit = true): array
     {
-        // Check if file type is supported
-        if (!$this->isFileTypeSupported($asset)) {
+        $registry = $this->registryThumbnailEligibility($asset);
+        if (! $registry['eligible']) {
             return [
                 'allowed' => false,
-                'reason' => 'Thumbnail generation is not supported for this file type',
+                'reason' => $registry['reason'] ?? 'Thumbnail generation is not supported for this file type',
             ];
         }
 
@@ -139,32 +139,69 @@ class ThumbnailRetryService
     }
 
     /**
-     * Check if file type supports thumbnail generation.
+     * Whether the asset is eligible for the thumbnail pipeline per the DAM registry
+     * ({@see config/file_types.php} / {@see FileTypeService}).
      *
-     * Reuses the same validation logic as GenerateThumbnailsJob to ensure consistency.
-     * This prevents retry attempts on file types that cannot be processed.
-     * 
-     * IMPORTANT: PDF support is additive - matches GenerateThumbnailsJob logic exactly.
+     * Intentionally does **not** call {@see FileTypeService::checkRequirements()}: that inspects
+     * Imagick/FFmpeg/LibreOffice in the **current PHP process** (often the web app), while
+     * {@see \App\Jobs\GenerateThumbnailsJob} runs on queue workers where those tools may exist.
+     * Using checkRequirements here caused false "not supported" for Office/PDF/video when the
+     * pipeline had already attempted thumbnails on a worker.
      *
-     * @param Asset $asset
+     * @param  Asset  $asset
      * @return bool
      */
     public function isFileTypeSupported(Asset $asset): bool
     {
-        $fileTypeService = app(\App\Services\FileTypeService::class);
+        return $this->registryThumbnailEligibility($asset)['eligible'];
+    }
+
+    /**
+     * Human-readable reason when {@see isFileTypeSupported} is false (422 bodies, logs).
+     */
+    public function getRegistryThumbnailIneligibleReason(Asset $asset): ?string
+    {
+        $registry = $this->registryThumbnailEligibility($asset);
+
+        return $registry['eligible'] ? null : ($registry['reason'] ?? null);
+    }
+
+    /**
+     * Registry-only gate: blocked list, resolvable type, thumbnail capability flag.
+     *
+     * @return array{eligible: bool, reason?: string, file_type?: string|null}
+     */
+    private function registryThumbnailEligibility(Asset $asset): array
+    {
+        $fileTypeService = app(FileTypeService::class);
+        $mime = $asset->mime_type;
+        $ext = strtolower((string) pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+
+        $unsupported = $fileTypeService->getUnsupportedReason($mime, $ext);
+        if ($unsupported !== null) {
+            return [
+                'eligible' => false,
+                'reason' => $unsupported['message'] ?? 'This file type cannot be processed by the pipeline.',
+            ];
+        }
+
         $fileType = $fileTypeService->detectFileTypeFromAsset($asset);
-        
-        if (!$fileType) {
-            return false;
+        if ($fileType === null) {
+            return [
+                'eligible' => false,
+                'reason' => 'Could not determine file type (missing or unknown MIME type / extension).',
+            ];
         }
-        
-        // Check if requirements are met
-        $requirements = $fileTypeService->checkRequirements($fileType);
-        if (!$requirements['met']) {
-            return false;
+
+        if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+            return [
+                'eligible' => false,
+                'reason' => 'Thumbnail generation is not supported for this file type',
+                'file_type' => $fileType,
+            ];
         }
-        
-        return $fileTypeService->supportsCapability($fileType, 'thumbnail');
+
+        return ['eligible' => true, 'file_type' => $fileType];
     }
 
     /**

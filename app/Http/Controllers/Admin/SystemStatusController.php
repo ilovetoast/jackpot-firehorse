@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Support\DeployedAtManifest;
 use App\Enums\EventType;
 use App\Models\ActivityEvent;
+use App\Models\SystemIncident;
 use App\Enums\StorageBucketStatus;
 use App\Models\Asset;
 use App\Models\StorageBucket;
 use App\Services\Admin\AssetProcessingIssuesService;
+use App\Services\Admin\StudioCompositionVideoExportAdminMetrics;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -68,6 +70,9 @@ class SystemStatusController extends Controller
         // Deployment info from DEPLOYED_AT file (written on each deploy)
         $deployedAt = DeployedAtManifest::read();
 
+        $openIncidentsCount = SystemIncident::query()->whereNull('resolved_at')->count();
+        $studioVideoExports = StudioCompositionVideoExportAdminMetrics::operationsCenterPayload();
+
         return Inertia::render('Admin/SystemStatus', [
             'systemHealth' => $systemHealth,
             'recentFailedJobs' => $recentFailedJobs,
@@ -78,6 +83,10 @@ class SystemStatusController extends Controller
             'horizonAvailable' => $horizonAvailable,
             'horizonUrl' => $horizonUrl,
             'deployedAt' => $deployedAt,
+            'operationsSnapshot' => [
+                'open_incidents_count' => $openIncidentsCount,
+                'studio_video_exports' => $studioVideoExports,
+            ],
         ]);
     }
 

@@ -1732,26 +1732,14 @@ class GenerateThumbnailsJob implements ShouldQueue
             return [];
         }
 
-        $lines = [];
-        foreach ($diag as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-            $ctx = (string) ($row['context'] ?? 'unknown');
-            $msg = (string) ($row['message'] ?? '');
-            if ($msg === '') {
-                continue;
-            }
-            $lines[] = "{$ctx}: {$msg}";
-        }
-
-        if ($lines === []) {
+        $normalized = \App\Support\ThumbnailEngineDiagnostics::normalizeForMetadata($diag);
+        if ($normalized['rows'] === [] || $normalized['summary'] === '') {
             return [];
         }
 
         return [
-            'thumbnail_engine_diagnostics' => $diag,
-            'thumbnail_engine_error_summary' => implode("\n", $lines),
+            'thumbnail_engine_diagnostics' => $normalized['rows'],
+            'thumbnail_engine_error_summary' => $normalized['summary'],
         ];
     }
 

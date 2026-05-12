@@ -965,82 +965,27 @@ class AssetThumbnailController extends Controller
         // Note: PENDING status is allowed - we reset to PENDING to allow generation
         // The job itself has idempotency checks (checks if COMPLETED) so it's safe
 
-        // Validate file type is supported for thumbnail generation
-        // Must align with GenerateThumbnailsJob / ThumbnailGenerationService supported types
-        $mimeType = strtolower($asset->mime_type ?? '');
-        $extension = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
+        // Validate file type using the same registry gate as manual retry ({@see ThumbnailRetryService}).
+        // Do not duplicate MIME/extension lists here — avoids drift (e.g. Office on web nodes without Imagick).
+        $retryService = app(\App\Services\ThumbnailRetryService::class);
+        if (! $retryService->isFileTypeSupported($asset)) {
+            $reason = $retryService->getRegistryThumbnailIneligibleReason($asset)
+                ?? 'Thumbnail generation is not supported for this file type';
 
-        $isSupported = false;
-        $supportReason = '';
-
-        // Check PDF support
-        if ($mimeType === 'application/pdf' || $extension === 'pdf') {
-            if (class_exists(\Spatie\PdfToImage\Pdf::class)) {
-                $isSupported = true;
-                $supportReason = 'PDF (page 1)';
-            } else {
-                return response()->json([
-                    'error' => 'PDF thumbnail generation requires spatie/pdf-to-image package',
-                ], 422);
-            }
-        }
-
-        // Check SVG support (rasterized via Imagick)
-        if (! $isSupported && ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
-            $isSupported = true;
-            $supportReason = 'SVG';
-        }
-
-        // Check TIFF/AVIF/CR2/PSD support (Imagick; CR2 also needs ImageMagick RAW/LibRaw on the server)
-        if (! $isSupported && extension_loaded('imagick')) {
-            if (($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') ||
-                ($mimeType === 'image/avif' || $extension === 'avif') ||
-                ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') ||
-                ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2')) {
-                $isSupported = true;
-                $supportReason = $mimeType === 'image/avif' || $extension === 'avif' ? 'AVIF'
-                    : (($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') ? 'HEIC'
-                    : (($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') ? 'CR2' : 'TIFF'));
-            } elseif ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') {
-                $isSupported = true;
-                $supportReason = $extension === 'psb' ? 'PSB' : 'PSD';
-            }
-        }
-
-        // Office (Word / Excel / PowerPoint): LibreOffice → PDF → raster — must match {@see FileTypeService::isOfficeDocument} / pipeline.
-        if (! $isSupported && class_exists(\Spatie\PdfToImage\Pdf::class) && extension_loaded('imagick')) {
-            if (app(FileTypeService::class)->isOfficeDocument($mimeType, $extension)) {
-                $isSupported = true;
-                $supportReason = 'Office';
-            }
-        }
-
-        // Check image support (GD library)
-        if (! $isSupported) {
-            $supportedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-            $supportedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-
-            if ($mimeType && in_array($mimeType, $supportedMimeTypes)) {
-                $isSupported = true;
-                $supportReason = 'Image';
-            } elseif ($extension && in_array($extension, $supportedExtensions)) {
-                $isSupported = true;
-                $supportReason = 'Image';
-            }
-        }
-
-        if (! $isSupported) {
             Log::warning('[AssetThumbnailController] Thumbnail generation not supported for file type', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
-                'mime_type' => $mimeType,
-                'extension' => $extension,
+                'mime_type' => $asset->mime_type,
+                'extension' => pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION),
+                'reason' => $reason,
             ]);
 
             return response()->json([
-                'error' => 'Thumbnail generation is not supported for this file type',
+                'error' => $reason,
             ], 422);
         }
+
+        $supportReason = (string) (app(FileTypeService::class)->detectFileTypeFromAsset($asset) ?? 'unknown');
 
         // Check if asset has required storage information
         if (! $asset->storage_root_path || ! $asset->storageBucket) {

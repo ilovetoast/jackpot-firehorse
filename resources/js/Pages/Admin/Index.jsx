@@ -168,7 +168,7 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                     description: 'Failed thumbnails & promotion errors — full error text',
                     href: '/app/admin/asset-processing-issues',
                 },
-                { name: 'Reliability Center', icon: ExclamationTriangleIcon, description: 'Incidents, queue, scheduler, failed jobs', href: '/app/admin/reliability' },
+                { name: 'Reliability Center', icon: ExclamationTriangleIcon, description: 'Incidents, queue, scheduler, failed jobs', href: '/app/admin/system-status' },
                 {
                     name: 'Studio export failures',
                     icon: VideoCameraIcon,

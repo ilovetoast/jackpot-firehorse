@@ -12,7 +12,7 @@ export default function AdminReliabilitySectionSidebar({ tabSwitchRouteName = 'a
     const pageUrl = url || ''
     const path = pageUrl.split('?')[0]
     const search = pageUrl.includes('?') ? pageUrl.split('?')[1] : ''
-    const tabParam = new URLSearchParams(search).get('tab') || 'overview'
+    const tabParam = new URLSearchParams(search).get('tab') || 'queue'
 
     const isReliabilityShell =
         path.includes('/admin/reliability') || path.includes('/admin/operations-center')
@@ -25,14 +25,19 @@ export default function AdminReliabilitySectionSidebar({ tabSwitchRouteName = 'a
         return [
             {
                 label: 'Overview',
-                links: [{ href: tabHref('overview'), label: 'Overview', active: tabActive('overview') }],
+                links: [
+                    {
+                        href: '/app/admin/system-status',
+                        label: 'System status',
+                        active: under('/app/admin/system-status'),
+                    },
+                ],
             },
             {
                 label: 'Runtime health',
                 links: [
                     { href: tabHref('queue'), label: 'Queue & scheduler', active: tabActive('queue') },
                     { href: tabHref('reliability'), label: 'Reliability metrics', active: tabActive('reliability') },
-                    { href: '/app/admin/system-status', label: 'System status', active: under('/app/admin/system-status') },
                     { href: '/app/admin/performance', label: 'Performance', active: under('/app/admin/performance') },
                 ],
             },

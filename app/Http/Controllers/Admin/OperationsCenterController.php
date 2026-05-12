@@ -45,10 +45,13 @@ class OperationsCenterController extends Controller
     {
         $this->authorizeAdmin();
 
-        $tab = (string) $request->get('tab', 'overview');
-        $allowedTabs = ['overview', 'queue', 'incidents', 'application-errors', 'reliability', 'failed-jobs', 'studio-exports'];
+        $tab = (string) $request->get('tab', 'queue');
+        if ($tab === 'overview') {
+            return redirect()->route('admin.system-status');
+        }
+        $allowedTabs = ['queue', 'incidents', 'application-errors', 'reliability', 'failed-jobs', 'studio-exports'];
         if (! in_array($tab, $allowedTabs, true)) {
-            $tab = 'overview';
+            $tab = 'queue';
         }
 
         $incidentRows = SystemIncident::whereNull('resolved_at')

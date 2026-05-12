@@ -18,10 +18,21 @@ import {
     ArrowPathIcon,
     LinkIcon,
     SparklesIcon,
-    CubeIcon,
+    VideoCameraIcon,
 } from '@heroicons/react/24/outline'
 
-export default function AdminSystemStatus({ systemHealth, recentFailedJobs, assetsWithIssues, latestAIInsight, scheduledTasks, queueNextRun, horizonAvailable, horizonUrl, deployedAt }) {
+export default function AdminSystemStatus({
+    systemHealth,
+    recentFailedJobs,
+    assetsWithIssues,
+    latestAIInsight,
+    scheduledTasks,
+    queueNextRun,
+    horizonAvailable,
+    horizonUrl,
+    deployedAt,
+    operationsSnapshot = {},
+}) {
     const { auth } = usePage().props
     const [clearingId, setClearingId] = useState(null)
 
@@ -127,7 +138,19 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                         { label: 'System status' },
                     ]}
                     title="System status"
-                    description="Queue, scheduler, storage, thumbnails, deployment metadata, failed jobs, cron schedule, and assets with processing issues."
+                    description="Queue, scheduler, storage, thumbnails, deployment metadata, failed jobs, cron schedule, assets with processing issues, and a snapshot of open incidents plus Studio export failures."
+                    technicalNote={
+                        <details className="mt-3 max-w-3xl rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                            <summary className="cursor-pointer font-medium text-slate-700">Technical notes</summary>
+                            <p className="mt-2 leading-relaxed">
+                                Health cards use queue config, scheduler cache heartbeat, storage bucket registry, and asset{' '}
+                                <code className="rounded bg-slate-100 px-1">thumbnail_status</code>. Failed job rows come from{' '}
+                                <code className="rounded bg-slate-100 px-1">failed_jobs</code>. Incident and Studio counts align
+                                with Reliability Center tabs (<code className="rounded bg-slate-100 px-1">system_incidents</code>,{' '}
+                                <code className="rounded bg-slate-100 px-1">studio_composition_video_export_jobs</code>).
+                            </p>
+                        </details>
+                    }
                     sidebar={<AdminReliabilitySectionSidebar />}
                 >
                     {/* Deployment / Deployed commit */}
@@ -351,6 +374,80 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
                                             </span>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Same summary cards as the former Reliability Center overview tab */}
+                    <div className="mb-8">
+                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                            Failures &amp; recovery snapshot
+                        </h2>
+                        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                <div className="p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <ExclamationTriangleIcon className="mr-3 h-6 w-6 text-gray-400" />
+                                            <h3 className="text-sm font-medium text-gray-900">Incidents</h3>
+                                        </div>
+                                        <span
+                                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                                (operationsSnapshot?.open_incidents_count ?? 0) === 0
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : (operationsSnapshot?.open_incidents_count ?? 0) > 10
+                                                      ? 'bg-red-100 text-red-800'
+                                                      : 'bg-amber-100 text-amber-800'
+                                            }`}
+                                        >
+                                            {operationsSnapshot?.open_incidents_count ?? 0} unresolved
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        {(operationsSnapshot?.open_incidents_count ?? 0) === 0
+                                            ? 'No open incidents. System reliability is healthy.'
+                                            : 'Open incidents need triage — playbook actions live in Reliability Center.'}
+                                    </p>
+                                    {(operationsSnapshot?.open_incidents_count ?? 0) > 0 && (
+                                        <Link
+                                            href="/app/admin/reliability?tab=incidents"
+                                            className="mt-4 inline-flex rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+                                        >
+                                            View incidents
+                                        </Link>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                <div className="p-6">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <VideoCameraIcon className="mr-3 h-6 w-6 text-gray-400" />
+                                            <h3 className="text-sm font-medium text-gray-900">Studio video exports (failed)</h3>
+                                        </div>
+                                        <span
+                                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                                (operationsSnapshot?.studio_video_exports?.last_24h ?? 0) === 0
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : 'bg-amber-100 text-amber-800'
+                                            }`}
+                                        >
+                                            {operationsSnapshot?.studio_video_exports?.last_24h ?? 0} in 24h /{' '}
+                                            {operationsSnapshot?.studio_video_exports?.last_7d ?? 0} in 7d
+                                        </span>
+                                    </div>
+                                    <p className="mt-4 text-sm text-gray-500">
+                                        <span className="font-medium text-gray-700">Failed jobs only</span> on the tab
+                                        (stderr inline, optional row delete). Counts surface fleet-wide FFmpeg or blend
+                                        issues.
+                                    </p>
+                                    <Link
+                                        href="/app/admin/reliability?tab=studio-exports"
+                                        className="mt-4 inline-flex rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+                                    >
+                                        View Studio export failures
+                                    </Link>
                                 </div>
                             </div>
                         </div>

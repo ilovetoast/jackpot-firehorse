@@ -336,7 +336,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
         {
             name: 'Reliability Center',
             description: 'Health, queues, incidents, failures, raw logs, and recovery tools.',
-            href: '/app/admin/reliability',
+            href: '/app/admin/system-status',
             icon: ExclamationTriangleIcon,
             show: perms.canViewOperations,
         },
@@ -394,7 +394,7 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                             value={incidents.total_unresolved ?? 0}
                             subtitle={`${incidents.critical ?? 0} critical`}
                             status={incidents.critical > 0 ? 'critical' : incidents.error > 0 ? 'error' : 'healthy'}
-                            href="/app/admin/reliability"
+                            href="/app/admin/reliability?tab=incidents"
                             icon={ExclamationTriangleIcon}
                         />
                         <MetricCard
@@ -493,10 +493,10 @@ export default function AdminDashboard({ auth, metrics: initialMetrics }) {
                                 </div>
                             </div>
                             <Link
-                                href="/app/admin/reliability"
+                                href="/app/admin/system-status"
                                 className="mt-4 inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-500"
                             >
-                                Open Reliability Center →
+                                Open system status →
                             </Link>
                         </div>
                     </div>

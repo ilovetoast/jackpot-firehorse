@@ -3,7 +3,7 @@ import { useAdminPermissions } from '../../hooks/useAdminPermissions'
 
 const CENTERS = [
     { key: 'command', label: 'Command Center', href: '/app/admin' },
-    { key: 'reliability', label: 'Reliability', href: '/app/admin/reliability' },
+    { key: 'reliability', label: 'Reliability', href: '/app/admin/system-status' },
     { key: 'ai', label: 'AI Control', href: '/app/admin/ai' },
     { key: 'organization', label: 'Organization', href: '/app/admin/organization' },
     { key: 'billing', label: 'Billing', href: '/app/admin/billing' },

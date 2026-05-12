@@ -1067,7 +1067,7 @@ class ThumbnailGenerationService
                 } catch (\Exception $e) {
                     $thumbnailEngineDiagnostics[] = [
                         'context' => 'preview',
-                        'message' => $e->getMessage(),
+                        'message' => \App\Support\ThumbnailEngineDiagnostics::sanitizeMessage($e->getMessage()),
                     ];
                     // Preview generation failure is non-fatal - continue with final thumbnails
                     Log::warning('[ThumbnailGenerationService] Failed to generate preview thumbnail (non-fatal)', [
@@ -1160,7 +1160,7 @@ class ThumbnailGenerationService
                 } catch (\Exception $e) {
                     $thumbnailEngineDiagnostics[] = [
                         'context' => 'style:'.$styleName,
-                        'message' => $e->getMessage(),
+                        'message' => \App\Support\ThumbnailEngineDiagnostics::sanitizeMessage($e->getMessage()),
                     ];
                     Log::warning("Failed to generate thumbnail style '{$styleName}' for asset", [
                         'asset_id' => $asset->id,

@@ -18,7 +18,6 @@ import {
     LinkIcon,
     ServerStackIcon,
     ChartBarIcon,
-    ChartBarSquareIcon,
     BoltIcon,
     VideoCameraIcon,
     XMarkIcon,
@@ -372,7 +371,6 @@ function IncidentRow({ incident: i, onAction, selected, onSelect, onSourceClick,
 }
 
 const TABS = [
-    { id: 'overview', label: 'Overview', icon: ChartBarSquareIcon },
     { id: 'queue', label: 'Queue & scheduler', icon: QueueListIcon },
     { id: 'incidents', label: 'Incidents', icon: ExclamationTriangleIcon },
     { id: 'application-errors', label: 'Application errors', icon: BoltIcon },
@@ -383,7 +381,7 @@ const TABS = [
 
 export default function OperationsCenterIndex({
     auth,
-    tab = 'overview',
+    tab = 'queue',
     tab_switch_route_name: tabSwitchRouteName = 'admin.reliability.index',
     incidents,
     failedJobs,
@@ -714,7 +712,7 @@ export default function OperationsCenterIndex({
     const SchedulerStatusIcon = schedulerStatus.icon
 
     const tabMeta = TABS.find((x) => x.id === tab)
-    const tabLabel = tabMeta?.label ?? 'Overview'
+    const tabLabel = tabMeta?.label ?? 'Reliability Center'
 
     return (
         <div className="min-h-full">
@@ -745,103 +743,6 @@ export default function OperationsCenterIndex({
                 >
                     {/* Tab content */}
                     <div className="mt-6">
-                        {tab === 'overview' && (
-                            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <QueueListIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                            <h3 className="text-sm font-medium text-gray-900">Queue</h3>
-                                        </div>
-                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${queueStatus.className}`}>
-                                            <QueueStatusIcon className="h-4 w-4 mr-1" />
-                                            {queueStatus.label}
-                                        </span>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-2 gap-4">
-                                        <div>
-                                            <span className="text-sm text-gray-500">Pending</span>
-                                            <p className="text-lg font-semibold">{queueHealth?.pending_count ?? 0}</p>
-                                        </div>
-                                        <div>
-                                            <span className="text-sm text-gray-500">Failed</span>
-                                            <p className="text-lg font-semibold text-red-600">{queueHealth?.failed_count ?? 0}</p>
-                                        </div>
-                                    </div>
-                                    {horizonAvailable && horizonUrl && (
-                                        <a href={horizonUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800">
-                                            <LinkIcon className="h-4 w-4 mr-1" /> Open Horizon
-                                        </a>
-                                    )}
-                                </div>
-                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <ClockIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                            <h3 className="text-sm font-medium text-gray-900">Scheduler</h3>
-                                        </div>
-                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${schedulerStatus.className}`}>
-                                            <SchedulerStatusIcon className="h-4 w-4 mr-1" />
-                                            {schedulerStatus.label}
-                                        </span>
-                                    </div>
-                                    <p className="mt-4 text-sm text-gray-500">
-                                        Last heartbeat: {schedulerHealth?.last_heartbeat ? formatDate(schedulerHealth.last_heartbeat) : 'Never'}
-                                    </p>
-                                </div>
-                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 lg:col-span-2">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <ExclamationTriangleIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                            <h3 className="text-sm font-medium text-gray-900">Incidents</h3>
-                                        </div>
-                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                            incidentList.length === 0 ? 'bg-green-100 text-green-800' : incidentList.length > 10 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                                        }`}>
-                                            {incidentList.length} unresolved
-                                        </span>
-                                    </div>
-                                    <p className="mt-4 text-sm text-gray-500">
-                                        {incidentList.length === 0
-                                            ? 'No open incidents. System reliability is healthy.'
-                                            : 'View the Incidents tab for details and actions.'}
-                                    </p>
-                                    {incidentList.length > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setTab('incidents')}
-                                            className="mt-4 inline-flex rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-                                        >
-                                            View Incidents
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 lg:col-span-2">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <VideoCameraIcon className="h-6 w-6 text-gray-400 mr-3" />
-                                            <h3 className="text-sm font-medium text-gray-900">Studio video exports (failed)</h3>
-                                        </div>
-                                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                            (studioVideoExports?.last_24h ?? 0) === 0 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
-                                        }`}>
-                                            {studioVideoExports?.last_24h ?? 0} in 24h / {studioVideoExports?.last_7d ?? 0} in 7d
-                                        </span>
-                                    </div>
-                                    <p className="mt-4 text-sm text-gray-500">
-                                        <span className="font-medium text-gray-700">Failed jobs only</span> on the tab (stderr inline, optional row delete for cleanup). Counts help spot fleet-wide FFmpeg or blend issues.
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={() => setTab('studio-exports')}
-                                        className="mt-4 inline-flex rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-                                    >
-                                        View Studio export failures
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
                         {tab === 'queue' && (
                             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                                 <div className="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
