@@ -282,6 +282,11 @@ class ThumbnailRetryService
             } elseif ($skipReason === 'dimensions_unknown' &&
                       ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                 $isNowSupported = true;
+            } elseif ($skipReason === 'dimensions_unknown' &&
+                in_array($extension, ['heic', 'heif', 'cr2', 'avif'], true) &&
+                extension_loaded('imagick')) {
+                // Soft-skip was a gate bug (MIME mis-order) or missing decode path; allow retry once Imagick is present.
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {

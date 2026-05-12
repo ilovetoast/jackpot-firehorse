@@ -412,6 +412,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                     break;
                 }
             }
+            // `detectFileType` checks MIME before extension. A mis-sniffed early candidate (e.g. `image/jpeg`)
+            // wins over `.heic` / `.heif` / `.cr2` / `.avif` on the extension, so the loop above never sets this
+            // flag — yet dimensions are legitimately unknown until Imagick decodes. Same pattern as
+            // {@see ThumbnailGenerationService::detectFileType} fallbacks for HEIC/CR2/AVIF.
+            if (in_array($ext, ['heic', 'heif', 'cr2', 'avif'], true)) {
+                $dimensionsFromRendering = true;
+            }
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;
