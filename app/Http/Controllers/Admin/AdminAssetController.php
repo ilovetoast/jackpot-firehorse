@@ -838,6 +838,7 @@ class AdminAssetController extends Controller
             'analysis_status' => $request->filled('analysis_status') ? trim($request->analysis_status) : null,
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
             'thumbnail_preview_issue' => $this->parseBoolParam($request, 'thumbnail_preview_issue'),
+            'thumbnail_preview_issue_include_trashed' => $this->parseBoolParam($request, 'thumbnail_preview_issue_include_trashed'),
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
             'deleted' => $this->parseBoolParam($request, 'deleted'),
             'builder_staged' => $this->parseBoolParam($request, 'builder_staged'),
@@ -1184,6 +1185,11 @@ class AdminAssetController extends Controller
         }
         if ($this->adminFilterTruthy($filters['thumbnail_preview_issue'] ?? null)) {
             $query->adminThumbnailPreviewIssues();
+            $includeTrashedInPreview = $this->adminFilterTruthy($filters['thumbnail_preview_issue_include_trashed'] ?? null);
+            $deletedOnly = ($filters['deleted'] ?? null) === true || ($filters['deleted'] ?? null) === '1';
+            if (! $includeTrashedInPreview && ! $deletedOnly) {
+                $query->whereNull('assets.deleted_at');
+            }
         }
         if (($filters['storage_missing'] ?? null) === true) {
             $query->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.storage_missing')) IN ('true', '1')");

@@ -1,6 +1,6 @@
 import { router } from '@inertiajs/react'
 import AppHead from '../../../Components/AppHead'
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo, useId } from 'react'
 import axios from 'axios'
 import AppNav from '../../../Components/AppNav'
 import AppFooter from '../../../Components/AppFooter'
@@ -107,6 +107,9 @@ function shouldOmitFromQuery(key, value) {
         return value === false || value === 'false' || value == null
     }
     if (key === 'thumbnail_preview_issue') {
+        return value !== true && value !== 'true' && value !== 1 && value !== '1'
+    }
+    if (key === 'thumbnail_preview_issue_include_trashed') {
         return value !== true && value !== 'true' && value !== 1 && value !== '1'
     }
     if (key === 'page') {
@@ -247,6 +250,11 @@ function summarizeActiveAdminFilters(f) {
         lines.push(
             'Preview issues: non-audio types from the file registry that expect thumbnails — failed, stuck processing, pending after analysis complete, or skipped with operational / stack skip reasons.',
         )
+        if (f.thumbnail_preview_issue_include_trashed === true || f.thumbnail_preview_issue_include_trashed === 'true' || f.thumbnail_preview_issue_include_trashed === 1 || f.thumbnail_preview_issue_include_trashed === '1') {
+            lines.push('Preview issues includes soft-deleted (trash) rows.')
+        } else {
+            lines.push('Soft-deleted assets are excluded from preview issues (use the trash control to include them).')
+        }
     }
     if (f.builder_staged === true) {
         lines.push('Builder-staged only (builder:true).')
@@ -332,6 +340,7 @@ export default function AdminAssetsIndex({
     const [recoverCategoryId, setRecoverCategoryId] = useState('')
     const [recoverCategoryLoading, setRecoverCategoryLoading] = useState(false)
     const actionsDropdownRef = useRef(null)
+    const previewIssueTrashFieldId = useId()
 
     const emptyStateHints = useMemo(() => summarizeActiveAdminFilters(initialFilters), [initialFilters])
 
@@ -460,6 +469,15 @@ export default function AdminAssetsIndex({
         [initialFilters?.thumbnail_preview_issue],
     )
 
+    const previewIssueIncludeTrashed = useMemo(
+        () =>
+            initialFilters?.thumbnail_preview_issue_include_trashed === true
+            || initialFilters?.thumbnail_preview_issue_include_trashed === 'true'
+            || initialFilters?.thumbnail_preview_issue_include_trashed === 1
+            || initialFilters?.thumbnail_preview_issue_include_trashed === '1',
+        [initialFilters?.thumbnail_preview_issue_include_trashed],
+    )
+
     const toggleStagedIntake = useCallback(() => {
         if (queueToggles.stagedIntake) {
             applyFilters({
@@ -503,11 +521,22 @@ export default function AdminAssetsIndex({
 
     const togglePreviewIssue = useCallback(() => {
         if (previewIssueOn) {
-            applyFilters({ thumbnail_preview_issue: false, page: 1 })
+            applyFilters({
+                thumbnail_preview_issue: false,
+                thumbnail_preview_issue_include_trashed: false,
+                page: 1,
+            })
         } else {
             applyFilters({ thumbnail_preview_issue: true, page: 1 })
         }
     }, [applyFilters, previewIssueOn])
+
+    const setPreviewIssueIncludeTrashed = useCallback(
+        (checked) => {
+            applyFilters({ thumbnail_preview_issue_include_trashed: checked ? true : false, page: 1 })
+        },
+        [applyFilters],
+    )
 
     const handleSearchSubmit = (e) => {
         e?.preventDefault()
@@ -546,6 +575,10 @@ export default function AdminAssetsIndex({
         initialFilters?.thumbnail_preview_issue === 'true' ||
         initialFilters?.thumbnail_preview_issue === 1 ||
         initialFilters?.thumbnail_preview_issue === '1' ||
+        initialFilters?.thumbnail_preview_issue_include_trashed === true ||
+        initialFilters?.thumbnail_preview_issue_include_trashed === 'true' ||
+        initialFilters?.thumbnail_preview_issue_include_trashed === 1 ||
+        initialFilters?.thumbnail_preview_issue_include_trashed === '1' ||
         initialFilters?.visible_in_grid != null ||
         initialFilters?.builder_staged != null ||
         initialFilters?.intake_state ||
@@ -962,15 +995,15 @@ export default function AdminAssetsIndex({
 
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Preview</span>
                         <div
-                            className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
+                            className="inline-flex flex-wrap items-center gap-0 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
                             role="group"
-                            aria-label="Thumbnail preview health"
+                            aria-label="Preview issues: thumbnail health (optional soft-deleted rows)"
                         >
                             <button
                                 type="button"
                                 aria-pressed={previewIssueOn}
                                 onClick={togglePreviewIssue}
-                                title="Registry types with thumbnail previews (excludes audio e.g. MP3): failed, pending after complete analysis, stalled processing, or skipped with operational / unsupported_format reasons"
+                                title="Registry types with thumbnail previews (excludes audio e.g. MP3): failed, pending after complete analysis, stalled processing, or skipped with operational / unsupported_format reasons. Soft-deleted rows are hidden unless the trash toggle is on."
                                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
                                     previewIssueOn
                                         ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
@@ -979,6 +1012,29 @@ export default function AdminAssetsIndex({
                             >
                                 Preview issues
                             </button>
+                            <span className="mx-0.5 h-5 w-px shrink-0 self-center bg-slate-300/90" aria-hidden />
+                            <label
+                                htmlFor={previewIssueTrashFieldId}
+                                title={
+                                    previewIssueOn
+                                        ? 'Include soft-deleted assets in this list'
+                                        : 'Turn on Preview issues first'
+                                }
+                                className={`inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-slate-600 transition focus-within:outline-none focus-within:ring-2 focus-within:ring-indigo-500 focus-within:ring-offset-2 ${
+                                    previewIssueOn ? 'hover:bg-white/80 hover:text-slate-900' : 'cursor-not-allowed opacity-40'
+                                }`}
+                            >
+                                <input
+                                    id={previewIssueTrashFieldId}
+                                    type="checkbox"
+                                    className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed"
+                                    checked={previewIssueIncludeTrashed}
+                                    disabled={!previewIssueOn}
+                                    onChange={(e) => setPreviewIssueIncludeTrashed(e.target.checked)}
+                                    aria-label="Include soft-deleted assets in preview issues"
+                                />
+                                <TrashIcon className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                            </label>
                         </div>
                     </div>
                     {typeToggles.ambiguous && (

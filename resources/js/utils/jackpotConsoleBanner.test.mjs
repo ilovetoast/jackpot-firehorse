@@ -7,45 +7,47 @@ import {
 } from './jackpotConsoleBanner.js'
 
 /*
- * Locks the console banner contract that fixed the staging "local · v:..." bug:
- *  - Server-supplied commitIso8601 wins (UTC stamp + optional `· sha` suffix).
+ * Locks the console banner stamp contract:
+ *  - Server-supplied commitIso8601 wins (MMDDYYYY:HHMM from that instant, UTC).
+ *  - Optional short SHA is appended as a third segment: MMDDYYYY:HHMM:sha (no `v:` / `UTC` / middle dot).
  *  - SHA is sanitized so a bad deploy manifest never injects junk into the styled log.
- *  - When nothing's available we fall back to "local · v:..." with NO hint message
- *    (the hint was leaking through to staging — operator-confusing).
+ *  - When nothing's available we fall back to `local · MMDDYYYY:HHMM` with NO hint message.
  */
 
-test('server iso + sha produces a UTC-stamped badge with sha suffix', () => {
+test('server iso + sha produces stamp with sha as third segment', () => {
     const out = buildVersionBadge(
         { commitIso8601: '2026-05-11T21:14:00+00:00', commitSha: 'c77c0c9abcdef' },
         null,
         null,
     )
-    assert.match(out.badgeText, /v:\d{8}:\d{4} UTC · c77c0c9a/)
+    assert.equal(out.releaseString, '05112026:2114:c77c0c9a')
+    assert.match(out.badgeText, /05112026:2114:c77c0c9a/)
     assert.equal(out.sha, 'c77c0c9a')
-    assert.match(out.releaseString, /v:\d{8}:\d{4} UTC · c77c0c9a/)
 })
 
-test('server iso without sha still shows UTC stamp (no trailing separator)', () => {
+test('server iso without sha is date:time only (no third segment)', () => {
     const out = buildVersionBadge(
         { commitIso8601: '2026-05-11T21:14:00+00:00' },
         null,
         null,
     )
-    assert.match(out.badgeText, /v:\d{8}:\d{4} UTC/)
-    assert.ok(!out.badgeText.includes(' · '),
-        'No SHA from server means no `· ` separator — keeps the badge clean')
+    assert.equal(out.releaseString, '05112026:2114')
+    assert.match(out.badgeText, /05112026:2114/)
+    assert.ok(!/:\d{8}$/.test(out.releaseString.trim()),
+        'No SHA from server means no `:sha` suffix')
     assert.equal(out.sha, null)
 })
 
 test('falls back to local clock when no server iso anywhere', () => {
     const out = buildVersionBadge(null, null, null)
-    assert.match(out.badgeText, /local · v:\d{8}:\d{4}/)
-    assert.match(out.releaseString, /^local · v:\d{8}:\d{4}$/)
+    assert.match(out.badgeText, /local · \d{8}:\d{4}/)
+    assert.match(out.releaseString, /^local · \d{8}:\d{4}$/)
 })
 
 test('cached iso fills in when current page payload omits it (Inertia partial reloads)', () => {
     const out = buildVersionBadge({}, '2026-04-01T00:00:00Z', 'feedface')
-    assert.match(out.badgeText, /v:\d{8}:\d{4} UTC · feedface/)
+    assert.equal(out.releaseString, '04012026:0000:feedface')
+    assert.match(out.badgeText, /04012026:0000:feedface/)
 })
 
 test('sanitizeCommitSha lowercases and clamps to 8 chars', () => {

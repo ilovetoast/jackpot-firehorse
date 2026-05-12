@@ -7,7 +7,7 @@ use Tests\TestCase;
 
 /**
  * Pin the resolution order for the console banner stamp. The bug we hit
- * on staging: the banner read `local · v:...` even though the Admin
+ * on staging: the banner read `local · …` even though the Admin
  * Command Center had `c77c0c9 / Deployed May 11 2026 5:14 PM` from the
  * DEPLOYED_AT manifest. The two surfaces must agree — both should resolve
  * via the same fallbacks.

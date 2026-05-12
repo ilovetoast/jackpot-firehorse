@@ -4,11 +4,11 @@
  * Stamp uses the server's release metadata when Laravel shares it:
  * `.release-info.json`, `APP_BUILD_*`, the deploy manifest (DEPLOYED_AT —
  * same source as the Admin Command Center), or `git log -1`. When a short
- * commit SHA is also available it is appended (e.g. `v:05112026:2114 UTC · c77c0c9`).
+ * commit SHA is also available it is appended with a colon (e.g. `05112026:2114:c77c0c9a`).
  *
  * Falls back to this browser's local clock with a `local ·` prefix when no
- * server-side metadata is available. We do NOT print a hint message in that
- * case — the badge itself is the signal, and a verbose hint leaked through
+ * server-side metadata is available (same `MMDDYYYY:HHMM` stamp, no `v:` / `UTC` labels).
+ * We do NOT print a hint message in that case — the badge itself is the signal, and a verbose hint leaked through
  * to staging when the manifest fallback was missing (now fixed server-side).
  *
  * The version line is printed with %c (black background, white monospace text).
@@ -30,7 +30,7 @@ export function formatJackpotConsoleVersionUtc(date) {
     const yyyy = String(date.getUTCFullYear())
     const hh = pad2(date.getUTCHours())
     const min = pad2(date.getUTCMinutes())
-    return `v:${mm}${dd}${yyyy}:${hh}${min}`
+    return `${mm}${dd}${yyyy}:${hh}${min}`
 }
 
 /** Local wall-clock compact stamp (dev fallback when no deploy metadata). */
@@ -40,7 +40,7 @@ export function formatJackpotConsoleVersionLocal(date = new Date()) {
     const yyyy = String(date.getFullYear())
     const hh = pad2(date.getHours())
     const min = pad2(date.getMinutes())
-    return `v:${mm}${dd}${yyyy}:${hh}${min}`
+    return `${mm}${dd}${yyyy}:${hh}${min}`
 }
 
 export function formatVersionLabelFromCommitIso(iso) {
@@ -108,10 +108,10 @@ export function buildVersionBadge(sharedPayload, cachedIso = null, cachedSha = n
     if (iso) {
         const label = formatVersionLabelFromCommitIso(iso)
         if (label) {
-            const tail = sha ? ` · ${sha}` : ''
+            const tail = sha ? `:${sha}` : ''
             return {
-                badgeText: `  ${label} UTC${tail}  `,
-                releaseString: `${label} UTC${tail}`,
+                badgeText: `  ${label}${tail}  `,
+                releaseString: `${label}${tail}`,
                 sha,
             }
         }

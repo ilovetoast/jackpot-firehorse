@@ -424,7 +424,7 @@ class HandleInertiaRequests extends Middleware
                 'is_development' => config('app.env') === 'local' || config('app.env') === 'development',
                 'app_env' => config('app.env'),
             ],
-            /** Release metadata for the authenticated console banner (UTC stamp + short SHA). */
+            /** Release metadata for the authenticated console banner (commit time as MMDDYYYY:HHMM + short SHA). */
             'jackpotConsole' => [
                 'commitIso8601' => JackpotConsoleRelease::committedAtIso8601(),
                 'commitSha' => JackpotConsoleRelease::commitShortSha(),
