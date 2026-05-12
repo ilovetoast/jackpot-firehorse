@@ -5,19 +5,23 @@ namespace App\Http\Controllers;
 use App\Enums\ApprovalStatus;
 use App\Enums\AssetStatus;
 use App\Enums\AssetType;
+use App\Enums\EventType;
 use App\Enums\ThumbnailStatus;
 use App\Exceptions\PlanLimitExceededException;
 use App\Jobs\AiMetadataGenerationJob;
 use App\Jobs\AiMetadataSuggestionJob;
 use App\Jobs\AiTagAutoApplyJob;
+use App\Jobs\RunAudioAiAnalysisJob;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\User;
+use App\Services\ActivityRecorder;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiTagPolicyService;
 use App\Services\AiUsageService;
+use App\Services\Audio\AudioAiAnalysisService;
 use App\Services\AssetArchiveService;
 use App\Services\AssetDeletionService;
 use App\Services\AssetPublicationService;
@@ -2473,6 +2477,58 @@ class AssetController extends Controller
             ], 403);
         }
 
+        $fileType = $this->fileTypeService->detectFileTypeFromAsset($asset);
+
+        // Audio uses the transcript / mood pipeline (RunAudioAiAnalysisJob), not
+        // vision-on-thumbnail. Many MP3s have thumbnail_status=skipped — the image
+        // tagging chain would 422 here even though audio AI is valid.
+        if ($fileType === 'audio') {
+            $aiUsage = app(AiUsageService::class);
+            $durationSeconds = (float) (($asset->metadata ?? [])['audio']['duration_seconds'] ?? 0.0);
+            $creditsRequired = $aiUsage->getAudioInsightsCreditCost($durationSeconds / 60.0);
+
+            try {
+                $aiUsage->checkUsage($tenant, AudioAiAnalysisService::FEATURE_KEY, $creditsRequired);
+            } catch (PlanLimitExceededException $e) {
+                return response()->json([
+                    'error' => 'Plan limit exceeded',
+                    'message' => $e->getMessage(),
+                ], 403);
+            }
+
+            $meta = $asset->metadata ?? [];
+            $meta['audio'] = array_merge($meta['audio'] ?? [], ['ai_status' => 'queued']);
+            unset($meta['_skip_ai_audio_analysis']);
+            $asset->update(['metadata' => $meta]);
+
+            $aiQueue = (string) config('queue.ai_queue', 'ai');
+
+            try {
+                RunAudioAiAnalysisJob::dispatch((string) $asset->id)->onQueue($aiQueue);
+
+                ActivityRecorder::logAsset($asset, EventType::ASSET_AI_TAGGING_REGENERATED, [
+                    'file_type' => 'audio',
+                    'pipeline' => 'audio_insights',
+                ], $user);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Audio AI analysis regeneration queued',
+                    'pipeline' => 'audio_insights',
+                ], 200);
+            } catch (\Throwable $e) {
+                Log::error('[AssetController] Failed to queue audio AI tagging regeneration', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Failed to queue audio AI analysis regeneration',
+                ], 500);
+            }
+        }
+
         try {
             app(AiUsageService::class)->checkUsage($tenant, 'tagging', 1);
         } catch (PlanLimitExceededException $e) {
@@ -2509,6 +2565,11 @@ class AssetController extends Controller
             ])
                 ->onQueue($aiQueue)
                 ->dispatch();
+
+            ActivityRecorder::logAsset($asset, EventType::ASSET_AI_TAGGING_REGENERATED, [
+                'file_type' => $fileType,
+                'pipeline' => 'vision_tags',
+            ], $user);
 
             return response()->json([
                 'success' => true,

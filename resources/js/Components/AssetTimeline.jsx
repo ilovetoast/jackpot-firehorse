@@ -82,6 +82,11 @@ export default function AssetTimeline({
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,
+            'asset.ai_tagging.regenerated': metadata?.pipeline === 'audio_insights'
+                ? 'Audio AI analysis re-run requested'
+                : metadata?.pipeline === 'vision_tags'
+                  ? 'AI tagging re-run requested (vision)'
+                  : 'AI tagging re-run requested',
             'asset.ai_metadata.generated': `AI metadata generated`,
             'asset.ai_metadata.failed': `AI metadata generation failed`,
             'asset.ai_video_insights.completed': `Video AI insights completed`,
