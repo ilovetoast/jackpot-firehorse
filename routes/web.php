@@ -305,10 +305,6 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::get('/api/permissions/tenant', [\App\Http\Controllers\RoleController::class, 'tenantPermissions'])->name('api.permissions.tenant');
         Route::get('/api/permissions/brand', [\App\Http\Controllers\RoleController::class, 'brandPermissions'])->name('api.permissions.brand');
 
-        // Phase AF-3: Notification API endpoints
-        Route::get('/api/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('api.notifications.index');
-        Route::post('/api/notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('api.notifications.read');
-
         // Downloads poll: mutable fields only for processing downloads (patch-based polling, no Inertia)
         Route::get('/api/downloads/poll', [\App\Http\Controllers\DownloadController::class, 'poll'])->name('api.downloads.poll');
 
@@ -382,6 +378,11 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         ->name('api.user.notification-preferences.show');
     Route::post('/api/user/notification-preferences', [\App\Http\Controllers\UserNotificationPreferencesController::class, 'update'])
         ->name('api.user.notification-preferences.update');
+
+    // Phase AF-3: Notification API (user-scoped JSON; must NOT sit behind `tenant` — site admin / company picker
+    // flows load AppNav without active tenant; tenant middleware was returning HTML, breaking fetch().json()).
+    Route::get('/api/notifications', [\App\Http\Controllers\NotificationController::class, 'index'])->name('api.notifications.index');
+    Route::post('/api/notifications/{notification}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead'])->name('api.notifications.read');
 
     // Site Admin routes - Command Center
     Route::get('/admin', [\App\Http\Controllers\Admin\AdminOverviewController::class, 'index'])->name('admin.index');
