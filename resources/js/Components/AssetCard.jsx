@@ -375,15 +375,31 @@ export default function AssetCard({
 
     const videoDurationLabel = useMemo(() => {
         if (!isVideo) return null
-        return formatVideoDurationForCard(
-            asset?.video_duration ?? asset?.metadata?.video?.duration_seconds,
-        )
-    }, [isVideo, asset?.video_duration, asset?.metadata?.video?.duration_seconds])
+        const seconds =
+            asset?.video_duration ??
+            asset?.metadata?.video?.duration_seconds ??
+            asset?.metadata?.video_duration
+        return formatVideoDurationForCard(seconds)
+    }, [
+        isVideo,
+        asset?.video_duration,
+        asset?.metadata?.video?.duration_seconds,
+        asset?.metadata?.video_duration,
+    ])
 
     const handleVideoCardPlayClick = useCallback(
         (e) => {
             e.preventDefault()
             e.stopPropagation()
+            // Prefer full-source viewer (drawer lightbox / same as double-click) over toggling the short hover MP4.
+            if (onDoubleClick) {
+                onDoubleClick(asset, e)
+                return
+            }
+            if (isVideo && onClick) {
+                onClick(asset, e)
+                return
+            }
             const v = videoPreviewRef.current
             if (v && previewLoaded && !videoPreviewFailed) {
                 if (v.paused) {
@@ -397,7 +413,7 @@ export default function AssetCard({
                 setIsHovering(true)
             }
         },
-        [previewLoaded, videoPreviewFailed, isMobile, asset?.video_preview_url],
+        [previewLoaded, videoPreviewFailed, isMobile, asset, onDoubleClick, onClick],
     )
 
     // Audio cards are fully painted by AudioCardVisual (gradient + waveform +
@@ -875,12 +891,19 @@ export default function AssetCard({
                         {/* Video grid: bottom-left play/pause + bottom-right duration (matches AudioCardVisual) */}
                         {isVideo && videoHasPosterFrame && !isExecutionThumbVisual ? (
                             <>
-                                {!isMobile && asset?.video_preview_url ? (
+                                {!isMobile &&
+                                (asset?.video_preview_url || onDoubleClick || onClick) ? (
                                     <button
                                         type="button"
                                         onClick={handleVideoCardPlayClick}
                                         className="absolute bottom-2 left-2 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-white shadow-lg ring-1 ring-white/25 backdrop-blur-md transition-transform duration-150 hover:scale-105 hover:bg-black/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                                        aria-label={videoPreviewPlaying ? 'Pause video preview' : 'Play video preview'}
+                                        aria-label={
+                                            onDoubleClick || (isVideo && onClick)
+                                                ? 'Open full video'
+                                                : videoPreviewPlaying
+                                                  ? 'Pause video preview'
+                                                  : 'Play video preview'
+                                        }
                                         aria-pressed={videoPreviewPlaying}
                                     >
                                         {videoPreviewPlaying ? (
@@ -892,9 +915,7 @@ export default function AssetCard({
                                 ) : null}
                                 {videoDurationLabel ? (
                                     <span
-                                        className={`pointer-events-none absolute z-30 rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] font-medium text-white/95 shadow-sm backdrop-blur-md ${
-                                            aiVideoBusy ? 'bottom-9 right-2' : 'bottom-2 right-2'
-                                        }`}
+                                        className="pointer-events-none absolute bottom-2 right-2 z-30 rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] font-medium text-white/95 shadow-sm backdrop-blur-md"
                                     >
                                         {videoDurationLabel}
                                     </span>
@@ -923,16 +944,6 @@ export default function AssetCard({
                                     </span>
                                 </div>
                             )}
-                        {!isVirtualGoogleFont && aiVideoBusy && cardVisualState.kind === 'ready' ? (
-                            <div className="pointer-events-none absolute bottom-2 right-2 z-[5]">
-                                <span
-                                    className="rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-medium text-white shadow-sm"
-                                    title="Video insights are running in the background"
-                                >
-                                    Video AI
-                                </span>
-                            </div>
-                        ) : null}
                     </>
                 )}
                 
@@ -1062,6 +1073,14 @@ export default function AssetCard({
                             </span>
                         )}
                     </div>
+                    {!isVirtualGoogleFont && aiVideoBusy && cardVisualState.kind === 'ready' ? (
+                        <span
+                            className="inline-flex items-center rounded-md bg-violet-950/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-100 shadow-sm ring-1 ring-violet-400/40 animate-pulse"
+                            title="Video insights (summary, tags, moments) are running in the background. Hover still shows the short preview clip when available."
+                        >
+                            Insights…
+                        </span>
+                    ) : null}
                 </div>
             </div>
             

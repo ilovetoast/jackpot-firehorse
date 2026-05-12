@@ -1007,6 +1007,7 @@ class AssetController extends Controller
                         'file_extension' => $fileExtension,
                         'status' => $asset->status instanceof \App\Enums\AssetStatus ? $asset->status->value : (string) $asset->status, // AssetStatus enum value
                         'size_bytes' => $asset->size_bytes,
+                        'video_duration' => $asset->video_duration !== null ? (int) $asset->video_duration : null,
                         'created_at' => $asset->created_at?->toIso8601String(),
                         'metadata' => DerivativeFailureUserMessaging::workspaceMetadata($asset->metadata), // Internal pipeline diagnostics stripped for workspace UI
                         'starred' => $this->assetIsStarred($metadata['starred'] ?? $starredFromTable[$asset->id] ?? null), // prefer assets.metadata; fallback asset_metadata for display
