@@ -3989,28 +3989,47 @@ class ThumbnailGenerationService
             // Get video duration and dimensions using FFprobe
             $videoInfo = $this->getVideoInfo($sourcePath, $ffmpegPath);
             $duration = $videoInfo['duration'] ?? 0;
+            $duration = is_numeric($duration) ? (float) $duration : 0.0;
             $width = $videoInfo['width'] ?? 0;
             $height = $videoInfo['height'] ?? 0;
-
-            if ($duration <= 0) {
-                throw new \RuntimeException('Unable to determine video duration');
-            }
 
             if ($width === 0 || $height === 0) {
                 throw new \RuntimeException('Unable to determine video dimensions');
             }
 
-            Log::info('[ThumbnailGenerationService] Video info extracted', [
-                'source_path' => $sourcePath,
-                'duration' => $duration,
-                'width' => $width,
-                'height' => $height,
-            ]);
+            $forceFirstFrameOnly = ($duration <= 0 || ! is_finite($duration));
 
-            // Calculate frame timestamp: 25-40% of duration (defaults to 30%)
-            // This avoids black frames at the start and ensures we get actual content
-            $timestampPercent = 0.30; // 30% of duration
-            $timestamp = max(0.5, $duration * $timestampPercent); // Minimum 0.5 seconds
+            if ($forceFirstFrameOnly) {
+                Log::warning('[ThumbnailGenerationService] Video duration missing or zero; extracting first decodable frame', [
+                    'source_path' => $sourcePath,
+                    'width' => $width,
+                    'height' => $height,
+                ]);
+            } else {
+                Log::info('[ThumbnailGenerationService] Video info extracted', [
+                    'source_path' => $sourcePath,
+                    'duration' => $duration,
+                    'width' => $width,
+                    'height' => $height,
+                ]);
+            }
+
+            $timestamp = 0.0;
+            if (! $forceFirstFrameOnly) {
+                // Frame timestamp: ~30% of duration. Never use a fixed minimum seek (e.g. 0.5s) that can land
+                // past EOF — short MOVs / clips under ~1.7s made FFmpeg exit 0 with an empty JPEG (misleading
+                // "error code 0" in logs). Clamp to (0, duration - margin).
+                $timestampPercent = 0.30;
+                $timestamp = $duration * $timestampPercent;
+                if ($duration >= 1.0) {
+                    $timestamp = max(0.5, $timestamp);
+                }
+                $margin = min(0.04, max(0.001, $duration * 0.05));
+                $timestamp = min($timestamp, max(0.0, $duration - $margin));
+                if ($timestamp <= 0.0) {
+                    $timestamp = min(max(0.001, $duration * 0.05), max(0.001, $duration - $margin));
+                }
+            }
 
             // Extract frame at calculated timestamp
             $tempImagePath = tempnam(sys_get_temp_dir(), 'video_thumb_').'.jpg';
@@ -4032,27 +4051,44 @@ class ThumbnailGenerationService
             ]));
             $vfClause = $vfParts !== [] ? sprintf('-vf %s ', escapeshellarg(implode(',', $vfParts))) : '';
 
-            $cmdAutorotate = sprintf(
-                '%s -ss %.2f -i %s -vframes 1 -q:v 2 -y %s 2>&1',
-                escapeshellarg($ffmpegPath),
-                $timestamp,
-                escapeshellarg($sourcePath),
-                escapeshellarg($tempImagePath)
-            );
-            $cmdManual = sprintf(
-                '%s -ss %.2f -noautorotate -i %s %s-vframes 1 -q:v 2 -y %s 2>&1',
-                escapeshellarg($ffmpegPath),
-                $timestamp,
-                escapeshellarg($sourcePath),
-                $vfClause,
-                escapeshellarg($tempImagePath)
-            );
+            if ($forceFirstFrameOnly) {
+                $cmdAutorotate = sprintf(
+                    '%s -i %s -vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    escapeshellarg($sourcePath),
+                    escapeshellarg($tempImagePath)
+                );
+                $cmdManual = sprintf(
+                    '%s -noautorotate -i %s %s-vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    escapeshellarg($sourcePath),
+                    $vfClause,
+                    escapeshellarg($tempImagePath)
+                );
+            } else {
+                $cmdAutorotate = sprintf(
+                    '%s -ss %.2f -i %s -vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    $timestamp,
+                    escapeshellarg($sourcePath),
+                    escapeshellarg($tempImagePath)
+                );
+                $cmdManual = sprintf(
+                    '%s -ss %.2f -noautorotate -i %s %s-vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    $timestamp,
+                    escapeshellarg($sourcePath),
+                    $vfClause,
+                    escapeshellarg($tempImagePath)
+                );
+            }
 
             $output = [];
             $returnCode = 0;
             Log::info('[ThumbnailGenerationService] Extracting video frame (autorotate first)', [
                 'source_path' => $sourcePath,
-                'timestamp' => $timestamp,
+                'timestamp' => $forceFirstFrameOnly ? null : $timestamp,
+                'first_frame_only' => $forceFirstFrameOnly,
                 'command' => $cmdAutorotate,
             ]);
             exec($cmdAutorotate, $output, $returnCode);
@@ -4069,12 +4105,66 @@ class ThumbnailGenerationService
                 }
                 Log::info('[ThumbnailGenerationService] Extracting video frame (manual rotation)', [
                     'source_path' => $sourcePath,
-                    'timestamp' => $timestamp,
+                    'timestamp' => $forceFirstFrameOnly ? null : $timestamp,
                     'command' => $cmdManual,
                     'rotation_deg' => $rotationDeg,
                 ]);
                 $output = [];
                 exec($cmdManual, $output, $returnCode);
+            }
+
+            if (! $forceFirstFrameOnly
+                && ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0)) {
+                $errorOutput = implode("\n", $output);
+                Log::warning('[ThumbnailGenerationService] Seek-based frame extract failed; trying first decodable frame', [
+                    'source_path' => $sourcePath,
+                    'duration' => $duration,
+                    'timestamp' => $timestamp,
+                    'return_code' => $returnCode,
+                    'output_tail' => substr($errorOutput, -800),
+                ]);
+                if (file_exists($tempImagePath)) {
+                    @unlink($tempImagePath);
+                }
+                $cmdFirstAutorotate = sprintf(
+                    '%s -i %s -vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    escapeshellarg($sourcePath),
+                    escapeshellarg($tempImagePath)
+                );
+                Log::info('[ThumbnailGenerationService] Extracting video frame (first frame, autorotate)', [
+                    'source_path' => $sourcePath,
+                    'command' => $cmdFirstAutorotate,
+                ]);
+                $output = [];
+                exec($cmdFirstAutorotate, $output, $returnCode);
+            }
+
+            if (! $forceFirstFrameOnly
+                && ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0)) {
+                $errorOutput = implode("\n", $output);
+                Log::warning('[ThumbnailGenerationService] First-frame autorotate failed; retrying first frame with manual rotation', [
+                    'source_path' => $sourcePath,
+                    'return_code' => $returnCode,
+                    'output_tail' => substr($errorOutput, -800),
+                ]);
+                if (file_exists($tempImagePath)) {
+                    @unlink($tempImagePath);
+                }
+                $cmdFirstManual = sprintf(
+                    '%s -noautorotate -i %s %s-vframes 1 -q:v 2 -y %s 2>&1',
+                    escapeshellarg($ffmpegPath),
+                    escapeshellarg($sourcePath),
+                    $vfClause,
+                    escapeshellarg($tempImagePath)
+                );
+                Log::info('[ThumbnailGenerationService] Extracting video frame (first frame, manual rotation)', [
+                    'source_path' => $sourcePath,
+                    'command' => $cmdFirstManual,
+                    'rotation_deg' => $rotationDeg,
+                ]);
+                $output = [];
+                exec($cmdFirstManual, $output, $returnCode);
             }
 
             if ($returnCode !== 0 || ! file_exists($tempImagePath) || filesize($tempImagePath) === 0) {
@@ -4084,7 +4174,14 @@ class ThumbnailGenerationService
                     'return_code' => $returnCode,
                     'output' => $errorOutput,
                 ]);
-                throw new \RuntimeException("Failed to extract video frame: FFmpeg returned error code {$returnCode}");
+                $jpegMissing = ! file_exists($tempImagePath) || filesize($tempImagePath) === 0;
+                $detail = $returnCode !== 0
+                    ? "FFmpeg exit code {$returnCode}"
+                    : ($jpegMissing
+                        ? 'FFmpeg exited 0 but produced no JPEG (empty/missing file — often seek past EOF, codec, or container issue)'
+                        : 'unknown');
+                $tail = substr($errorOutput, -600);
+                throw new \RuntimeException("Failed to extract video frame: {$detail}. Output tail: {$tail}");
             }
 
             Log::info('[ThumbnailGenerationService] Video frame extracted', [
@@ -4304,6 +4401,18 @@ class ThumbnailGenerationService
         }
 
         $duration = (float) ($videoData['format']['duration'] ?? 0);
+        if ($duration <= 0 || ! is_finite($duration)) {
+            foreach ($videoData['streams'] ?? [] as $stream) {
+                if (($stream['codec_type'] ?? '') !== 'video') {
+                    continue;
+                }
+                $sd = isset($stream['duration']) ? (float) $stream['duration'] : 0.0;
+                if ($sd > 0 && is_finite($sd)) {
+                    $duration = $sd;
+                    break;
+                }
+            }
+        }
 
         return [
             'duration' => $duration,

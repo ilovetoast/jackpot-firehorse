@@ -654,7 +654,7 @@ class ProcessAssetJob implements ShouldQueue
             }
             $pipelineQueue = PipelineQueueResolver::forPipeline(
                 $fileSizeBytes,
-                $mimeForType,
+                $version?->mime_type ?? $asset->mime_type,
                 $asset->original_filename
             );
 
