@@ -82,7 +82,7 @@ final class LibreOfficeDocumentPreviewServiceTest extends TestCase
             } catch (\RuntimeException) {
                 $this->assertFileExists($argfile);
                 $logged = (string) file_get_contents($argfile);
-                $this->assertStringContainsString('--env:UserInstallation=', $logged);
+                $this->assertStringContainsString('-env:UserInstallation=', $logged);
                 $this->assertStringContainsString('file:///', $logged);
             }
         } finally {
@@ -135,3 +135,4 @@ final class LibreOfficeDocumentPreviewServiceTest extends TestCase
         }
         @rmdir($dir);
     }
+}

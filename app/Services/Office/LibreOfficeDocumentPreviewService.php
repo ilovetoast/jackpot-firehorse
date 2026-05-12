@@ -131,8 +131,10 @@ final class LibreOfficeDocumentPreviewService
         @mkdir($runtime, 0700, true);
 
         $profileUrl = $this->profileDirToFileUrl($profileDir);
+        // Use "-env:UserInstallation=..." (single dash). LibreOffice 7.x rejects "--env:UserInstallation"
+        // and prints "Error in option: --env:UserInstallation=..." then exits without converting.
         $cmd = sprintf(
-            'timeout %d env HOME=%s XDG_RUNTIME_DIR=%s %s --headless --nologo --norestore --nodefault --env:UserInstallation=%s --convert-to pdf --outdir %s %s 2>&1',
+            'timeout %d env HOME=%s XDG_RUNTIME_DIR=%s %s --headless --nologo --norestore --nodefault -env:UserInstallation=%s --convert-to pdf --outdir %s %s 2>&1',
             $timeout,
             escapeshellarg($home),
             escapeshellarg($runtime),
