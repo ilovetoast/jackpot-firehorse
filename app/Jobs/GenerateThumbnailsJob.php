@@ -389,29 +389,27 @@ class GenerateThumbnailsJob implements ShouldQueue
             // metadata extraction (e.g. worker without HEIF delegate); ThumbnailGenerationService still reads size
             // via Imagick at decode time when HEIF support is present — do not soft-skip as dimensions_unknown first.
             $fileTypeService = app(\App\Services\FileTypeService::class);
-            // Match {@see ThumbnailGenerationService::detectFileType}: version path uses file_path extension only;
-            // legacy uses original_filename then storage_root_path. Do NOT use asset filename only here — it can be
-            // empty while version.file_path still ends in .pptx, which incorrectly triggered dimensions_unknown for Office.
-            if ($version) {
-                $mime = $version->mime_type;
-                $ext = $version->file_path
-                    ? strtolower(pathinfo((string) $version->file_path, PATHINFO_EXTENSION))
-                    : '';
-                if ($ext === '' && $asset->original_filename) {
-                    $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
-                }
-            } else {
-                $mime = $asset->mime_type;
-                $ext = $asset->original_filename
-                    ? strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION))
-                    : ($asset->storage_root_path
-                        ? strtolower(pathinfo((string) $asset->storage_root_path, PATHINFO_EXTENSION))
-                        : '');
+            // Match {@see ThumbnailGenerationService::detectFileType} for extension; also consider
+            // `metadata.metadata` from ExtractMetadataJob when the version path has no extension and the asset
+            // row lost original_filename — otherwise wrong version MIME + empty ext hits dimensions_unknown for PPTX.
+            $ext = $this->resolveThumbnailPipelineExtension($asset, $version);
+            $mimeCandidates = $this->resolveThumbnailPipelineMimeCandidates($asset, $version);
+            if ($mimeCandidates === []) {
+                $mimeCandidates = [''];
             }
-            $mimeLower = is_string($mime) ? strtolower($mime) : '';
-            $fileType = $fileTypeService->detectFileType($mimeLower !== '' ? $mimeLower : null, $ext !== '' ? $ext : null);
-            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic', 'office'], true)
-                || $fileTypeService->isOfficeDocument($mimeLower !== '' ? $mimeLower : null, $ext !== '' ? $ext : null);
+            $dimensionsFromRendering = false;
+            foreach ($mimeCandidates as $candidateMime) {
+                $m = is_string($candidateMime) && $candidateMime !== '' ? strtolower($candidateMime) : '';
+                $ft = $fileTypeService->detectFileType($m !== '' ? $m : null, $ext !== '' ? $ext : null);
+                if (in_array($ft, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic', 'office'], true)) {
+                    $dimensionsFromRendering = true;
+                    break;
+                }
+                if ($fileTypeService->isOfficeDocument($m !== '' ? $m : null, $ext !== '' ? $ext : null)) {
+                    $dimensionsFromRendering = true;
+                    break;
+                }
+            }
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;
@@ -553,13 +551,20 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
 
             // Step 5: Defensive check - Skip if file type doesn't support thumbnails
-            // Use version->mime_type when version-aware (from FileInspectionService)
-            $mimeForCheck = $version ? $version->mime_type : $asset->mime_type;
-            $extForCheck = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
+            $mimeCandidatesForGate = $this->resolveThumbnailPipelineMimeCandidates($asset, $version);
+            $mimeForCheck = $mimeCandidatesForGate[0] ?? ($version ? $version->mime_type : $asset->mime_type);
+            $extForCheck = $this->resolveThumbnailPipelineExtension($asset, $version);
 
             // PDF guardrail: do not process extremely large page-count documents.
-            $isPdf = strtolower((string) $mimeForCheck) === 'application/pdf'
-                || strtolower((string) $extForCheck) === 'pdf';
+            $isPdf = strtolower($extForCheck) === 'pdf';
+            if (! $isPdf) {
+                foreach ($mimeCandidatesForGate as $cMime) {
+                    if (strtolower((string) $cMime) === 'application/pdf') {
+                        $isPdf = true;
+                        break;
+                    }
+                }
+            }
 
             if ($isPdf) {
                 $pageCount = (int) ($asset->pdf_page_count ?? 0);
@@ -2095,9 +2100,82 @@ class GenerateThumbnailsJob implements ShouldQueue
     }
 
     /**
+     * Nested payload from {@see ExtractMetadataJob} (`metadata.metadata` on the asset).
+     *
+     * @return array<string, mixed>
+     */
+    protected function nestedExtractedMetadata(Asset $asset): array
+    {
+        $blob = $asset->metadata['metadata'] ?? null;
+
+        return is_array($blob) ? $blob : [];
+    }
+
+    /**
+     * Extension for thumbnail gating (dimensions, support check, PDF guardrail).
+     * Version path: file_path, then asset original_filename, then extracted nested original_filename.
+     */
+    protected function resolveThumbnailPipelineExtension(Asset $asset, ?AssetVersion $version): string
+    {
+        $nested = $this->nestedExtractedMetadata($asset);
+
+        if ($version) {
+            $ext = $version->file_path
+                ? strtolower(pathinfo((string) $version->file_path, PATHINFO_EXTENSION))
+                : '';
+            if ($ext === '' && $asset->original_filename) {
+                $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
+            }
+            if ($ext === '' && ! empty($nested['original_filename']) && is_string($nested['original_filename'])) {
+                $ext = strtolower(pathinfo($nested['original_filename'], PATHINFO_EXTENSION));
+            }
+
+            return $ext;
+        }
+
+        $ext = $asset->original_filename
+            ? strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION))
+            : '';
+        if ($ext === '' && $asset->storage_root_path) {
+            $ext = strtolower(pathinfo((string) $asset->storage_root_path, PATHINFO_EXTENSION));
+        }
+        if ($ext === '' && ! empty($nested['original_filename']) && is_string($nested['original_filename'])) {
+            $ext = strtolower(pathinfo($nested['original_filename'], PATHINFO_EXTENSION));
+        }
+
+        return $ext;
+    }
+
+    /**
+     * MIME candidates for gates: prefer version row, then asset row, then nested extraction (often correct when
+     * version MIME was mis-sniffed).
+     *
+     * @return list<string>
+     */
+    protected function resolveThumbnailPipelineMimeCandidates(Asset $asset, ?AssetVersion $version): array
+    {
+        $nested = $this->nestedExtractedMetadata($asset);
+        $extractedMime = isset($nested['mime_type']) && is_string($nested['mime_type']) ? $nested['mime_type'] : '';
+
+        $out = [];
+        if ($version && is_string($version->mime_type) && $version->mime_type !== '') {
+            $out[] = $version->mime_type;
+        }
+        if (is_string($asset->mime_type) && $asset->mime_type !== '') {
+            $out[] = $asset->mime_type;
+        }
+        if ($extractedMime !== '') {
+            $out[] = $extractedMime;
+        }
+
+        return array_values(array_unique(array_filter($out)));
+    }
+
+    /**
      * Check if thumbnail generation is supported for an asset.
      *
-     * When version is provided, uses version->mime_type (from FileInspectionService).
+     * When version is provided, still considers asset MIME and nested extracted MIME so Office is not mis-routed
+     * as raster when the version row MIME is wrong.
      *
      * @param  AssetVersion|null  $version  When provided, uses version->mime_type for file type detection
      * @return bool True if thumbnail generation is supported
@@ -2105,30 +2183,38 @@ class GenerateThumbnailsJob implements ShouldQueue
     protected function supportsThumbnailGeneration(Asset $asset, ?AssetVersion $version = null): bool
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
-        $mime = $version ? $version->mime_type : $asset->mime_type;
-        $ext = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
-        $fileType = $fileTypeService->detectFileType($mime, $ext);
-
-        if (! $fileType) {
-            return false;
-        }
-        if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
-            return false;
-        }
-        $requirements = $fileTypeService->checkRequirements($fileType);
-        if (! $requirements['met']) {
-            Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
-                'asset_id' => $asset->id,
-                'file_type' => $fileType,
-                'missing' => $requirements['missing'],
-                'mime_type' => $mime,
-                'filename' => $asset->original_filename,
-            ]);
-
-            return false;
+        $ext = $this->resolveThumbnailPipelineExtension($asset, $version);
+        $candidates = $this->resolveThumbnailPipelineMimeCandidates($asset, $version);
+        if ($candidates === []) {
+            $candidates = [''];
         }
 
-        return true;
+        foreach ($candidates as $rawMime) {
+            $mime = is_string($rawMime) && $rawMime !== '' ? strtolower($rawMime) : '';
+            $fileType = $fileTypeService->detectFileType($mime !== '' ? $mime : null, $ext !== '' ? $ext : null);
+            if (! $fileType) {
+                continue;
+            }
+            if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+                continue;
+            }
+            $requirements = $fileTypeService->checkRequirements($fileType);
+            if (! $requirements['met']) {
+                Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
+                    'asset_id' => $asset->id,
+                    'file_type' => $fileType,
+                    'missing' => $requirements['missing'],
+                    'mime_type' => $rawMime,
+                    'filename' => $asset->original_filename,
+                ]);
+
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /**

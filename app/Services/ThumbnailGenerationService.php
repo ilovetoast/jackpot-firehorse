@@ -4189,22 +4189,32 @@ class ThumbnailGenerationService
 
     /**
      * Detect file type from mime type and extension.
-     * Version-pure: when version is provided, use ONLY version (never asset).
+     * When a version exists, primary MIME/extension come from the version row; asset filename and
+     * {@see ExtractMetadataJob} nested `metadata.metadata` fill missing extensions and MIME fallbacks so
+     * mis-sniffed version MIME (e.g. image/jpeg) does not skip Office handling for a stored .pptx.
      *
-     * @param  Asset  $asset  Used only when version is null (legacy path)
-     * @param  AssetVersion|null  $version  When provided, use ONLY version->mime_type and version->file_path
+     * @param  Asset  $asset  Used for legacy path; with version, used only for filename / nested extraction fallbacks
+     * @param  AssetVersion|null  $version  When provided, primary mime/path from version
      * @return string File type: image, pdf, tiff, psd, ai, office, video, or unknown
      */
     protected function detectFileType(Asset $asset, ?AssetVersion $version = null): string
     {
         $fileTypeService = app(\App\Services\FileTypeService::class);
+        $nestedMeta = $asset->metadata['metadata'] ?? [];
+        $nestedMeta = is_array($nestedMeta) ? $nestedMeta : [];
+        $nestedMime = isset($nestedMeta['mime_type']) && is_string($nestedMeta['mime_type']) ? $nestedMeta['mime_type'] : null;
 
         if ($version) {
-            // Version-pure: use ONLY version. Ignore asset completely.
             $mime = $version->mime_type;
             $ext = $version->file_path
-                ? strtolower(pathinfo($version->file_path, PATHINFO_EXTENSION))
+                ? strtolower(pathinfo((string) $version->file_path, PATHINFO_EXTENSION))
                 : '';
+            if ($ext === '' && $asset->original_filename) {
+                $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
+            }
+            if ($ext === '' && ! empty($nestedMeta['original_filename']) && is_string($nestedMeta['original_filename'])) {
+                $ext = strtolower(pathinfo($nestedMeta['original_filename'], PATHINFO_EXTENSION));
+            }
         } else {
             // Legacy (Starter): use asset only. No mixed fallback.
             $mime = $asset->mime_type;
@@ -4214,9 +4224,13 @@ class ThumbnailGenerationService
             if ($ext === '' && $asset->original_filename) {
                 $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
             }
+            if ($ext === '' && ! empty($nestedMeta['original_filename']) && is_string($nestedMeta['original_filename'])) {
+                $ext = strtolower(pathinfo($nestedMeta['original_filename'], PATHINFO_EXTENSION));
+            }
         }
         $ext = $ext ?: '';
-        $fileType = $fileTypeService->detectFileType($mime, $ext);
+        $mimeLower = $mime ? strtolower((string) $mime) : null;
+        $fileType = $fileTypeService->detectFileType($mimeLower, $ext !== '' ? $ext : null);
 
         // TIFF fallback: GD getimagesize() does not support TIFF. When MIME is wrong (e.g. from S3)
         // or application/octet-stream, we may get 'image' or 'unknown'. For .tif/.tiff extension,
@@ -4240,8 +4254,21 @@ class ThumbnailGenerationService
             return 'svg';
         }
 
-        if ($fileTypeService->isOfficeDocument($mime ? strtolower((string) $mime) : null, $ext !== '' ? $ext : null)) {
-            return 'office';
+        $officeMimeCandidates = $version
+            ? array_values(array_unique(array_filter([
+                is_string($mime) ? $mime : null,
+                is_string($asset->mime_type) ? $asset->mime_type : null,
+                $nestedMime,
+            ])))
+            : array_values(array_unique(array_filter([
+                is_string($mime) ? $mime : null,
+                $nestedMime,
+            ])));
+
+        foreach ($officeMimeCandidates as $candidate) {
+            if ($fileTypeService->isOfficeDocument(strtolower((string) $candidate), $ext !== '' ? $ext : null)) {
+                return 'office';
+            }
         }
 
         return $resolved;

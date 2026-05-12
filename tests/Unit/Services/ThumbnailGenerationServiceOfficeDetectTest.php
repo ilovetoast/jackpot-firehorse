@@ -41,4 +41,28 @@ class ThumbnailGenerationServiceOfficeDetectTest extends TestCase
         $svc = app(ThumbnailGenerationService::class);
         $this->assertSame('office', $svc->detectFileTypeForDiagnostics($asset, $version));
     }
+
+    /**
+     * Extension-less storage key + wrong version MIME: rely on nested extraction filename / MIME from asset metadata.
+     */
+    public function test_version_path_uses_nested_extracted_filename_and_mime_when_version_row_is_wrong(): void
+    {
+        $asset = new Asset([
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'original_filename' => '',
+            'metadata' => [
+                'metadata' => [
+                    'original_filename' => 'hefty-pptx-template.pptx',
+                    'mime_type' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                ],
+            ],
+        ]);
+        $version = new AssetVersion([
+            'mime_type' => 'image/jpeg',
+            'file_path' => 'tenants/u/assets/a/v1/original',
+        ]);
+
+        $svc = app(ThumbnailGenerationService::class);
+        $this->assertSame('office', $svc->detectFileTypeForDiagnostics($asset, $version));
+    }
 }
