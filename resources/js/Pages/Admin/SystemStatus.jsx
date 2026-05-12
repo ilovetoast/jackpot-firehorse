@@ -19,6 +19,7 @@ import {
     LinkIcon,
     SparklesIcon,
     VideoCameraIcon,
+    CubeIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AdminSystemStatus({
