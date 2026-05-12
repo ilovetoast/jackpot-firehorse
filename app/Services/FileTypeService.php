@@ -483,6 +483,105 @@ class FileTypeService
     }
 
     /**
+     * MIME types for Admin Asset Operations "preview issues": registry types with thumbnail capability,
+     * excluding `audio` (waveform / audio pipeline is not treated as a missing grid preview here).
+     *
+     * @return list<string>
+     */
+    public function adminPreviewIssueMimeTypes(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $key => $typeConfig) {
+            if ($key === 'audio') {
+                continue;
+            }
+            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+                continue;
+            }
+            foreach ($typeConfig['mime_types'] ?? [] as $m) {
+                $seen[strtolower((string) $m)] = true;
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * Lowercase extensions (no dot) matching {@see adminPreviewIssueMimeTypes()}.
+     *
+     * @return list<string>
+     */
+    public function adminPreviewIssueExtensions(): array
+    {
+        $seen = [];
+        foreach (config('file_types.types', []) as $key => $typeConfig) {
+            if ($key === 'audio') {
+                continue;
+            }
+            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+                continue;
+            }
+            foreach ($typeConfig['extensions'] ?? [] as $e) {
+                $e = strtolower(ltrim((string) $e, '.'));
+                if ($e !== '') {
+                    $seen[$e] = true;
+                }
+            }
+        }
+
+        return array_keys($seen);
+    }
+
+    /**
+     * AND-filter: MIME or filename extension matches a non-audio thumbnail-capable registry type.
+     */
+    public function constrainAssetQueryToAdminPreviewIssueFormats(Builder $query): void
+    {
+        $mimes = $this->adminPreviewIssueMimeTypes();
+        $exts = $this->adminPreviewIssueExtensions();
+        $table = $query->getModel()->getTable();
+        $driver = DB::getDriverName();
+
+        $query->where(function ($q) use ($mimes, $exts, $table, $driver) {
+            if ($mimes === [] && $exts === []) {
+                $q->whereRaw('1 = 0');
+
+                return;
+            }
+
+            if ($mimes !== []) {
+                $q->whereIn(DB::raw("LOWER({$table}.mime_type)"), $mimes);
+            }
+
+            if ($exts === []) {
+                return;
+            }
+
+            if ($mimes !== []) {
+                $q->orWhere(function ($qq) use ($table, $exts, $driver) {
+                    if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                        $qq->whereIn(DB::raw("LOWER(SUBSTRING_INDEX({$table}.original_filename, '.', -1))"), $exts);
+                    } else {
+                        $qq->where(function ($inner) use ($table, $exts) {
+                            foreach ($exts as $e) {
+                                $inner->orWhereRaw("LOWER({$table}.original_filename) LIKE ?", ['%.'.$e]);
+                            }
+                        });
+                    }
+                });
+            } elseif (in_array($driver, ['mysql', 'mariadb'], true)) {
+                $q->whereIn(DB::raw("LOWER(SUBSTRING_INDEX({$table}.original_filename, '.', -1))"), $exts);
+            } else {
+                $q->where(function ($inner) use ($table, $exts) {
+                    foreach ($exts as $e) {
+                        $inner->orWhereRaw("LOWER({$table}.original_filename) LIKE ?", ['%.'.$e]);
+                    }
+                });
+            }
+        });
+    }
+
+    /**
      * All MIME types from the registry (DAM-supported uploads).
      *
      * @return list<string>

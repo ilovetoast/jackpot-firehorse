@@ -245,7 +245,7 @@ function summarizeActiveAdminFilters(f) {
     }
     if (f.thumbnail_preview_issue === true || f.thumbnail_preview_issue === 'true' || f.thumbnail_preview_issue === 1 || f.thumbnail_preview_issue === '1') {
         lines.push(
-            'Preview issues: failed thumbnails, stuck processing, pending after analysis complete, or skipped previews for audio/image/video/PDF (plus operational skip reasons).',
+            'Preview issues: non-audio types from the file registry that expect thumbnails — failed, stuck processing, pending after analysis complete, or skipped with operational / stack skip reasons.',
         )
     }
     if (f.builder_staged === true) {
@@ -970,7 +970,7 @@ export default function AdminAssetsIndex({
                                 type="button"
                                 aria-pressed={previewIssueOn}
                                 onClick={togglePreviewIssue}
-                                title="Assets where previews are missing or stuck: failed, pending after complete analysis, stalled processing, or skipped audio/image/video/PDF (and operational skip reasons)"
+                                title="Registry types with thumbnail previews (excludes audio e.g. MP3): failed, pending after complete analysis, stalled processing, or skipped with operational / unsupported_format reasons"
                                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
                                     previewIssueOn
                                         ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'

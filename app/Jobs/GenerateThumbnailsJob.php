@@ -389,10 +389,29 @@ class GenerateThumbnailsJob implements ShouldQueue
             // metadata extraction (e.g. worker without HEIF delegate); ThumbnailGenerationService still reads size
             // via Imagick at decode time when HEIF support is present — do not soft-skip as dimensions_unknown first.
             $fileTypeService = app(\App\Services\FileTypeService::class);
-            $mime = $version ? $version->mime_type : $asset->mime_type;
-            $ext = strtolower(pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION));
-            $fileType = $fileTypeService->detectFileType($mime, $ext);
-            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic', 'office'], true);
+            // Match {@see ThumbnailGenerationService::detectFileType}: version path uses file_path extension only;
+            // legacy uses original_filename then storage_root_path. Do NOT use asset filename only here — it can be
+            // empty while version.file_path still ends in .pptx, which incorrectly triggered dimensions_unknown for Office.
+            if ($version) {
+                $mime = $version->mime_type;
+                $ext = $version->file_path
+                    ? strtolower(pathinfo((string) $version->file_path, PATHINFO_EXTENSION))
+                    : '';
+                if ($ext === '' && $asset->original_filename) {
+                    $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
+                }
+            } else {
+                $mime = $asset->mime_type;
+                $ext = $asset->original_filename
+                    ? strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION))
+                    : ($asset->storage_root_path
+                        ? strtolower(pathinfo((string) $asset->storage_root_path, PATHINFO_EXTENSION))
+                        : '');
+            }
+            $mimeLower = is_string($mime) ? strtolower($mime) : '';
+            $fileType = $fileTypeService->detectFileType($mimeLower !== '' ? $mimeLower : null, $ext !== '' ? $ext : null);
+            $dimensionsFromRendering = in_array($fileType, ['pdf', 'video', 'svg', 'psd', 'psb', 'heic', 'office'], true)
+                || $fileTypeService->isOfficeDocument($mimeLower !== '' ? $mimeLower : null, $ext !== '' ? $ext : null);
 
             $assetWidth = $asset->width;
             $assetHeight = $asset->height;

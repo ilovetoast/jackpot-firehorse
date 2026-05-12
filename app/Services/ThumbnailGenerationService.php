@@ -4237,6 +4237,10 @@ class ThumbnailGenerationService
             return 'svg';
         }
 
+        if ($fileTypeService->isOfficeDocument($mime ? strtolower((string) $mime) : null, $ext !== '' ? $ext : null)) {
+            return 'office';
+        }
+
         return $resolved;
     }
 

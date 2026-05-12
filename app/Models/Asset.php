@@ -1341,10 +1341,11 @@ class Asset extends Model
     }
 
     /**
-     * Admin Asset Operations: raster-style previews were expected or attempted but are missing, stuck, or failed.
+     * Admin Asset Operations: previews are expected (non-audio registry thumbnail types) but are missing, stuck, or failed.
      *
-     * Includes: failed; pending after analysis complete; processing stalled; skipped with operational skip reasons,
-     * thumbnail timeout, or MIME types that normally receive thumbnails (audio waveform, image, video, PDF).
+     * MIME/extension allowlist comes from {@see FileTypeService::constrainAssetQueryToAdminPreviewIssueFormats()}
+     * (thumbnail capability in config, excluding the `audio` type). Includes: failed; pending after analysis complete;
+     * processing stalled; skipped with operational skip reasons, thumbnail timeout, or unsupported_format:% .
      */
     public function scopeAdminThumbnailPreviewIssues(\Illuminate\Database\Eloquent\Builder $query): void
     {
@@ -1376,16 +1377,12 @@ class Asset extends Model
                         ->where(function ($q2) use ($operationalSkipReasons) {
                             $q2->where('metadata->thumbnail_timeout', true)
                                 ->orWhereIn('metadata->thumbnail_skip_reason', $operationalSkipReasons)
-                                ->orWhere('metadata->thumbnail_skip_reason', 'like', 'unsupported_format:%')
-                                ->orWhere(function ($q3) {
-                                    $q3->where('mime_type', 'like', 'audio/%')
-                                        ->orWhere('mime_type', 'like', 'image/%')
-                                        ->orWhere('mime_type', 'like', 'video/%')
-                                        ->orWhere('mime_type', 'like', 'application/pdf%');
-                                });
+                                ->orWhere('metadata->thumbnail_skip_reason', 'like', 'unsupported_format:%');
                         });
                 });
         });
+
+        app(\App\Services\FileTypeService::class)->constrainAssetQueryToAdminPreviewIssueFormats($query);
     }
 
     /**
