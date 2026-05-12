@@ -15,6 +15,9 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Local Office → PDF → raster diagnostic for one asset version (read-only unless --repair is passed).
+ *
+ * Never add an Artisan option named `version`: Symfony reserves the global `--version` / `-V` flag, and
+ * merging a command that redefines it throws {@see \Symfony\Component\Console\Exception\LogicException}.
  */
 final class AssetsDebugOfficePreviewCommand extends Command
 {
