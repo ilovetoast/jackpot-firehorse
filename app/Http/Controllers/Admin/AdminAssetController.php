@@ -837,6 +837,7 @@ class AdminAssetController extends Controller
             'visible_in_grid' => $this->parseBoolParam($request, 'visible_in_grid'),
             'analysis_status' => $request->filled('analysis_status') ? trim($request->analysis_status) : null,
             'thumbnail_status' => $request->filled('thumbnail_status') ? trim($request->thumbnail_status) : null,
+            'thumbnail_preview_issue' => $this->parseBoolParam($request, 'thumbnail_preview_issue'),
             'has_incident' => $request->has('has_incident') ? (bool) $request->has_incident : null,
             'deleted' => $this->parseBoolParam($request, 'deleted'),
             'builder_staged' => $this->parseBoolParam($request, 'builder_staged'),
@@ -954,6 +955,12 @@ class AdminAssetController extends Controller
         $parsed['include_composition'] = $request->has('composition')
             ? $request->boolean('composition')
             : true;
+    }
+
+    /** @param  mixed  $value  Request query / bulk-action JSON (bool|int|string). */
+    protected function adminFilterTruthy(mixed $value): bool
+    {
+        return $value === true || $value === 1 || $value === '1';
     }
 
     protected function parseBoolParam(Request $request, string $key): ?bool
@@ -1174,6 +1181,9 @@ class AdminAssetController extends Controller
         }
         if (! empty($filters['thumbnail_status'])) {
             $query->where('thumbnail_status', $filters['thumbnail_status']);
+        }
+        if ($this->adminFilterTruthy($filters['thumbnail_preview_issue'] ?? null)) {
+            $query->adminThumbnailPreviewIssues();
         }
         if (($filters['storage_missing'] ?? null) === true) {
             $query->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.storage_missing')) IN ('true', '1')");

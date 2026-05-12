@@ -963,8 +963,13 @@ class AssetController extends Controller
                     $thumbnailVersion = null;
                     $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf'
                         || strtolower((string) ($fileExtension ?? '')) === 'pdf';
+                    $fileTypeService = app(\App\Services\FileTypeService::class);
+                    $usesPdfPagePreview = $isPdf || (
+                        $fileTypeService->isOfficeDocument(strtolower((string) ($asset->mime_type ?? '')), strtolower((string) ($fileExtension ?? '')))
+                        && ! empty($metadata['office']['preview_pdf_path'] ?? null)
+                    );
                     $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
-                    $pdfPageApiEndpoint = $isPdf
+                    $pdfPageApiEndpoint = $usesPdfPagePreview
                         ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
                         : null;
                     $firstPageUrl = null;
@@ -989,7 +994,7 @@ class AssetController extends Controller
                             }
                         }
                     }
-                    if ($isPdf) {
+                    if ($usesPdfPagePreview) {
                         $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
                     }
 
@@ -1036,6 +1041,9 @@ class AssetController extends Controller
                         'preview_unavailable_user_message' => $metadata['preview_unavailable_user_message'] ?? null,
                         'pdf_page_count' => $asset->pdf_page_count,
                         'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
+                        'uses_pdf_page_preview' => $usesPdfPagePreview,
+                        'first_page_url' => $firstPageUrl,
+                        'pdf_page_api_endpoint' => $pdfPageApiEndpoint,
                         // Phase L.4: Lifecycle fields (Actions dropdown: Publish/Unpublish/Archive/Restore)
                         'published_at' => $asset->published_at?->toIso8601String(),
                         'is_published' => $asset->published_at !== null,
@@ -2180,9 +2188,14 @@ class AssetController extends Controller
         $thumbnailUrl = $finalThumbnailUrl ?: $previewThumbnailUrl;
         $fileExtension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
         $isPdf = strtolower((string) ($asset->mime_type ?? '')) === 'application/pdf' || $fileExtension === 'pdf';
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $usesPdfPagePreview = $isPdf || (
+            $fileTypeService->isOfficeDocument(strtolower((string) ($asset->mime_type ?? '')), $fileExtension)
+            && ! empty($metadata['office']['preview_pdf_path'] ?? null)
+        );
         $pdfPageCount = $asset->pdf_page_count ?? ($metadata['pdf_page_count'] ?? null);
-        $firstPageUrl = $isPdf ? ($finalThumbnailUrl ?: $previewThumbnailUrl) : null;
-        $pdfPageApiEndpoint = $isPdf
+        $firstPageUrl = $usesPdfPagePreview ? ($finalThumbnailUrl ?: $previewThumbnailUrl) : null;
+        $pdfPageApiEndpoint = $usesPdfPagePreview
             ? route('assets.pdf-page.show', ['asset' => $asset->id, 'page' => '__PAGE__'])
             : null;
 
@@ -2194,13 +2207,13 @@ class AssetController extends Controller
             'title' => $asset->title,
             'original_filename' => $asset->original_filename,
             'mime_type' => $asset->mime_type,
-            'pdf_page_count' => $asset->pdf_page_count,
             'pdf_pages_rendered' => (bool) ($asset->pdf_pages_rendered ?? false),
             'thumbnail_url' => $thumbnailUrl,
             'download_url' => route('assets.download', ['asset' => $asset->id]),
             'collection_only' => $collectionOnly,
             'collection' => $collection ? ['id' => $collection->id, 'name' => $collection->name] : null,
             'is_pdf' => $isPdf,
+            'uses_pdf_page_preview' => $usesPdfPagePreview,
             'pdf_page_count' => $pdfPageCount,
             'first_page_url' => $firstPageUrl,
             'pdf_page_api_endpoint' => $pdfPageApiEndpoint,

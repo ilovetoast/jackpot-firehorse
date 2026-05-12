@@ -127,6 +127,20 @@ function assetSupportsLightboxCarousel(a) {
     if (!a) {
         return false
     }
+    if (a.uses_pdf_page_preview === true) {
+        return true
+    }
+    const officePath = a.metadata?.office?.preview_pdf_path
+    if (
+        officePath &&
+        (Number(a.pdf_page_count) > 0 || Number(a.metadata?.pdf_page_count) > 0)
+    ) {
+        return true
+    }
+    const extLo = (a.file_extension || a.original_filename?.split('.').pop() || '').toLowerCase()
+    if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(extLo)) {
+        return true
+    }
     if (a.is_virtual_google_font) {
         return true
     }
@@ -1395,7 +1409,7 @@ export default function AssetDrawer({
         }
     }, [bulkActionUrl, displayAsset?.id, videoInsightsRetryLoading])
 
-    const isPdf = useMemo(() => {
+    const isNativePdf = useMemo(() => {
         if (!displayAsset) return false
         const mimeType = (displayAsset.mime_type || '').toLowerCase()
         const ext = (displayAsset.original_filename || '').split('.').pop()?.toLowerCase() || ''
@@ -1403,9 +1417,20 @@ export default function AssetDrawer({
         return mimeType.includes('pdf') || ext === 'pdf'
     }, [displayAsset])
 
+    const usesPdfPagePreview = useMemo(() => {
+        if (!displayAsset) return false
+        if (displayAsset.uses_pdf_page_preview === true) return true
+        if (isNativePdf) return true
+        const meta = displayAsset.metadata && typeof displayAsset.metadata === 'object' ? displayAsset.metadata : {}
+        const path = meta.office?.preview_pdf_path
+        const pages = Number(displayAsset.pdf_page_count || meta.pdf_page_count || 0)
+
+        return Boolean(path && pages > 0)
+    }, [displayAsset, isNativePdf])
+
     /** Match grid tiles (AssetCard): checkerboard behind transparent logos/graphics */
     const drawerPreviewCheckerboardStyle = useMemo(() => {
-        if (isVirtualGoogleFont || isVideo || isPdf) {
+        if (isVirtualGoogleFont || isVideo || usesPdfPagePreview) {
             return undefined
         }
         const slug = String(drawerCategory?.slug || '').toLowerCase()
@@ -1417,7 +1442,7 @@ export default function AssetDrawer({
             backgroundImage: 'repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%)',
             backgroundSize: '12px 12px',
         }
-    }, [drawerCategory?.slug, isVirtualGoogleFont, isVideo, isPdf])
+    }, [drawerCategory?.slug, isVirtualGoogleFont, isVideo, usesPdfPagePreview])
     const tenantRoleForPdfActions = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
     const canRequestFullPdfExtraction = ['owner', 'admin'].includes(tenantRoleForPdfActions)
 
@@ -1693,8 +1718,29 @@ export default function AssetDrawer({
         Number(pdfKnownPageCount || displayAsset?.pdf_page_count || 1)
     )
 
+    /** Drawer + lightbox: PDF-style preview can zoom when we have any page-1 raster (API URL, signed thumb, or grid first_page_url). */
+    const pdfStyleHasDrawerZoomTarget = useMemo(
+        () =>
+            Boolean(
+                pdfPageCache[pdfCurrentPage] ||
+                    pdfPageCache[1] ||
+                    (displayAsset?.first_page_url && String(displayAsset.first_page_url).trim()) ||
+                    displayAsset?.thumbnail_url ||
+                    displayAsset?.final_thumbnail_url ||
+                    displayAsset?.preview_thumbnail_url
+            ),
+        [
+            pdfPageCache,
+            pdfCurrentPage,
+            displayAsset?.first_page_url,
+            displayAsset?.thumbnail_url,
+            displayAsset?.final_thumbnail_url,
+            displayAsset?.preview_thumbnail_url,
+        ]
+    )
+
     const fetchPdfPage = useCallback(async (pageToFetch, attempt = 0) => {
-        if (!isPdf || !displayAsset?.id) return
+        if (!usesPdfPagePreview || !displayAsset?.id) return
 
         setPdfPageLoading(true)
         setPdfPageError(null)
@@ -1751,7 +1797,7 @@ export default function AssetDrawer({
             }
             setPdfPageError('Unable to load PDF page right now.')
         }
-    }, [displayAsset?.id, isPdf])
+    }, [displayAsset?.id, usesPdfPagePreview])
 
     useEffect(() => {
         if (pdfPollTimeoutRef.current) {
@@ -1772,7 +1818,7 @@ export default function AssetDrawer({
         setPdfFullExtractionLoading(false)
         setPdfFullExtractionRequested(Boolean(displayAsset?.metadata?.pdf_full_extraction_requested))
 
-        if (!isPdf || !displayAsset?.id) {
+        if (!usesPdfPagePreview || !displayAsset?.id) {
             return undefined
         }
 
@@ -1789,7 +1835,7 @@ export default function AssetDrawer({
             }
         }
         // Re-fetch PDF page when asset updates (e.g. after Retry Processing completes and thumbnail_status becomes completed)
-    }, [displayAsset?.id, displayAsset?.thumbnail_status?.value ?? displayAsset?.thumbnail_status ?? '', fetchPdfPage, isPdf])
+    }, [displayAsset?.id, displayAsset?.thumbnail_status?.value ?? displayAsset?.thumbnail_status ?? '', fetchPdfPage, usesPdfPagePreview])
 
     const scheduleDebouncedPdfFetch = useCallback((pageToFetch) => {
         pdfPendingFetchPageRef.current = pageToFetch
@@ -1806,16 +1852,16 @@ export default function AssetDrawer({
     }, [displayAsset?.id, fetchPdfPage])
 
     const handlePdfPageNavigate = useCallback((nextPage) => {
-        if (!isPdf) return
+        if (!usesPdfPagePreview) return
         if (nextPage < 1 || nextPage > effectivePdfPageCount) return
 
         setPdfCurrentPage(nextPage)
         if (pdfPageCache[nextPage]) return
         scheduleDebouncedPdfFetch(nextPage)
-    }, [effectivePdfPageCount, isPdf, pdfPageCache, scheduleDebouncedPdfFetch])
+    }, [effectivePdfPageCount, usesPdfPagePreview, pdfPageCache, scheduleDebouncedPdfFetch])
 
     const handleRequestFullPdfExtraction = useCallback(async () => {
-        if (!isPdf || !displayAsset?.id || pdfFullExtractionLoading || !canRequestFullPdfExtraction) {
+        if (!isNativePdf || !displayAsset?.id || pdfFullExtractionLoading || !canRequestFullPdfExtraction) {
             return
         }
 
@@ -1852,13 +1898,13 @@ export default function AssetDrawer({
     }, [
         canRequestFullPdfExtraction,
         displayAsset,
-        isPdf,
+        isNativePdf,
         onAssetUpdate,
         pdfFullExtractionLoading,
     ])
 
     const fetchPdfTextExtraction = useCallback(async () => {
-        if (!isPdf || !displayAsset?.id) return
+        if (!isNativePdf || !displayAsset?.id) return
         setPdfTextExtractionLoading(true)
         try {
             const response = await window.axios.get(
@@ -1871,15 +1917,15 @@ export default function AssetDrawer({
         } finally {
             setPdfTextExtractionLoading(false)
         }
-    }, [displayAsset?.id, isPdf])
+    }, [displayAsset?.id, isNativePdf])
 
     useEffect(() => {
-        if (!isPdf || !displayAsset?.id) {
+        if (!isNativePdf || !displayAsset?.id) {
             setPdfTextExtraction(null)
             return
         }
         fetchPdfTextExtraction()
-    }, [displayAsset?.id, isPdf, fetchPdfTextExtraction])
+    }, [displayAsset?.id, isNativePdf, fetchPdfTextExtraction])
 
     useEffect(() => {
         if (!pdfTextExtraction || !['pending', 'processing'].includes(pdfTextExtraction.status)) {
@@ -1899,7 +1945,7 @@ export default function AssetDrawer({
     }, [pdfTextExtraction?.id, pdfTextExtraction?.status, fetchPdfTextExtraction])
 
     const handleTriggerPdfOcr = useCallback(async () => {
-        if (!isPdf || !displayAsset?.id || pdfOcrTriggerLoading || !canRequestFullPdfExtraction) return
+        if (!isNativePdf || !displayAsset?.id || pdfOcrTriggerLoading || !canRequestFullPdfExtraction) return
         setPdfOcrTriggerLoading(true)
         try {
             await window.axios.post(
@@ -1918,7 +1964,7 @@ export default function AssetDrawer({
         } finally {
             setPdfOcrTriggerLoading(false)
         }
-    }, [canRequestFullPdfExtraction, displayAsset?.id, fetchPdfTextExtraction, isPdf, pdfOcrTriggerLoading])
+    }, [canRequestFullPdfExtraction, displayAsset?.id, fetchPdfTextExtraction, isNativePdf, pdfOcrTriggerLoading])
 
     // Phase 3.1: Carousel navigation handlers with smooth transitions
     const handlePrevious = (e) => {
@@ -2005,7 +2051,9 @@ export default function AssetDrawer({
                                 fileExtension.toUpperCase() === 'PSD' ||
                                 fileExtension.toUpperCase() === 'PSB' ||
                                 fileExtension.toUpperCase() === 'EPS' ||
-                                fileExtension.toUpperCase() === 'AI'
+                                fileExtension.toUpperCase() === 'AI' ||
+                                usesPdfPagePreview ||
+                                ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(fileExtension.toUpperCase())
     const isPdfAsset = Boolean(displayAsset?.is_pdf)
         || displayAsset.mime_type === 'application/pdf'
         || fileExtension.toUpperCase() === 'PDF'
@@ -2541,7 +2589,7 @@ export default function AssetDrawer({
         if (!can('metadata.edit_post_upload')) {
             return false
         }
-        if (!displayAsset?.id || isVirtualGoogleFont || isVideo || isPdf || isFontFile) {
+        if (!displayAsset?.id || isVirtualGoogleFont || isVideo || usesPdfPagePreview || isFontFile) {
             return false
         }
         const m = displayAsset.mime_type || ''
@@ -2552,7 +2600,7 @@ export default function AssetDrawer({
             return false
         }
         return true
-    }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, isPdf, isFontFile, can])
+    }, [displayAsset?.id, displayAsset?.mime_type, isVirtualGoogleFont, isVideo, usesPdfPagePreview, isFontFile, can])
 
     /** Fullscreen / lightbox: only when this asset has something to show (avoids opening on OBJ / failed thumbs / stale carousel index). */
     const canOpenDrawerLightbox = useMemo(() => {
@@ -2568,8 +2616,8 @@ export default function AssetDrawer({
         if (isUploadedFontFileAsset(displayAsset)) {
             return true
         }
-        if (isPdf) {
-            return Boolean(pdfPageCache[pdfCurrentPage] || pdfPageCache[1])
+        if (usesPdfPagePreview) {
+            return pdfStyleHasDrawerZoomTarget
         }
         if (isVideo) {
             return !!(
@@ -2596,10 +2644,11 @@ export default function AssetDrawer({
         displayAsset,
         drawerEphemeralLocalPreviewUrl,
         isAudio,
-        isPdf,
+        usesPdfPagePreview,
         isVideo,
         pdfCurrentPage,
         pdfPageCache,
+        pdfStyleHasDrawerZoomTarget,
         thumbnailRetryCount,
     ])
 
@@ -2837,7 +2886,7 @@ export default function AssetDrawer({
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
-        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile || isAudio)) {
+        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile || isAudio || usesPdfPagePreview)) {
             initialZoomAppliedRef.current = true
             onInitialZoomConsumed?.()
             return
@@ -2869,6 +2918,7 @@ export default function AssetDrawer({
         isVirtualGoogleFont,
         isFontFile,
         isAudio,
+        usesPdfPagePreview,
         imageAssets,
         onInitialZoomConsumed,
         initialVideoSeekSeconds,
@@ -3523,14 +3573,14 @@ export default function AssetDrawer({
             !externalCollectionGuest &&
             !displayAsset?.deleted_at &&
             (canRegeneratePreviewInProcessingSection ||
-                isPdf ||
+                usesPdfPagePreview ||
                 isVideo ||
                 showExecutionPreviewChrome),
         [
             externalCollectionGuest,
             displayAsset?.deleted_at,
             canRegeneratePreviewInProcessingSection,
-            isPdf,
+            usesPdfPagePreview,
             isVideo,
             showExecutionPreviewChrome,
         ],
@@ -4661,22 +4711,22 @@ export default function AssetDrawer({
                                         </div>
                                     ) : null}
                                 </div>
-                            ) : isPdf && displayAsset.id ? (
+                            ) : usesPdfPagePreview && displayAsset.id ? (
                                 <div className="flex h-full min-h-0 w-full flex-col bg-white">
                                     <div
                                         className={`relative min-h-0 flex-1 w-full overflow-hidden ${
-                                            pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'cursor-pointer group' : ''
+                                            pdfStyleHasDrawerZoomTarget ? 'cursor-pointer group' : ''
                                         }`}
                                         onClick={() => {
-                                            if (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) {
+                                            if (pdfStyleHasDrawerZoomTarget) {
                                                 openDrawerLightbox()
                                             }
                                         }}
-                                        role={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 'button' : undefined}
-                                        tabIndex={pdfPageCache[pdfCurrentPage] || pdfPageCache[1] ? 0 : undefined}
+                                        role={pdfStyleHasDrawerZoomTarget ? 'button' : undefined}
+                                        tabIndex={pdfStyleHasDrawerZoomTarget ? 0 : undefined}
                                         onKeyDown={(e) => {
                                             if (
-                                                (pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) &&
+                                                pdfStyleHasDrawerZoomTarget &&
                                                 (e.key === 'Enter' || e.key === ' ')
                                             ) {
                                                 e.preventDefault()
@@ -4700,6 +4750,19 @@ export default function AssetDrawer({
                                                     fetchPdfPage(pdfCurrentPage)
                                                 }}
                                             />
+                                        ) : pdfCurrentPage === 1 &&
+                                          displayAsset?.first_page_url &&
+                                          String(displayAsset.first_page_url).trim() ? (
+                                            <img
+                                                src={String(displayAsset.first_page_url).trim()}
+                                                alt="Page 1 preview"
+                                                className="h-full w-full object-contain"
+                                                onError={() => {
+                                                    setPdfPageLoading(true)
+                                                    setPdfPageError(null)
+                                                    fetchPdfPage(1)
+                                                }}
+                                            />
                                         ) : (
                                             <div className="flex h-full w-full items-center justify-center">
                                                 <div className="px-4 text-center">
@@ -4719,7 +4782,7 @@ export default function AssetDrawer({
                                                 </div>
                                             </div>
                                         )}
-                                        {(pdfPageCache[pdfCurrentPage] || pdfPageCache[1]) && (
+                                        {pdfStyleHasDrawerZoomTarget && (
                                             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/0 opacity-0 transition-colors group-hover:bg-black/10 group-hover:opacity-100">
                                                 <span className="text-sm font-medium text-white">Click to zoom</span>
                                             </div>
@@ -4912,7 +4975,7 @@ export default function AssetDrawer({
                             </div>
                         )}
 
-                    {isPdf && displayAsset?.id && showPreviewContentSection && (
+                    {usesPdfPagePreview && displayAsset?.id && showPreviewContentSection && (
                         <div className="rounded-md border border-slate-200/80 bg-slate-50/70 px-2.5 py-2 shadow-sm shadow-slate-900/[0.02]">
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                                 <div className="min-w-0 flex-1">
@@ -6450,10 +6513,10 @@ export default function AssetDrawer({
                                         </div>
                                     )}
 
-                                    {isPdf && (
+                                    {usesPdfPagePreview && (
                                         <div className="space-y-2">
                                             <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                                PDF
+                                                {isNativePdf ? 'PDF' : 'Document pages'}
                                             </div>
                                             <div className="space-y-2">
                                                 <p className="text-[11px] leading-snug text-gray-500">
@@ -6462,7 +6525,7 @@ export default function AssetDrawer({
                                                         ? ' Use Previous / Next under the main preview to change pages.'
                                                         : ''}
                                                 </p>
-                                                {canRequestFullPdfExtraction && effectivePdfPageCount > 1 && (
+                                                {canRequestFullPdfExtraction && isNativePdf && effectivePdfPageCount > 1 && (
                                                     <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
                                                         <p className="text-xs text-gray-500">
                                                             Render all pages for AI ingestion and faster navigation.
@@ -6481,7 +6544,7 @@ export default function AssetDrawer({
                                                         </button>
                                                     </div>
                                                 )}
-                                                {canRequestFullPdfExtraction && (
+                                                {canRequestFullPdfExtraction && isNativePdf && (
                                                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-2">
                                                         <p className="text-xs text-gray-500">
                                                             Extract text from PDF for search and AI (pdftotext).
@@ -7716,7 +7779,11 @@ export default function AssetDrawer({
                             const ext = currentFilename.split('.').pop()?.toLowerCase() || ''
                             const isCurrentVideo = currentMimeType.startsWith('video/') || videoExtensions.includes(ext)
                             const isCurrentAudio = currentMimeType.startsWith('audio/') || audioExtensions.includes(ext)
-                            const isCurrentPdf = Boolean(currentCarouselAsset?.is_pdf)
+                            const isCurrentPdf =
+                                Boolean(currentCarouselAsset?.uses_pdf_page_preview) ||
+                                Boolean(currentCarouselAsset?.is_pdf) ||
+                                (currentMimeType || '').toLowerCase().includes('pdf') ||
+                                (currentFilename || '').toLowerCase().endsWith('.pdf')
                                 || currentMimeType === 'application/pdf'
                                 || ext === 'pdf'
 

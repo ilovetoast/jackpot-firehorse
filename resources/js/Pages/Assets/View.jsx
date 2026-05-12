@@ -12,7 +12,8 @@ export default function AssetView({ asset }) {
     const { auth } = usePage().props
     const isImage = asset?.mime_type?.startsWith('image/')
     const isVideo = asset?.mime_type?.startsWith('video/')
-    const isPdf = (asset?.mime_type || '').toLowerCase().includes('pdf')
+    const isNativePdf = (asset?.mime_type || '').toLowerCase().includes('pdf')
+    const usesPdfPagePreview = Boolean(asset?.uses_pdf_page_preview) || isNativePdf
     const [pdfPage, setPdfPage] = useState(1)
     const [pdfPageUrl, setPdfPageUrl] = useState(null)
     const [pdfPageCount, setPdfPageCount] = useState(Number(asset?.pdf_page_count || 1))
@@ -58,7 +59,7 @@ export default function AssetView({ asset }) {
     }
 
     useEffect(() => {
-        if (!isPdf || !asset?.id) return
+        if (!usesPdfPagePreview || !asset?.id) return
         setPdfPage(1)
         setPdfPageUrl(null)
         setFullExtractionLoading(false)
@@ -66,10 +67,10 @@ export default function AssetView({ asset }) {
         setFullExtractionMessage(null)
         fetchPdfPage(1)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [asset?.id, isPdf])
+    }, [asset?.id, usesPdfPagePreview])
 
     const requestFullExtraction = async () => {
-        if (!isPdf || !asset?.id || !canRequestFullPdfExtraction || fullExtractionLoading) return
+        if (!isNativePdf || !asset?.id || !canRequestFullPdfExtraction || fullExtractionLoading) return
 
         setFullExtractionLoading(true)
         try {
@@ -133,7 +134,7 @@ export default function AssetView({ asset }) {
                             <p className="text-gray-500">Asset not found.</p>
                         ) : (
                             <>
-                                {isPdf && (
+                                {usesPdfPagePreview && (
                                     <div className="w-full max-w-4xl">
                                         <div className="bg-white rounded border border-gray-200 min-h-[420px] flex items-center justify-center">
                                             {pdfPageUrl ? (
@@ -179,7 +180,7 @@ export default function AssetView({ asset }) {
                                                 Next
                                             </button>
                                         </div>
-                                        {canRequestFullPdfExtraction && Math.max(1, pdfPageCount) > 1 && (
+                                        {canRequestFullPdfExtraction && isNativePdf && Math.max(1, pdfPageCount) > 1 && (
                                             <div className="mt-2 flex items-center justify-between rounded border border-gray-200 bg-white px-3 py-2">
                                                 <p className="text-xs text-gray-500">Need all pages rendered for AI ingestion?</p>
                                                 <button
@@ -205,7 +206,7 @@ export default function AssetView({ asset }) {
                                 )}
                                 {/* Always show thumbnail when available (any file type) */}
                                 {/* Video: play inline (download URL redirects to signed storage — same pattern as the editor). */}
-                                {!isPdf && isVideo && asset.download_url && (
+                                {!usesPdfPagePreview && isVideo && asset.download_url && (
                                     <div className="w-full max-w-4xl">
                                         <video
                                             src={asset.download_url}
@@ -224,13 +225,13 @@ export default function AssetView({ asset }) {
                                         )}
                                     </div>
                                 )}
-                                {!isPdf && isVideo && !asset.download_url && (
+                                {!usesPdfPagePreview && isVideo && !asset.download_url && (
                                     <p className="text-center text-gray-500">
                                         Video file is not available to stream. If this persists, contact support.
                                     </p>
                                 )}
                                 {/* Images: show raster preview (not used for video — avoids broken img when video thumb is pending). */}
-                                {!isPdf && !isVideo && isImage && asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && isImage && asset.thumbnail_url && (
                                     <div className="flex max-h-[60vh] w-full max-w-4xl flex-shrink-0 justify-center">
                                         <img
                                             src={asset.thumbnail_url}
@@ -240,7 +241,7 @@ export default function AssetView({ asset }) {
                                     </div>
                                 )}
                                 {/* Non-image, non-video (e.g. font): thumbnail + note */}
-                                {!isPdf && !isVideo && !isImage && asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && !isImage && asset.thumbnail_url && (
                                     <div className="w-full max-w-4xl text-center">
                                         <div className="flex max-h-[60vh] w-full justify-center">
                                             <img
@@ -260,7 +261,7 @@ export default function AssetView({ asset }) {
                                         )}
                                     </div>
                                 )}
-                                {!isPdf && !isVideo && !isImage && !asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && !isImage && !asset.thumbnail_url && (
                                     <div className="text-center text-gray-500">
                                         <p className="mb-2">No preview available.</p>
                                         {asset.download_url && (
@@ -273,7 +274,7 @@ export default function AssetView({ asset }) {
                                         )}
                                     </div>
                                 )}
-                                {!isPdf && !isVideo && isImage && !asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && isImage && !asset.thumbnail_url && (
                                     <div className="text-center text-gray-500">
                                         <p className="mb-2">No thumbnail yet.</p>
                                         {asset.download_url && (

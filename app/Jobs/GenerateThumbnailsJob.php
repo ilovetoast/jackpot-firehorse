@@ -829,7 +829,18 @@ class GenerateThumbnailsJob implements ShouldQueue
                 pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION)
             );
             $isPdf = $detectedFileType === 'pdf';
-            $pdfPageCount = $isPdf ? max(1, (int) ($result['pdf_page_count'] ?? 1)) : null;
+            $isOffice = $detectedFileType === 'office';
+            $officePreviewPath = is_string($result['office_preview_pdf_path'] ?? null) ? $result['office_preview_pdf_path'] : null;
+            if ($isPdf) {
+                $pdfPageCount = max(1, (int) ($result['pdf_page_count'] ?? 1));
+            } elseif ($isOffice && $officePreviewPath !== null && $officePreviewPath !== '') {
+                $pdfPageCount = max(1, (int) ($result['pdf_page_count'] ?? 0));
+                if ($pdfPageCount < 1) {
+                    $pdfPageCount = null;
+                }
+            } else {
+                $pdfPageCount = null;
+            }
 
             // CRITICAL: If NO final thumbnails were generated, mark as FAILED immediately
             // This prevents marking as COMPLETED when all thumbnail generation failed
@@ -1118,9 +1129,24 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (! empty($result['thumbnail_quality'])) {
                 $thumbnailMetadata['thumbnail_quality'] = $result['thumbnail_quality'];
             }
-            if ($isPdf && $pdfPageCount !== null) {
+            $hasPdfStylePaging = ($isPdf || ($isOffice && $officePreviewPath)) && $pdfPageCount !== null;
+            if ($hasPdfStylePaging) {
                 $thumbnailMetadata['pdf_page_count'] = $pdfPageCount;
                 $thumbnailMetadata['pdf_pages_rendered'] = $pdfPageCount <= 1;
+            }
+            if ($isOffice) {
+                $prevOffice = is_array($metaBaseForMerge['office'] ?? null) ? $metaBaseForMerge['office'] : [];
+                if ($officePreviewPath) {
+                    $thumbnailMetadata['office'] = array_merge($prevOffice, [
+                        'preview_pdf_path' => $officePreviewPath,
+                        'preview_pdf_generated_at' => now()->toIso8601String(),
+                    ]);
+                } else {
+                    unset($prevOffice['preview_pdf_path'], $prevOffice['preview_pdf_generated_at']);
+                    if ($prevOffice !== []) {
+                        $thumbnailMetadata['office'] = $prevOffice;
+                    }
+                }
             }
 
             if (! empty($result['_thumbnail_profiling']) && config('assets.thumbnail_profiling.store_in_version_metadata', true)) {
@@ -1151,7 +1177,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'thumbnail_ready_duration_ms' => ProcessingMetrics::thumbnailReadyDurationMs($asset),
                 'thumbnail_started_at' => null,
             ];
-            if ($isPdf && $pdfPageCount !== null) {
+            if ($hasPdfStylePaging) {
                 $updateData['pdf_page_count'] = $pdfPageCount;
                 $updateData['pdf_pages_rendered'] = $pdfPageCount <= 1;
             }
@@ -1190,12 +1216,12 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $version->refresh();
             }
 
-            if ($isPdf) {
+            if ($hasPdfStylePaging) {
                 $this->syncFirstPdfPageRecord($asset, $version, $finalThumbnails, $pdfPageCount);
+            }
 
-                if ($this->shouldScheduleFullPdfExtraction($asset, $pdfPageCount)) {
-                    FullPdfExtractionJob::dispatch($asset->id, $version?->id);
-                }
+            if ($isPdf && $pdfPageCount !== null && $this->shouldScheduleFullPdfExtraction($asset, $pdfPageCount)) {
+                FullPdfExtractionJob::dispatch($asset->id, $version?->id);
             }
 
             // Verify metadata was saved correctly (defensive check)

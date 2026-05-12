@@ -106,6 +106,9 @@ function shouldOmitFromQuery(key, value) {
     if (key === 'generative_workspace') {
         return value === false || value === 'false' || value == null
     }
+    if (key === 'thumbnail_preview_issue') {
+        return value !== true && value !== 'true' && value !== 1 && value !== '1'
+    }
     if (key === 'page') {
         return value === 1 || value === '1'
     }
@@ -239,6 +242,11 @@ function summarizeActiveAdminFilters(f) {
     }
     if (f.intake_state === 'staged') {
         lines.push('Intake staged only (awaiting category — member /assets/staged queue).')
+    }
+    if (f.thumbnail_preview_issue === true || f.thumbnail_preview_issue === 'true' || f.thumbnail_preview_issue === 1 || f.thumbnail_preview_issue === '1') {
+        lines.push(
+            'Preview issues: failed thumbnails, stuck processing, pending after analysis complete, or skipped previews for audio/image/video/PDF (plus operational skip reasons).',
+        )
     }
     if (f.builder_staged === true) {
         lines.push('Builder-staged only (builder:true).')
@@ -443,6 +451,15 @@ export default function AdminAssetsIndex({
         [initialFilters],
     )
 
+    const previewIssueOn = useMemo(
+        () =>
+            initialFilters?.thumbnail_preview_issue === true
+            || initialFilters?.thumbnail_preview_issue === 'true'
+            || initialFilters?.thumbnail_preview_issue === 1
+            || initialFilters?.thumbnail_preview_issue === '1',
+        [initialFilters?.thumbnail_preview_issue],
+    )
+
     const toggleStagedIntake = useCallback(() => {
         if (queueToggles.stagedIntake) {
             applyFilters({
@@ -484,6 +501,14 @@ export default function AdminAssetsIndex({
         }
     }, [applyFilters, queueToggles.referenceMaterials])
 
+    const togglePreviewIssue = useCallback(() => {
+        if (previewIssueOn) {
+            applyFilters({ thumbnail_preview_issue: false, page: 1 })
+        } else {
+            applyFilters({ thumbnail_preview_issue: true, page: 1 })
+        }
+    }, [applyFilters, previewIssueOn])
+
     const handleSearchSubmit = (e) => {
         e?.preventDefault()
         applyFilters({ page: 1 })
@@ -517,6 +542,10 @@ export default function AdminAssetsIndex({
         initialFilters?.asset_type ||
         initialFilters?.analysis_status ||
         initialFilters?.thumbnail_status ||
+        initialFilters?.thumbnail_preview_issue === true ||
+        initialFilters?.thumbnail_preview_issue === 'true' ||
+        initialFilters?.thumbnail_preview_issue === 1 ||
+        initialFilters?.thumbnail_preview_issue === '1' ||
         initialFilters?.visible_in_grid != null ||
         initialFilters?.builder_staged != null ||
         initialFilters?.intake_state ||
@@ -926,6 +955,29 @@ export default function AdminAssetsIndex({
                                 }`}
                             >
                                 Reference materials
+                            </button>
+                        </div>
+
+                        <span className="hidden sm:block h-5 w-px shrink-0 bg-slate-300/90" aria-hidden />
+
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Preview</span>
+                        <div
+                            className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100/90 p-1 shadow-inner"
+                            role="group"
+                            aria-label="Thumbnail preview health"
+                        >
+                            <button
+                                type="button"
+                                aria-pressed={previewIssueOn}
+                                onClick={togglePreviewIssue}
+                                title="Assets where previews are missing or stuck: failed, pending after complete analysis, stalled processing, or skipped audio/image/video/PDF (and operational skip reasons)"
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                                    previewIssueOn
+                                        ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/90'
+                                        : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                                }`}
+                            >
+                                Preview issues
                             </button>
                         </div>
                     </div>

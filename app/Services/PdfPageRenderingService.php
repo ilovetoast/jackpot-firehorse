@@ -25,11 +25,18 @@ class PdfPageRenderingService
     public function getPdfPageCount(Asset $asset, bool $forceDetect = false): int
     {
         $mime = strtolower((string) ($asset->mime_type ?? ''));
-        if (!str_contains($mime, 'pdf')) {
+        $extension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $fileTypeService = app(FileTypeService::class);
+        $isNativePdf = str_contains($mime, 'pdf') || $extension === 'pdf';
+        $isOfficeWithDerivative = $fileTypeService->isOfficeDocument($mime, $extension)
+            && is_string(data_get($asset->metadata, 'office.preview_pdf_path'))
+            && data_get($asset->metadata, 'office.preview_pdf_path') !== '';
+
+        if (! $isNativePdf && ! $isOfficeWithDerivative) {
             return 0;
         }
 
-        if (!$forceDetect) {
+        if (! $forceDetect) {
             $stored = (int) ($asset->pdf_page_count ?? 0);
             if ($stored > 0) {
                 return $stored;
@@ -51,12 +58,20 @@ class PdfPageRenderingService
     }
 
     /**
-     * Download source PDF to a local temp path.
+     * Download the PDF used for page rendering: native original, or stored LibreOffice derivative for Office assets.
      */
     public function downloadSourcePdfToTemp(Asset $asset, ?AssetVersion $version = null): string
     {
         $bucket = $asset->storageBucket;
-        $sourcePath = $version?->file_path ?: $asset->storage_root_path;
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $extension = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $fileTypeService = app(FileTypeService::class);
+        $officeKey = data_get($asset->metadata, 'office.preview_pdf_path');
+        if ($fileTypeService->isOfficeDocument($mime, $extension) && is_string($officeKey) && $officeKey !== '') {
+            $sourcePath = $officeKey;
+        } else {
+            $sourcePath = $version?->file_path ?: $asset->storage_root_path;
+        }
 
         if (!$bucket || !$sourcePath) {
             throw new RuntimeException('Asset source path or storage bucket is missing.');

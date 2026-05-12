@@ -96,4 +96,19 @@ class AssetPathGenerator
 
         return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/pdf_pages/page-{$page}.{$extension}";
     }
+
+    /**
+     * Canonical path for a LibreOffice-generated PDF used for Office multipage preview (slides/sheets as PDF pages).
+     */
+    public function generateOfficePreviewPdfPath(Tenant $tenant, Asset $asset, int $version): string
+    {
+        if (! $tenant->uuid) {
+            throw new \RuntimeException('Tenant UUID required for canonical storage path.');
+        }
+        if ($version < 1) {
+            throw new \RuntimeException('Version must be >= 1 for canonical storage path.');
+        }
+
+        return "tenants/{$tenant->uuid}/assets/{$asset->id}/v{$version}/previews/office_preview.pdf";
+    }
 }

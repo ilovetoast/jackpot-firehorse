@@ -1,9 +1,13 @@
 import { useEffect } from 'react'
 import { ShieldExclamationIcon } from '@heroicons/react/24/outline'
 
+/** Default primary matches BrandThemeProvider / Jackpot shell (violet), not app.css :root first paint. */
+const PRIMARY_FALLBACK = '#7c3aed'
+
 /**
  * In-app permission denied dialog (replaces Inertia's full-screen error for 403 when logged in).
- * theme: brand (CSS --primary), workspace (app chrome), jackpot (default indigo).
+ * Accents follow document --primary (brand on content pages, default purple on settings / non-brand).
+ * theme: brand adds a left accent bar; workspace and jackpot use the same CSS-driven colors.
  */
 export default function PermissionDeniedModal({ open, onClose, title, message, theme = 'jackpot' }) {
     useEffect(() => {
@@ -26,25 +30,11 @@ export default function PermissionDeniedModal({ open, onClose, title, message, t
 
     if (!open) return null
 
-    const primary =
-        theme === 'brand'
-            ? 'var(--primary, #6366f1)'
-            : theme === 'workspace'
-              ? '#4f46e5'
-              : '#6366f1'
-
-    const ring =
-        theme === 'brand'
-            ? 'ring-2 ring-[color:var(--primary,#6366f1)]/25'
-            : theme === 'workspace'
-              ? 'ring-2 ring-indigo-500/20'
-              : 'ring-2 ring-indigo-500/20'
-
-    const iconBg =
-        theme === 'brand' ? 'bg-[color:var(--primary,#6366f1)]/10' : theme === 'workspace' ? 'bg-indigo-50' : 'bg-indigo-50'
-
-    const iconColor =
-        theme === 'brand' ? 'text-[color:var(--primary,#6366f1)]' : theme === 'workspace' ? 'text-indigo-600' : 'text-indigo-600'
+    const primary = `var(--primary, ${PRIMARY_FALLBACK})`
+    /* Tailwind arbitrary values: avoid comma inside var() (parser); --primary is set by BrandThemeProvider. */
+    const ring = 'ring-2 ring-[color:var(--primary)]/25'
+    const iconBg = 'bg-[color:var(--primary)]/10'
+    const iconColor = 'text-[color:var(--primary)]'
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="permission-denied-title">

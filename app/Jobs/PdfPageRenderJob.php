@@ -53,8 +53,13 @@ class PdfPageRenderJob implements ShouldQueue
         $pathExtension = $activeVersion?->file_path
             ? strtolower(pathinfo($activeVersion->file_path, PATHINFO_EXTENSION))
             : '';
-        $isPdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
-        if (!$isPdf) {
+        $fileTypeService = app(\App\Services\FileTypeService::class);
+        $isNativePdf = str_contains($mime, 'pdf') || $extension === 'pdf' || $pathExtension === 'pdf';
+        $isOfficeWithPreview = $fileTypeService->isOfficeDocument($mime, $extension)
+            && is_string(data_get($asset->metadata, 'office.preview_pdf_path'))
+            && data_get($asset->metadata, 'office.preview_pdf_path') !== '';
+        $isPdfLike = $isNativePdf || $isOfficeWithPreview;
+        if (! $isPdfLike) {
             return;
         }
 

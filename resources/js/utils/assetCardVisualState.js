@@ -68,6 +68,12 @@ function isPdfAsset(asset) {
     return ext === 'pdf' || m === 'application/pdf'
 }
 
+/** Office formats that use the deferred LibreOffice → thumbnail pipeline (matches DAM registry). */
+function isOfficeCardAsset(asset) {
+    const ext = extensionOf(asset)
+    return ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)
+}
+
 function isDesignAsset(asset) {
     const ext = extensionOf(asset)
     const m = (asset?.mime_type || '').toLowerCase()
@@ -243,16 +249,16 @@ export function getAssetCardVisualState(asset, options = {}) {
         }
     }
 
-    if (isPdfAsset(asset) && (ts === 'pending' || ts === 'processing' || ts === '')) {
+    if ((isPdfAsset(asset) || isOfficeCardAsset(asset)) && (ts === 'pending' || ts === 'processing' || ts === '')) {
         return {
             kind: 'document_processing',
-            label: 'PDF',
+            label: isPdfAsset(asset) ? 'PDF' : 'Document',
             description: 'First-page preview is processing…',
             showThumbnail: false,
             showLocalPreview: false,
             showFileTypeCard: true,
             badgeTone: 'processing',
-            badgeShort: 'PDF',
+            badgeShort: isPdfAsset(asset) ? 'PDF' : 'Office',
             extensionLabel: extUpper,
         }
     }

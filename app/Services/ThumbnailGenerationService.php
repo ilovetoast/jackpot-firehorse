@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
+use App\Models\Tenant;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\ThumbnailMode;
@@ -984,6 +985,7 @@ class ThumbnailGenerationService
             // File type was already detected above, reuse it
             // This ensures consistent file type detection throughout the method
             $thumbnails = [];
+            $officePreviewPdfPath = null;
 
             // Step 6: Generate preview thumbnail FIRST (before final thumbnails)
             // This provides immediate visual feedback while final thumbnails process
@@ -1211,6 +1213,40 @@ class ThumbnailGenerationService
                 ]);
             }
 
+            // Office: persist LibreOffice PDF to S3 so PDF page rendering can paginate like native PDFs.
+            if ($fileType === 'office'
+                && is_string($this->officeIntermediatePdfPath)
+                && is_file($this->officeIntermediatePdfPath)
+            ) {
+                try {
+                    $maxAllowedPages = (int) config('pdf.max_allowed_pages', 500);
+                    $detectedPages = $this->detectPdfPageCount($this->officeIntermediatePdfPath);
+                    if ($detectedPages > $maxAllowedPages) {
+                        Log::warning('[ThumbnailGenerationService] Office converted PDF exceeds page limit; skipping preview PDF upload', [
+                            'asset_id' => $asset->id,
+                            'page_count' => $detectedPages,
+                            'max_allowed_pages' => $maxAllowedPages,
+                        ]);
+                    } else {
+                        $pdfPageCount = $detectedPages;
+                        $officePreviewPdfPath = $this->uploadOfficePreviewPdfToStorage(
+                            $bucket,
+                            $asset,
+                            $this->officeIntermediatePdfPath,
+                            $version,
+                            $fallbackUploadDisk
+                        );
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('[ThumbnailGenerationService] Office preview PDF persist failed', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $pdfPageCount = null;
+                    $officePreviewPdfPath = null;
+                }
+            }
+
             $this->thumbProfilingLap('post_styles_metadata_ms');
 
             $payload = [
@@ -1221,6 +1257,7 @@ class ThumbnailGenerationService
                 'image_height' => $sourceImageHeight,
                 'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
                 'pdf_page_count' => $pdfPageCount,
+                'office_preview_pdf_path' => $officePreviewPdfPath,
                 'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
             $profRow = $this->completeThumbnailProfiling(
@@ -1675,6 +1712,76 @@ class ThumbnailGenerationService
         }
 
         return $s3ThumbnailPath;
+    }
+
+    /**
+     * Upload the LibreOffice-generated PDF used for multipage Office preview (same rendering path as native PDFs).
+     *
+     * @return string Canonical S3 / disk key (see {@see AssetPathGenerator::generateOfficePreviewPdfPath})
+     */
+    protected function uploadOfficePreviewPdfToStorage(
+        ?StorageBucket $bucket,
+        Asset $asset,
+        string $localPdfPath,
+        ?AssetVersion $version,
+        ?string $laravelDiskWhenNoBucket,
+    ): string {
+        $asset->loadMissing('tenant');
+        $tenant = $asset->tenant;
+        if (! $tenant instanceof Tenant) {
+            throw new \RuntimeException('Tenant is required to store office preview PDF.');
+        }
+
+        $versionNumber = $version?->version_number ?? $asset->currentVersion?->version_number ?? 1;
+        $pathGenerator = app(AssetPathGenerator::class);
+        $s3Key = $pathGenerator->generateOfficePreviewPdfPath($tenant, $asset, $versionNumber);
+
+        $bytes = file_get_contents($localPdfPath);
+        if ($bytes === false || $bytes === '') {
+            throw new \RuntimeException('Failed to read local office preview PDF for upload.');
+        }
+
+        if ($bucket !== null) {
+            try {
+                $this->s3Client->putObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $s3Key,
+                    'Body' => $bytes,
+                    'ContentType' => 'application/pdf',
+                    'Metadata' => [
+                        'original-asset-id' => $asset->id,
+                        'derivative' => 'office_preview_pdf',
+                        'generated-at' => now()->toIso8601String(),
+                    ],
+                ]);
+
+                return $s3Key;
+            } catch (S3Exception $e) {
+                Log::error('[ThumbnailGenerationService] Failed to upload office preview PDF', [
+                    'bucket' => $bucket->name,
+                    'key' => $s3Key,
+                    'error' => $e->getMessage(),
+                ]);
+                throw new \RuntimeException("Failed to upload office preview PDF: {$e->getMessage()}", 0, $e);
+            }
+        }
+
+        if (! is_string($laravelDiskWhenNoBucket) || $laravelDiskWhenNoBucket === '' || ! config("filesystems.disks.{$laravelDiskWhenNoBucket}")) {
+            throw new \RuntimeException('Office preview PDF upload requires a storage bucket or resolved Laravel disk.');
+        }
+
+        try {
+            Storage::disk($laravelDiskWhenNoBucket)->put($s3Key, $bytes, ['visibility' => 'private']);
+        } catch (\Throwable $e) {
+            Log::error('[ThumbnailGenerationService] Failed to upload office preview PDF to fallback disk', [
+                'disk' => $laravelDiskWhenNoBucket,
+                'key' => $s3Key,
+                'error' => $e->getMessage(),
+            ]);
+            throw new \RuntimeException("Failed to upload office preview PDF: {$e->getMessage()}", 0, $e);
+        }
+
+        return $s3Key;
     }
 
     /**

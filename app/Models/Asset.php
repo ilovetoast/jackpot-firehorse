@@ -1341,6 +1341,54 @@ class Asset extends Model
     }
 
     /**
+     * Admin Asset Operations: raster-style previews were expected or attempted but are missing, stuck, or failed.
+     *
+     * Includes: failed; pending after analysis complete; processing stalled; skipped with operational skip reasons,
+     * thumbnail timeout, or MIME types that normally receive thumbnails (audio waveform, image, video, PDF).
+     */
+    public function scopeAdminThumbnailPreviewIssues(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $stale = now()->subHours(2);
+        $operationalSkipReasons = [
+            'missing_storage',
+            'dimensions_unknown',
+            'pixel_limit_exceeded',
+            'pdf_unsupported_large',
+            'server_resource_limit',
+            'generation_exhausted',
+            'worker_processing_guardrail',
+            'source_file_too_large',
+            'office_libreoffice_missing',
+        ];
+
+        $query->where(function ($outer) use ($stale, $operationalSkipReasons) {
+            $outer->where('thumbnail_status', ThumbnailStatus::FAILED)
+                ->orWhere(function ($q) {
+                    $q->where('thumbnail_status', ThumbnailStatus::PENDING)
+                        ->where('analysis_status', 'complete');
+                })
+                ->orWhere(function ($q) use ($stale) {
+                    $q->where('thumbnail_status', ThumbnailStatus::PROCESSING)
+                        ->where('updated_at', '<', $stale);
+                })
+                ->orWhere(function ($q) use ($operationalSkipReasons) {
+                    $q->where('thumbnail_status', ThumbnailStatus::SKIPPED)
+                        ->where(function ($q2) use ($operationalSkipReasons) {
+                            $q2->where('metadata->thumbnail_timeout', true)
+                                ->orWhereIn('metadata->thumbnail_skip_reason', $operationalSkipReasons)
+                                ->orWhere('metadata->thumbnail_skip_reason', 'like', 'unsupported_format:%')
+                                ->orWhere(function ($q3) {
+                                    $q3->where('mime_type', 'like', 'audio/%')
+                                        ->orWhere('mime_type', 'like', 'image/%')
+                                        ->orWhere('mime_type', 'like', 'video/%')
+                                        ->orWhere('mime_type', 'like', 'application/pdf%');
+                                });
+                        });
+                });
+        });
+    }
+
+    /**
      * Check if asset type produces a raster thumbnail (image, SVG, PDF, video, AI/EPS).
      *
      * Used for capability-based logic: orientation, resolution_class, dominant_colors

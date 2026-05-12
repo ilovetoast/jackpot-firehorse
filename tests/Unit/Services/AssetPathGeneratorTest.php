@@ -130,6 +130,34 @@ class AssetPathGeneratorTest extends TestCase
         $this->assertSame("tenants/{$tenant->uuid}/assets/{$asset->id}/v1/pdf_pages/page-7.webp", $path);
     }
 
+    public function test_generate_office_preview_pdf_path_returns_canonical_structure(): void
+    {
+        $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
+        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B', 'slug' => 'b']);
+        $asset = Asset::create([
+            'tenant_id' => $tenant->id,
+            'brand_id' => $brand->id,
+            'storage_bucket_id' => StorageBucket::create([
+                'tenant_id' => $tenant->id,
+                'name' => 'b',
+                'region' => 'us-east-1',
+                'status' => StorageBucketStatus::ACTIVE,
+            ])->id,
+            'status' => AssetStatus::VISIBLE,
+            'type' => AssetType::ASSET,
+            'title' => 'Test',
+            'original_filename' => 'deck.pptx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'size_bytes' => 1024,
+            'storage_root_path' => 'temp/placeholder',
+        ]);
+
+        $generator = app(AssetPathGenerator::class);
+        $path = $generator->generateOfficePreviewPdfPath($tenant, $asset, 3);
+
+        $this->assertSame("tenants/{$tenant->uuid}/assets/{$asset->id}/v3/previews/office_preview.pdf", $path);
+    }
+
     public function test_throws_when_tenant_uuid_missing(): void
     {
         $tenant = Tenant::create(['name' => 'T', 'slug' => 't']);
