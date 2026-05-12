@@ -34,7 +34,7 @@ import {
     getWorkspaceSidebarActiveRowForegroundHex,
     resolveWorkspaceSidebarSurface,
 } from '../../utils/colorUtils'
-import { shouldPurgeOnCategoryChange } from '../../utils/filterQueryOwnership'
+import { isUploadAllowedForDroppedFile } from '../../utils/damFileTypes'
 import { isCategoryCompatible } from '../../utils/filterScopeRules'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { usePermission } from '../../hooks/usePermission'
@@ -924,26 +924,12 @@ export default function AssetsIndex({
         
         const files = Array.from(e.dataTransfer.files || [])
         if (files.length > 0) {
-            // Filter to supported DAM file types (images, video, PDF, PSD, AI, SVG, Office, etc.)
-            const supportedMimes = [
-                'image/', 'video/', 'application/pdf', 'application/postscript',
-                'application/vnd.adobe.illustrator', 'application/illustrator',
-                'image/vnd.adobe.photoshop', 'image/svg+xml',
-                'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
-                'application/vnd.openxmlformats-officedocument.',
-            ]
-            const supportedExts = ['ai', 'psd', 'psb', 'svg', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']
-            const isSupported = (f) => {
-                if (supportedMimes.some(m => f.type && (f.type.startsWith(m) || f.type === m))) return true
-                const ext = (f.name || '').split('.').pop()?.toLowerCase()
-                return ext && supportedExts.includes(ext)
-            }
-            const imageFiles = files.filter(isSupported)
+            const imageFiles = files.filter((f) => isUploadAllowedForDroppedFile(f, pageProps.dam_file_types))
             if (imageFiles.length > 0) {
                 handleOpenUploadDialog(imageFiles)
             }
         }
-    }, [canUpload, handleOpenUploadDialog])
+    }, [canUpload, handleOpenUploadDialog, pageProps.dam_file_types])
 
     // Phase L.6.2: Detect pending publication or unpublished mode from URL
     const [isPendingApprovalMode, setIsPendingApprovalMode] = useState(() => {

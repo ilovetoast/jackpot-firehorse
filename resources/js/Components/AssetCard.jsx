@@ -12,11 +12,11 @@
  * @param {string} props.primaryColor - Brand primary color for selected highlight
  * @param {string} props.cardStyle - 'default' | 'guidelines' — guidelines = flat tiles, label below (color-tile style), hover shadow
  */
-import { useMemo, useState, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useMemo, useState, useEffect, useRef, useSyncExternalStore, useCallback } from 'react'
 import { usePage } from '@inertiajs/react'
 import { useSelectionOptional } from '../contexts/SelectionContext'
 import { TrashIcon } from '@heroicons/react/24/outline'
-import { StarIcon } from '@heroicons/react/24/solid'
+import { PauseIcon, PlayIcon, StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
 import AudioCardVisual from './Audio/AudioCardVisual'
@@ -37,6 +37,21 @@ import {
 } from '../utils/uploadPreviewRegistry'
 import { getAssetCardVisualState } from '../utils/assetCardVisualState'
 import { assetNeedsThumbnailPipelineAttention } from '../utils/assetGridPipelineSummary'
+
+/** Grid video tile: same m:ss (or h:mm:ss) chip as {@link AudioCardVisual} duration overlay. */
+function formatVideoDurationForCard(seconds) {
+    const n = Number(seconds)
+    if (!Number.isFinite(n) || n <= 0) return null
+    const total = Math.round(n)
+    const m = Math.floor(total / 60)
+    const s = total % 60
+    if (m >= 60) {
+        const h = Math.floor(m / 60)
+        const mm = m % 60
+        return `${h}:${String(mm).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    }
+    return `${m}:${String(s).padStart(2, '0')}`
+}
 
 function searchTokensForHighlight(q) {
     if (!q || typeof q !== 'string') return []
@@ -356,6 +371,36 @@ export default function AssetCard({
     const hasRasterThumbnailUrl =
         Boolean(thumbnailState.thumbnailUrl) || Boolean(ephemeralLocalPreviewUrl)
     const isExecutionThumbVisual = showExecutionDualThumb || showExecutionSingleThumb
+
+    const [videoPreviewPlaying, setVideoPreviewPlaying] = useState(false)
+
+    const videoDurationLabel = useMemo(() => {
+        if (!isVideo) return null
+        return formatVideoDurationForCard(
+            asset?.video_duration ?? asset?.metadata?.video?.duration_seconds,
+        )
+    }, [isVideo, asset?.video_duration, asset?.metadata?.video?.duration_seconds])
+
+    const handleVideoCardPlayClick = useCallback(
+        (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const v = videoPreviewRef.current
+            if (v && previewLoaded && !videoPreviewFailed) {
+                if (v.paused) {
+                    void v.play().catch(() => {})
+                } else {
+                    v.pause()
+                }
+                return
+            }
+            if (!isMobile && asset?.video_preview_url) {
+                setIsHovering(true)
+            }
+        },
+        [previewLoaded, videoPreviewFailed, isMobile, asset?.video_preview_url],
+    )
+
     // Audio cards are fully painted by AudioCardVisual (gradient + waveform +
     // chrome) — they do not want the generic "no thumbnail yet" full-bleed
     // placeholder, badge, or processing pill stacked on top.
@@ -657,6 +702,7 @@ export default function AssetCard({
                     setIsHovering(false)
                     setPreviewLoaded(false)
                     setVideoPreviewFailed(false)
+                    setVideoPreviewPlaying(false)
                     setExecutionThumbHover(false)
                     // Pause and unload preview on mouse leave
                     if (videoPreviewRef.current) {
@@ -721,7 +767,12 @@ export default function AssetCard({
                                     loop
                                     playsInline
                                     onLoadedData={() => setPreviewLoaded(true)}
-                                    onError={() => setVideoPreviewFailed(true)}
+                                    onError={() => {
+                                        setVideoPreviewFailed(true)
+                                        setVideoPreviewPlaying(false)
+                                    }}
+                                    onPlay={() => setVideoPreviewPlaying(true)}
+                                    onPause={() => setVideoPreviewPlaying(false)}
                                     style={{
                                         opacity: previewLoaded ? 1 : 0,
                                         transition: 'opacity 0.2s',
@@ -823,16 +874,35 @@ export default function AssetCard({
                             </>
                         )}
 
-                        {/* Phase V-1: Play overlay on real frames only — pending video uses frosted play in AssetPlaceholder */}
-                        {isVideo && videoHasPosterFrame && (
-                            <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                                <div className="rounded-full bg-black/40 p-3 shadow-md ring-1 ring-white/25 backdrop-blur-sm">
-                                    <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-                                        <path d="M8 5v14l11-7z" />
-                                    </svg>
-                                </div>
-                            </div>
-                        )}
+                        {/* Video grid: bottom-left play/pause + bottom-right duration (matches AudioCardVisual) */}
+                        {isVideo && videoHasPosterFrame && !isExecutionThumbVisual ? (
+                            <>
+                                {!isMobile && asset?.video_preview_url ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleVideoCardPlayClick}
+                                        className="absolute bottom-2 left-2 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-white shadow-lg ring-1 ring-white/25 backdrop-blur-md transition-transform duration-150 hover:scale-105 hover:bg-black/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                                        aria-label={videoPreviewPlaying ? 'Pause video preview' : 'Play video preview'}
+                                        aria-pressed={videoPreviewPlaying}
+                                    >
+                                        {videoPreviewPlaying ? (
+                                            <PauseIcon className="h-4 w-4" />
+                                        ) : (
+                                            <PlayIcon className="h-4 w-4 translate-x-[1px]" />
+                                        )}
+                                    </button>
+                                ) : null}
+                                {videoDurationLabel ? (
+                                    <span
+                                        className={`pointer-events-none absolute z-30 rounded-md bg-black/55 px-2 py-0.5 font-mono text-[11px] font-medium text-white/95 shadow-sm backdrop-blur-md ${
+                                            aiVideoBusy ? 'bottom-9 right-2' : 'bottom-2 right-2'
+                                        }`}
+                                    >
+                                        {videoDurationLabel}
+                                    </span>
+                                ) : null}
+                            </>
+                        ) : null}
 
                         {!isVirtualGoogleFont &&
                             !showFontSwatch &&

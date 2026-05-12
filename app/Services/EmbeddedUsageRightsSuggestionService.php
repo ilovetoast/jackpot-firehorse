@@ -206,12 +206,10 @@ class EmbeddedUsageRightsSuggestionService
             return 'video';
         }
 
-        if ($mimeType === 'application/pdf' || $extension === 'pdf' ||
-            in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'], true) ||
-            str_starts_with($mimeType, 'application/msword') ||
-            str_starts_with($mimeType, 'application/vnd.ms-excel') ||
-            str_starts_with($mimeType, 'application/vnd.ms-powerpoint') ||
-            str_starts_with($mimeType, 'application/vnd.openxmlformats')) {
+        $fts = app(\App\Services\FileTypeService::class);
+        if ($fts->matchesRegistryType($mimeType, $extension, 'pdf') ||
+            $fts->isOfficeDocument($mimeType, $extension) ||
+            str_starts_with($mimeType, 'application/vnd.openxmlformats-officedocument')) {
             return 'document';
         }
 

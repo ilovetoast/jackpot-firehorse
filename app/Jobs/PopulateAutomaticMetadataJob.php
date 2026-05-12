@@ -561,9 +561,9 @@ class PopulateAutomaticMetadataJob implements ShouldQueue
             return 'video';
         }
 
-        // Document types
-        if ($mimeType === 'application/pdf' || $extension === 'pdf' ||
-            in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'])) {
+        // Document types (registry-driven Office list — config/file_types.php `office`)
+        $fts = app(\App\Services\FileTypeService::class);
+        if ($fts->matchesRegistryType($mimeType, $extension, 'pdf') || $fts->isOfficeDocument($mimeType, $extension)) {
             return 'document';
         }
 

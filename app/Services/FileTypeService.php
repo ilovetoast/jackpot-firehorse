@@ -22,8 +22,6 @@ class FileTypeService
     /**
      * Detect file type from MIME type and/or extension.
      *
-     * @param string|null $mimeType
-     * @param string|null $extension
      * @return string|null File type key (e.g., 'image', 'pdf', 'tiff') or null if unknown
      */
     public function detectFileType(?string $mimeType = null, ?string $extension = null): ?string
@@ -47,9 +45,6 @@ class FileTypeService
 
     /**
      * Detect file type from Asset model.
-     *
-     * @param Asset $asset
-     * @return string|null
      */
     public function detectFileTypeFromAsset(Asset $asset): ?string
     {
@@ -61,10 +56,6 @@ class FileTypeService
 
     /**
      * Check if file is supported (has a registered type).
-     *
-     * @param string|null $mimeType
-     * @param string|null $extension
-     * @return bool
      */
     public function isSupported(?string $mimeType = null, ?string $extension = null): bool
     {
@@ -72,11 +63,30 @@ class FileTypeService
     }
 
     /**
+     * True when MIME and/or extension resolves to the given registry key under `file_types.types`.
+     *
+     * Prefer this (or {@see isOfficeDocument}) over hardcoding Office extension lists in jobs,
+     * controllers, and maintenance commands — the registry in config/file_types.php stays the
+     * single source of truth for which extensions and MIMEs belong to each type.
+     */
+    public function matchesRegistryType(?string $mimeType, ?string $extension, string $registryTypeKey): bool
+    {
+        return $this->detectFileType($mimeType, $extension) === $registryTypeKey;
+    }
+
+    /**
+     * Word / Excel / PowerPoint (legacy and OpenXML) as registered under the `office` type.
+     */
+    public function isOfficeDocument(?string $mimeType = null, ?string $extension = null): bool
+    {
+        return $this->matchesRegistryType($mimeType, $extension, 'office');
+    }
+
+    /**
      * Check if file type supports a specific capability.
      *
-     * @param string $fileType File type key (e.g., 'image', 'pdf')
-     * @param string $capability Capability name (e.g., 'thumbnail', 'metadata', 'preview', 'ai_analysis')
-     * @return bool
+     * @param  string  $fileType  File type key (e.g., 'image', 'pdf')
+     * @param  string  $capability  Capability name (e.g., 'thumbnail', 'metadata', 'preview', 'ai_analysis')
      */
     public function supportsCapability(string $fileType, string $capability): bool
     {
@@ -88,7 +98,6 @@ class FileTypeService
     /**
      * Check if file type requirements are met.
      *
-     * @param string $fileType
      * @return array ['met' => bool, 'missing' => array]
      */
     public function checkRequirements(string $fileType): array
@@ -100,7 +109,7 @@ class FileTypeService
         // Check PHP extensions
         if (isset($requirements['php_extensions'])) {
             foreach ($requirements['php_extensions'] as $ext) {
-                if (!extension_loaded($ext)) {
+                if (! extension_loaded($ext)) {
                     $missing[] = "PHP extension: {$ext}";
                 }
             }
@@ -111,10 +120,10 @@ class FileTypeService
             $classMap = [
                 'spatie/pdf-to-image' => \Spatie\PdfToImage\Pdf::class,
             ];
-            
+
             foreach ($requirements['php_packages'] as $package) {
                 $className = $classMap[$package] ?? null;
-                if ($className && !class_exists($className)) {
+                if ($className && ! class_exists($className)) {
                     $missing[] = "PHP package: {$package}";
                 }
             }
@@ -126,8 +135,8 @@ class FileTypeService
                 if ($tool === 'ffmpeg') {
                     // Check if FFmpeg is available
                     $ffmpegPath = $this->findFFmpegPath();
-                    if (!$ffmpegPath) {
-                        $missing[] = "External tool: FFmpeg (required for video processing)";
+                    if (! $ffmpegPath) {
+                        $missing[] = 'External tool: FFmpeg (required for video processing)';
                         \Illuminate\Support\Facades\Log::warning('[FileTypeService] FFmpeg not found during requirements check', [
                             'file_type' => $fileType,
                             'checked_paths' => ['ffmpeg (PATH)', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/opt/homebrew/bin/ffmpeg'],
@@ -166,8 +175,7 @@ class FileTypeService
     /**
      * Get handler method name for a file type and operation.
      *
-     * @param string $fileType
-     * @param string $operation Operation name (e.g., 'thumbnail', 'metadata')
+     * @param  string  $operation  Operation name (e.g., 'thumbnail', 'metadata')
      * @return string|null Handler method name or null if not supported
      */
     public function getHandler(string $fileType, string $operation): ?string
@@ -180,8 +188,7 @@ class FileTypeService
     /**
      * Get error message for a file type and error key.
      *
-     * @param string $fileType
-     * @param string $errorKey Error key (e.g., 'processing_failed', 'corrupted')
+     * @param  string  $errorKey  Error key (e.g., 'processing_failed', 'corrupted')
      * @return string|null Error message or null if not found
      */
     public function getErrorMessage(string $fileType, string $errorKey): ?string
@@ -193,9 +200,6 @@ class FileTypeService
 
     /**
      * Get global error message.
-     *
-     * @param string $errorKey
-     * @return string|null
      */
     public function getGlobalErrorMessage(string $errorKey): ?string
     {
@@ -205,7 +209,6 @@ class FileTypeService
     /**
      * Get frontend hints for a file type.
      *
-     * @param string $fileType
      * @return array Frontend hints (can_preview_inline, preview_component, show_placeholder, disable_upload_reason)
      */
     public function getFrontendHints(string $fileType): array
@@ -222,7 +225,7 @@ class FileTypeService
 
     /**
      * Find FFmpeg executable path.
-     * 
+     *
      * @return string|null Path to FFmpeg executable or null if not found
      */
     protected function findFFmpegPath(): ?string
@@ -242,7 +245,7 @@ class FileTypeService
                 $output = [];
                 $returnCode = 0;
                 exec('which ffmpeg 2>&1', $output, $returnCode);
-                if ($returnCode === 0 && !empty($output[0]) && file_exists($output[0])) {
+                if ($returnCode === 0 && ! empty($output[0]) && file_exists($output[0])) {
                     return $output[0];
                 }
             } elseif (file_exists($path) && is_executable($path)) {
@@ -256,8 +259,6 @@ class FileTypeService
     /**
      * Get unsupported reason for a file type.
      *
-     * @param string|null $mimeType
-     * @param string|null $extension
      * @return array|null ['skip_reason' => string, 'message' => string, 'disable_upload_reason' => string|null] or null if not unsupported
      */
     public function getUnsupportedReason(?string $mimeType = null, ?string $extension = null): ?array
@@ -290,8 +291,7 @@ class FileTypeService
     /**
      * Sanitize technical error message to user-friendly message.
      *
-     * @param string $errorMessage
-     * @param string|null $fileType Optional file type for type-specific errors
+     * @param  string|null  $fileType  Optional file type for type-specific errors
      * @return string User-friendly error message
      */
     public function sanitizeErrorMessage(string $errorMessage, ?string $fileType = null): string
@@ -300,16 +300,17 @@ class FileTypeService
 
         // Check for specific error patterns
         foreach ($patterns as $pattern => $messageKey) {
-            if (preg_match('/' . $pattern . '/i', $errorMessage)) {
+            if (preg_match('/'.$pattern.'/i', $errorMessage)) {
                 // Resolve message key (e.g., 'pdf.errors.file_not_found' or 'global_errors.generic')
                 $parts = explode('.', $messageKey);
-                
+
                 if ($parts[0] === 'global_errors') {
                     return $this->getGlobalErrorMessage($parts[1]) ?? $this->getGlobalErrorMessage('generic');
                 } else {
                     // Type-specific error (e.g., 'pdf.errors.file_not_found')
                     $type = $parts[0];
                     $errorKey = $parts[1];
+
                     return $this->getErrorMessage($type, $errorKey) ?? $this->getGlobalErrorMessage('generic');
                 }
             }
@@ -334,7 +335,6 @@ class FileTypeService
     /**
      * Get all supported file types for a capability.
      *
-     * @param string $capability
      * @return array Array of file type keys
      */
     public function getSupportedTypesForCapability(string $capability): array
@@ -354,7 +354,6 @@ class FileTypeService
     /**
      * Get MIME type for extension.
      *
-     * @param string $extension
      * @return string|null MIME type or null if not found
      */
     public function getMimeTypeForExtension(string $extension): ?string
@@ -375,7 +374,6 @@ class FileTypeService
     /**
      * Get file type configuration.
      *
-     * @param string $fileType
      * @return array|null File type configuration or null if not found
      */
     public function getFileTypeConfig(string $fileType): ?array
@@ -386,7 +384,6 @@ class FileTypeService
     /**
      * Get capabilities for a file type.
      *
-     * @param string $fileType
      * @return array Capabilities array
      */
     public function getCapabilities(string $fileType): array
@@ -400,7 +397,7 @@ class FileTypeService
      * Get file type info for frontend consumption.
      * Returns all relevant information for UI rendering.
      *
-     * @param Asset|string|null $assetOrFileType Asset model or file type string
+     * @param  Asset|string|null  $assetOrFileType  Asset model or file type string
      * @return array File type info with capabilities and frontend hints
      */
     public function getFileTypeInfo($assetOrFileType): array
@@ -412,7 +409,7 @@ class FileTypeService
             $fileType = $assetOrFileType;
         }
 
-        if (!$fileType) {
+        if (! $fileType) {
             return [
                 'file_type' => null,
                 'capabilities' => [],
@@ -1038,7 +1035,7 @@ class FileTypeService
         }
 
         $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
-        $name = str_replace(["\\", '/'], '', $name);
+        $name = str_replace(['\\', '/'], '', $name);
         $name = preg_replace('/\.\.+/', '.', $name) ?? '';
         $name = trim($name, " \t.");
 

@@ -143,4 +143,19 @@ class FileTypeServiceUploadTest extends TestCase
         $this->assertFalse($this->svc->requiresSanitization('image'));
         $this->assertFalse($this->svc->requiresSanitization('audio'));
     }
+
+    public function test_matches_registry_type_for_office_xlsx(): void
+    {
+        $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        $this->assertTrue($this->svc->matchesRegistryType($mime, null, 'office'));
+        $this->assertTrue($this->svc->matchesRegistryType(null, 'xlsx', 'office'));
+        $this->assertTrue($this->svc->isOfficeDocument($mime, 'xlsx'));
+        $this->assertFalse($this->svc->isOfficeDocument('image/png', 'png'));
+    }
+
+    public function test_matches_registry_type_for_pdf(): void
+    {
+        $this->assertTrue($this->svc->matchesRegistryType('application/pdf', 'pdf', 'pdf'));
+        $this->assertFalse($this->svc->matchesRegistryType('application/pdf', 'pdf', 'office'));
+    }
 }

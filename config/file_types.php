@@ -20,6 +20,12 @@ return [
     | To temporarily soft-disable: set the type's `upload.status = 'coming_soon'`.
     | To skip thumbnails only:     add to `thumbnail_skip`.
     |
+    | Office (`office` type): thumbnails use LibreOffice → PDF → raster. If workers
+    | lack `soffice`, FileTypeService::checkRequirements('office') fails, the pipeline
+    | marks thumbnails skipped (e.g. office_libreoffice_missing). Install per
+    | docs/environments/PRODUCTION_WORKER_SOFTWARE.md — do not add parallel extension
+    | allowlists for Office; use FileTypeService::isOfficeDocument() instead.
+    |
     | DO NOT add another file with extension lists. DO NOT hardcode MIMEs in
     | services or jobs. Always go through FileTypeService.
     |
@@ -926,8 +932,10 @@ return [
     | Supported Thumbnail File Types (Reference)
     |--------------------------------------------------------------------------
     |
-    | Extensions that support thumbnail generation. Derived from types with
-    | capability thumbnail=true. Used for early skip checks and UI hints.
+    | Non-authoritative mirror of types where capabilities.thumbnail === true.
+    | Runtime code must use FileTypeService::getThumbnailCapabilityExtensions() /
+    | getThumbnailCapabilityMimeTypes() (exposed to the UI as dam_file_types).
+    | This list is for human grep / docs only — edit the `types` entry first.
     |
     */
     'supported_thumbnail_extensions' => [

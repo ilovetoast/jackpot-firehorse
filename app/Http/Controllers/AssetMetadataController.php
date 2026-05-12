@@ -12,6 +12,7 @@ namespace App\Http\Controllers;
 
 use App\Assets\Metadata\EmbeddedMetadataPresentation;
 use App\Enums\EventType;
+use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Enums\ThumbnailStatus;
 use App\Enums\TicketCategory;
 use App\Enums\TicketStatus;
@@ -22,16 +23,13 @@ use App\Jobs\GenerateThumbnailsJob;
 use App\Jobs\PopulateAutomaticMetadataJob;
 use App\Jobs\ProcessAssetJob;
 use App\Jobs\PromoteAssetJob;
-use App\Enums\PdfBrandIntelligenceScanMode;
 use App\Jobs\ScoreAssetBrandIntelligenceJob;
-use App\Services\BrandIntelligence\VisualEvaluationSourceResolver;
 use App\Models\ActivityEvent;
 use App\Models\Asset;
 use App\Models\AssetEmbedding;
 use App\Models\Brand;
 use App\Models\BrandIntelligenceFeedback;
 use App\Models\BrandIntelligenceScore;
-use App\Services\BrandIntelligence\PdfBrandIntelligenceScanGates;
 use App\Models\Category;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
@@ -42,7 +40,10 @@ use App\Models\User;
 use App\Services\ActivityRecorder;
 use App\Services\AiMetadataConfidenceService;
 use App\Services\AiMetadataSuggestionService;
+use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\BrandIntelligence\BrandIntelligenceScheduleService;
+use App\Services\BrandIntelligence\PdfBrandIntelligenceScanGates;
+use App\Services\BrandIntelligence\VisualEvaluationSourceResolver;
 use App\Services\BulkMetadataService;
 use App\Services\EmbeddedUsageRightsSuggestionService;
 use App\Services\MetadataApprovalResolver;
@@ -52,7 +53,6 @@ use App\Services\MetadataPersistenceService;
 use App\Services\MetadataSchemaResolver;
 use App\Services\PlanService;
 use App\Services\SystemIncidentService;
-use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\TenantPermissionResolver;
 use App\Support\ThumbnailMetadata;
 use Illuminate\Http\JsonResponse;
@@ -556,13 +556,11 @@ class AssetMetadataController extends Controller
             return 'video';
         }
 
-        // Document types (PDF, office docs)
-        if ($mimeType === 'application/pdf' || $extension === 'pdf' ||
-            in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']) ||
-            str_starts_with($mimeType, 'application/msword') ||
-            str_starts_with($mimeType, 'application/vnd.ms-excel') ||
-            str_starts_with($mimeType, 'application/vnd.ms-powerpoint') ||
-            str_starts_with($mimeType, 'application/vnd.openxmlformats')) {
+        // Document types (PDF + Office — registry in config/file_types.php, via FileTypeService)
+        $fts = app(\App\Services\FileTypeService::class);
+        if ($fts->matchesRegistryType($mimeType, $extension, 'pdf')
+            || $fts->isOfficeDocument($mimeType, $extension)
+            || str_starts_with($mimeType, 'application/vnd.openxmlformats-officedocument')) {
             return 'document';
         }
 

@@ -126,7 +126,7 @@ class ClearOldThumbnailSkipReasons extends Command
             // Office (LibreOffice + PDF stack now available)
             if (($format === 'all' || $format === 'office') &&
                 $skipReason === 'office_libreoffice_missing' &&
-                in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'], true)) {
+                app(\App\Services\FileTypeService::class)->isOfficeDocument($mimeType, $extension)) {
                 $lo = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
                 if ($lo->isAvailable()) {
                     $shouldClear = true;

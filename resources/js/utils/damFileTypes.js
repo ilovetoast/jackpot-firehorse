@@ -90,6 +90,33 @@ export function getThumbnailAcceptAttribute() {
 }
 
 /**
+ * Whether a dropped {@link File} is allowed for DAM upload, using the same
+ * allowlist as the upload dialog (`dam_file_types.upload_*` from config/file_types.php).
+ *
+ * @param {File} file
+ * @param {DamFileTypesPayload|null|undefined} [damOverride] Pass `usePage().props.dam_file_types` when available.
+ */
+export function isUploadAllowedForDroppedFile(file, damOverride) {
+    const base = emptyPayload()
+    const dam =
+        damOverride && typeof damOverride === 'object' && Array.isArray(damOverride.upload_extensions)
+            ? { ...base, ...damOverride }
+            : getDamFileTypes()
+    const exts = new Set((dam.upload_extensions || []).map((e) => String(e).toLowerCase()))
+    const mimes = new Set((dam.upload_mime_types || []).map((m) => String(m).toLowerCase()))
+    const name = file?.name ?? ''
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+    if (ext && exts.has(ext)) {
+        return true
+    }
+    const t = (file?.type || '').toLowerCase()
+    if (t && mimes.has(t)) {
+        return true
+    }
+    return false
+}
+
+/**
  * Per-type summary suitable for help / settings UI: name, description,
  * extensions, status, capabilities, max size. Driven entirely by the
  * server registry — no hardcoded list here, so adding a type to
