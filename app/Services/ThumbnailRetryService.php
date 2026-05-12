@@ -264,7 +264,7 @@ class ThumbnailRetryService
             } elseif ($skipReason === 'unsupported_format:heic' &&
                       ($mimeType === 'image/heic' || $mimeType === 'image/heif' ||
                           $extension === 'heic' || $extension === 'heif') &&
-                      extension_loaded('imagick')) {
+                      app(\App\Services\FileTypeService::class)->checkRequirements('heic')['met']) {
                 $isNowSupported = true;
             } elseif ($skipReason === 'unsupported_format:cr2' &&
                       ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') &&
@@ -283,9 +283,12 @@ class ThumbnailRetryService
                       ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                 $isNowSupported = true;
             } elseif ($skipReason === 'dimensions_unknown' &&
-                in_array($extension, ['heic', 'heif', 'cr2', 'avif'], true) &&
+                in_array($extension, ['heic', 'heif'], true) &&
+                app(\App\Services\FileTypeService::class)->checkRequirements('heic')['met']) {
+                $isNowSupported = true;
+            } elseif ($skipReason === 'dimensions_unknown' &&
+                in_array($extension, ['cr2', 'avif'], true) &&
                 extension_loaded('imagick')) {
-                // Soft-skip was a gate bug (MIME mis-order) or missing decode path; allow retry once Imagick is present.
                 $isNowSupported = true;
             }
             

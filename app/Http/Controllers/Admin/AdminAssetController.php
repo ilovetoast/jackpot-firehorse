@@ -729,7 +729,7 @@ class AdminAssetController extends Controller
         $isNowSupported = $skipReason === 'unsupported_format:tiff' && ($mimeType === 'image/tiff' || $mimeType === 'image/tif' || $extension === 'tiff' || $extension === 'tif') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:cr2' && ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:avif' && ($mimeType === 'image/avif' || $extension === 'avif') && extension_loaded('imagick')
-            || $skipReason === 'unsupported_format:heic' && ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') && extension_loaded('imagick')
+            || $skipReason === 'unsupported_format:heic' && ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') && app(\App\Services\FileTypeService::class)->checkRequirements('heic')['met']
             || ($skipReason === 'unsupported_format:psd' || $skipReason === 'unsupported_file_type') && ($mimeType === 'image/vnd.adobe.photoshop' || $extension === 'psd' || $extension === 'psb') && extension_loaded('imagick')
             || $skipReason === 'unsupported_format:svg' && ($mimeType === 'image/svg+xml' || $extension === 'svg');
         if ($isNowSupported) {

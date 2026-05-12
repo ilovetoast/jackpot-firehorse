@@ -274,6 +274,11 @@ return [
 
             'requirements' => [
                 'php_extensions' => ['imagick'],
+                /*
+                 * HEIC decode is delegated to libheif inside ImageMagick. PHP imagick alone is not enough:
+                 * {@see FileTypeService::checkRequirements} verifies HEIC/HEIF appears in Imagick::queryFormats().
+                 */
+                'imagick_heif_decode' => true,
             ],
 
             'errors' => [

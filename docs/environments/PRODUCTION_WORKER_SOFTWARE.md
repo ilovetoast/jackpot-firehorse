@@ -55,6 +55,7 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | Package | Purpose |
 |---------|---------|
 | **imagemagick** | Raster thumbnails, conversions (`convert` / `magick`), many formats |
+| **libheif1** | **HEIC/HEIF read** — ImageMagick must expose **HEIC** in `magick identify -list format` (the app checks `Imagick::queryFormats()`). Without libheif (or an IM build without the HEIF coder), PHP **imagick** loads but HEIC jobs fail or soft-skip |
 | **ghostscript** | Delegate ImageMagick needs for **PDF** read/write |
 | **poppler-utils** | PDF: `pdftotext`, `pdftoppm`, `pdfinfo` (text extraction and fallbacks) |
 | **libreoffice-nogui** | **Office** → PDF for thumbnails/previews (`soffice`); see [Office documents](#office-worker-libreoffice) |
@@ -75,7 +76,7 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  imagemagick ghostscript poppler-utils \
+  imagemagick libheif1 ghostscript poppler-utils \
   libreoffice-nogui xvfb \
   fonts-dejavu fonts-liberation fonts-noto \
   librsvg2-bin librsvg2-dev \

@@ -107,7 +107,7 @@ class ClearOldThumbnailSkipReasons extends Command
             if (($format === 'all' || $format === 'heic') &&
                 $skipReason === 'unsupported_format:heic' &&
                 ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif')) {
-                if (extension_loaded('imagick')) {
+                if (app(\App\Services\FileTypeService::class)->checkRequirements('heic')['met']) {
                     $shouldClear = true;
                     $formatName = 'HEIC';
                 }

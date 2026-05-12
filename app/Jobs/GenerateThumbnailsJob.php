@@ -2390,9 +2390,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             return 'unsupported_file_type';
         }
 
-        // HEIC/HEIF — Imagick + libheif delegate
+        // HEIC/HEIF — Imagick + ImageMagick HEIF coder (libheif)
         if ($mimeType === 'image/heic' || $mimeType === 'image/heif' || $extension === 'heic' || $extension === 'heif') {
-            if (! extension_loaded('imagick')) {
+            $heicReq = $fileTypeService->checkRequirements('heic');
+            if (! $heicReq['met']) {
                 return 'unsupported_format:heic';
             }
 

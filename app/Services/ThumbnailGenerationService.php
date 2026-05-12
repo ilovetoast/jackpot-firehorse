@@ -908,6 +908,13 @@ class ThumbnailGenerationService
                 throw new \RuntimeException('HEIC file processing requires Imagick PHP extension');
             }
 
+            $fileTypeService = app(FileTypeService::class);
+            if (! $fileTypeService->imagickHasHeifReadSupport()) {
+                throw new \RuntimeException(
+                    'HEIC processing requires ImageMagick built with HEIC/HEIF read support (libheif). This worker has PHP imagick but no HEIF decode delegate.'
+                );
+            }
+
             try {
                 $imagick = new \Imagick;
                 $imagick->pingImage($tempPath.'[0]');
@@ -930,7 +937,11 @@ class ThumbnailGenerationService
                     'file_type' => 'heic',
                 ]);
             } catch (\ImagickException $e) {
-                throw new \RuntimeException("Downloaded file is not a valid HEIC image: {$e->getMessage()}");
+                $msg = $e->getMessage();
+                $hint = (stripos($msg, 'delegate') !== false || stripos($msg, 'HEIF') !== false || stripos($msg, 'HEIC') !== false)
+                    ? ' If this is a new worker, install libheif and ensure ImageMagick lists HEIC in `magick identify -list format`.'
+                    : '';
+                throw new \RuntimeException("Downloaded file is not a valid HEIC image: {$msg}{$hint}");
             }
         } elseif ($fileType === 'svg') {
             // SVG validation: Basic XML structure check

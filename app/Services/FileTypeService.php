@@ -178,10 +178,41 @@ class FileTypeService
             }
         }
 
+        if (! empty($requirements['imagick_heif_decode']) && extension_loaded('imagick')) {
+            if (! $this->imagickHasHeifReadSupport()) {
+                $missing[] = 'Imagick HEIF decode: ImageMagick lacks HEIC/HEIF read support (install libheif and use an ImageMagick build with the HEIF coder — see docs/environments/PRODUCTION_WORKER_SOFTWARE.md).';
+            }
+        }
+
         return [
             'met' => empty($missing),
             'missing' => $missing,
         ];
+    }
+
+    /**
+     * True when PHP Imagick is loaded and ImageMagick reports HEIC/HEIF read formats (libheif delegate).
+     */
+    public function imagickHasHeifReadSupport(): bool
+    {
+        if (! extension_loaded('imagick') || ! class_exists(\Imagick::class)) {
+            return false;
+        }
+
+        try {
+            $formats = \Imagick::queryFormats('*');
+        } catch (\Throwable) {
+            return false;
+        }
+
+        foreach ($formats as $format) {
+            $upper = strtoupper((string) $format);
+            if ($upper === 'HEIC' || $upper === 'HEIF') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
