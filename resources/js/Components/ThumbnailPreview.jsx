@@ -13,6 +13,10 @@
  * This prevents flicker and re-render thrash.
  * 
  * Live thumbnail updates are ONLY enabled in AssetDrawer context via useDrawerThumbnailPoll.
+ *
+ * Pointer events: raster `<img>` tags use `pointer-events-none` so opacity fades and stacked layers
+ * never steal clicks from the grid card, drawer controls, or sibling buttons. Interactive overlays
+ * (e.g. GIF play) opt in with `pointer-events-auto`.
  * 
  * Terminal state guarantees:
  * - Spinner ONLY shows when thumbnail_status === PROCESSING
@@ -734,15 +738,15 @@ export default function ThumbnailPreview({
                     />
                 ) : null}
                 {forcedStableUrl ? (
-                    <img
-                        key={forcedStableUrl}
-                        ref={imgRef}
-                        src={gifPlaybackControl ? gifPlayback.displaySrc || forcedStableUrl : forcedStableUrl}
-                        alt={alt}
-                        draggable={false}
-                        onDragStart={(e) => e.preventDefault()}
-                        className={imgFitClasses}
-                        loading="eager"
+                <img
+                    key={forcedStableUrl}
+                    ref={imgRef}
+                    src={gifPlaybackControl ? gifPlayback.displaySrc || forcedStableUrl : forcedStableUrl}
+                    alt={alt}
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    className={`${imgFitClasses} pointer-events-none`}
+                    loading="eager"
                         style={mergeImageStyle(
                             {
                                 opacity: 1,
@@ -863,7 +867,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`relative z-[1] ${imgFitClasses}`}
+                    className={`relative z-[1] ${imgFitClasses} pointer-events-none`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
@@ -922,7 +926,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`relative z-[1] ${imgFitClasses}`}
+                    className={`relative z-[1] ${imgFitClasses} pointer-events-none`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
@@ -996,7 +1000,7 @@ export default function ThumbnailPreview({
                     alt={alt}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
-                    className={`relative z-[1] ${imgFitClasses}`}
+                    className={`relative z-[1] ${imgFitClasses} pointer-events-none`}
                     loading="eager"
                     style={mergeImageStyle(
                         {
@@ -1084,7 +1088,7 @@ export default function ThumbnailPreview({
                 <img
                     src={svgOriginalFallback}
                     alt={alt}
-                    className="max-w-full max-h-full object-contain p-2"
+                    className="pointer-events-none max-h-full max-w-full object-contain p-2"
                     loading="lazy"
                 />
             </div>

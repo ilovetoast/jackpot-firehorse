@@ -785,7 +785,14 @@ export default function AssetDetailPanel({
                                 </span>
                             )}
                             {asset?.is_published === true && !asset?.archived_at && (
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${lb ? 'bg-emerald-900/50 text-emerald-200 border-emerald-700/50' : 'bg-green-100 text-green-700 border-green-300'}`}>
+                                <span
+                                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${
+                                        lb
+                                            ? 'bg-neutral-900/80 border-neutral-600'
+                                            : 'bg-green-100 text-green-700 border-green-300'
+                                    }`}
+                                    style={lb ? { color: brandPrimary } : undefined}
+                                >
                                     Published
                                 </span>
                             )}

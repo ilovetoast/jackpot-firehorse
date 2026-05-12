@@ -380,7 +380,7 @@ export const AssetPlaceholder = memo(function AssetPlaceholder({
                 )}
             </div>
 
-            <div className="absolute bottom-0 left-0 right-0 z-[3] flex min-h-[2.25rem] flex-col justify-center border-t border-white/[0.08] bg-black/55 px-2 py-1.5 text-center backdrop-blur-md">
+            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[3] flex min-h-[2.25rem] flex-col justify-center border-t border-white/[0.08] bg-black/55 px-2 py-1.5 text-center backdrop-blur-md">
                 <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95">{primaryFooter}</p>
                 {footerSubtext ? (
                     <p className="mt-0.5 line-clamp-2 text-[9px] font-medium leading-snug text-white/65">{footerSubtext}</p>

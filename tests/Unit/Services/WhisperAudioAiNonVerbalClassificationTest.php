@@ -32,6 +32,14 @@ class WhisperAudioAiNonVerbalClassificationTest extends TestCase
                 'Thanks for watching. Today we discuss the migration plan and rollout schedule for the API changes.',
                 false,
             ],
+            'thanks with short tail' => [
+                'Thanks for watching! Hope you enjoyed this one.',
+                true,
+            ],
+            'thank you with subscribe tail' => [
+                'Thank you for watching and please subscribe to our channel',
+                true,
+            ],
         ];
     }
 

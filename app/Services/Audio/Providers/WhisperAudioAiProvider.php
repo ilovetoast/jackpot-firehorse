@@ -236,8 +236,11 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
 
     /**
      * Whisper often emits stock YouTube outros or bracket tags on music-only
-     * sources. When the transcript is short and dominated by those patterns,
-     * we classify as non-verbal rather than surfacing misleading "speech".
+     * sources. Those lines are model hallucination, not real speech — we must
+     * not persist them as transcripts. Uses exact junk tokens plus a
+     * "known-outro stem + almost nothing else" rule so short outros with
+     * trailing fluff still classify as non-verbal without nuking long real
+     * sentences that merely contain a phrase as a substring.
      */
     protected function isLikelyNonVerbalOrHallucination(string $transcript): bool
     {
@@ -284,6 +287,45 @@ class WhisperAudioAiProvider implements AudioAiProviderInterface
                 if (str_contains($compact, $needle)) {
                     return true;
                 }
+            }
+        }
+
+        // Stock video / podcast outros: phrase present but almost no other words.
+        $outroStems = [
+            'thanks for watching',
+            'thank you for watching',
+            'thank you so much for watching',
+            'please subscribe',
+            'please like and subscribe',
+            'like and subscribe',
+            'like comment and subscribe',
+            'subscribe for more',
+            'hit the bell',
+            'hit the notification bell',
+            'smash that like',
+            'see you next time',
+            'see you in the next video',
+            'dont forget to subscribe',
+            "don't forget to subscribe",
+            'stay tuned',
+            'until next time',
+            'goodbye everyone',
+            'bye everyone',
+        ];
+        foreach ($outroStems as $stem) {
+            if (! str_contains($compact, $stem)) {
+                continue;
+            }
+            $len = mb_strlen($compact);
+            // Very short line — almost always hallucination on music-only sources.
+            if ($len <= 56) {
+                return true;
+            }
+            $rest = trim(str_replace($stem, '', $compact));
+            $rest = trim(preg_replace('/\s+/u', ' ', $rest));
+            // Longer line: only reject when the model added a tiny tail after the outro.
+            if ($len <= 200 && mb_strlen($rest) <= 36) {
+                return true;
             }
         }
 

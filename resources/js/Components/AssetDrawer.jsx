@@ -4508,7 +4508,9 @@ export default function AssetDrawer({
                             </div>
                         )}
                         <div 
-                            className={`relative w-full h-full transition-opacity duration-200 ${isLayoutSettling ? 'opacity-0' : 'opacity-100'}`}
+                            className={`relative w-full h-full transition-opacity duration-200 ${
+                                isLayoutSettling ? 'pointer-events-none opacity-0' : 'opacity-100'
+                            }`}
                         >
                             {isVirtualGoogleFont ? (
                                 <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 p-6 text-center">
@@ -4597,7 +4599,7 @@ export default function AssetDrawer({
                                 >
                                     {/* Hover clip: short MP4 letterboxed to match drawer preview (object-contain); poster unchanged */}
                                     {isHoveringVideo && displayAsset.video_preview_url && !isMobile && !videoPreviewFailed && (
-                                        <div className="absolute inset-0 z-10 overflow-hidden bg-black">
+                                        <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden bg-black">
                                             <video
                                                 ref={videoPreviewRef}
                                                 src={displayAsset.video_preview_url}
