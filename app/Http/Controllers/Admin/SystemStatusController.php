@@ -5,11 +5,11 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Support\DeployedAtManifest;
 use App\Enums\EventType;
-use App\Enums\ThumbnailStatus;
 use App\Models\ActivityEvent;
 use App\Enums\StorageBucketStatus;
 use App\Models\Asset;
 use App\Models\StorageBucket;
+use App\Services\Admin\AssetProcessingIssuesService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -491,48 +491,10 @@ class SystemStatusController extends Controller
     protected function getAssetsWithIssues(int $limit = 50): array
     {
         try {
-            $assets = Asset::whereNull('deleted_at')
-                ->where(function ($query) {
-                    $query->where('thumbnail_status', ThumbnailStatus::FAILED)
-                        ->orWhere(function ($q) {
-                            $q->whereNotNull('metadata->promotion_failed')
-                                ->where('metadata->promotion_failed', true);
-                        });
-                })
-                ->orderBy('created_at', 'desc')
-                ->limit($limit)
-                ->get(['id', 'title', 'original_filename', 'created_at', 'thumbnail_status', 'thumbnail_error', 'metadata'])
-                ->map(function ($asset) {
-                    $issues = [];
-                    $errorMessages = [];
-
-                    if ($asset->thumbnail_status === ThumbnailStatus::FAILED) {
-                        $issues[] = 'thumbnail_generation_failed';
-                        if ($asset->thumbnail_error) {
-                            $errorMessages[] = "Thumbnail: {$asset->thumbnail_error}";
-                        }
-                    }
-
-                    if (isset($asset->metadata['promotion_failed']) && $asset->metadata['promotion_failed'] === true) {
-                        $issues[] = 'promotion_failed';
-                        if (isset($asset->metadata['promotion_error'])) {
-                            $errorMessages[] = "Promotion: {$asset->metadata['promotion_error']}";
-                        }
-                    }
-
-                    return [
-                        'id' => $asset->id,
-                        'title' => $asset->title ?? $asset->original_filename ?? 'Untitled Asset',
-                        'created_at' => $asset->created_at?->toIso8601String(),
-                        'issues' => $issues,
-                        'error_messages' => $errorMessages,
-                    ];
-                })
-                ->toArray();
-
-            return $assets;
+            return app(AssetProcessingIssuesService::class)->list($limit);
         } catch (\Exception $e) {
             Log::error('Failed to get assets with issues', ['error' => $e->getMessage()]);
+
             return [];
         }
     }

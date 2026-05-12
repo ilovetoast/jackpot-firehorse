@@ -162,6 +162,12 @@ export default function AdminIndex({ companies: initialCompanies, users: initial
                 { name: 'Derivative Failures', icon: ExclamationTriangleIcon, description: stats ? `Total: ${stats.derivative_failures_total ?? 0}, Escalated: ${stats.derivative_failures_escalated ?? 0}` : 'Thumbnail/preview failures, by processor and type', href: '/app/admin/derivative-failures' },
                 { name: 'Activity history', icon: DocumentTextIcon, description: 'Structured user and tenant activity', href: '/app/admin/activity-logs' },
                 { name: 'System Status', icon: CogIcon, description: 'Monitor system health', href: '/app/admin/system-status' },
+                {
+                    name: 'Asset processing issues',
+                    icon: ExclamationTriangleIcon,
+                    description: 'Failed thumbnails & promotion errors — full error text',
+                    href: '/app/admin/asset-processing-issues',
+                },
                 { name: 'Reliability Center', icon: ExclamationTriangleIcon, description: 'Incidents, queue, scheduler, failed jobs', href: '/app/admin/reliability' },
                 {
                     name: 'Studio export failures',

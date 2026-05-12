@@ -326,12 +326,38 @@ class AdminAssetController extends Controller
         ];
 
         $assetIdStr = (string) $asset->id;
+        $versionModels = $asset->versions()
+            ->with('uploadedBy:id,first_name,last_name')
+            ->orderByDesc('version_number')
+            ->limit(50)
+            ->get();
+
+        // GenerateThumbnailsJob serializes `assetVersionId` (often the version UUID, not the asset UUID).
+        // Match failed_jobs on asset id and every version id so thrown failures still surface in admin.
+        $needleIds = array_values(array_unique(array_filter(array_merge(
+            [$assetIdStr],
+            $versionModels->pluck('id')->map(fn ($id) => (string) $id)->all()
+        ))));
         $failedJobs = DB::table('failed_jobs')
-            ->where('payload', 'like', '%'.$assetIdStr.'%')
+            ->where(function ($q) use ($needleIds) {
+                foreach ($needleIds as $nid) {
+                    $q->orWhere('payload', 'like', '%'.$nid.'%');
+                }
+            })
             ->orderByDesc('failed_at')
-            ->limit(20)
+            ->limit(50)
             ->get(['id', 'uuid', 'queue', 'payload', 'exception', 'failed_at'])
-            ->filter(fn ($j) => str_contains($j->payload ?? '', $assetIdStr))
+            ->filter(function ($j) use ($needleIds) {
+                $p = (string) ($j->payload ?? '');
+                foreach ($needleIds as $nid) {
+                    if ($nid !== '' && str_contains($p, $nid)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->take(20)
             ->values()
             ->map(fn ($j) => [
                 'id' => $j->id,
@@ -343,12 +369,7 @@ class AdminAssetController extends Controller
             ])
             ->all();
 
-        // Always load versions for admin operations (debugging/troubleshooting regardless of plan)
-        $versions = $asset->versions()
-            ->with('uploadedBy:id,first_name,last_name')
-            ->orderByDesc('version_number')
-            ->limit(50)
-            ->get()
+        $versions = $versionModels
             ->map(fn ($v) => [
                 'id' => $v->id,
                 'version_number' => $v->version_number,

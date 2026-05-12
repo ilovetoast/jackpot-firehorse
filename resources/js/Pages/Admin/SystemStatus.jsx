@@ -525,7 +525,15 @@ export default function AdminSystemStatus({ systemHealth, recentFailedJobs, asse
 
                     {/* Assets with Issues */}
                     <div className="mb-8">
-                        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">Assets with processing issues</h2>
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Assets with processing issues</h2>
+                            <Link
+                                href="/app/admin/asset-processing-issues"
+                                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            >
+                                Full report with complete errors →
+                            </Link>
+                        </div>
                         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                             {assetsWithIssues && assetsWithIssues.length > 0 ? (
                                 <div className="overflow-x-auto">

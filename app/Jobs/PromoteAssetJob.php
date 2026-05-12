@@ -107,7 +107,10 @@ class PromoteAssetJob implements ShouldQueue
         if (! $completionService->isComplete($asset)) {
             Log::debug('Asset promotion skipped - asset processing not completed yet', [
                 'asset_id' => $asset->id,
-                'status' => $asset->status->value,
+                'visibility_status' => $asset->status->value,
+                'thumbnail_status' => $asset->thumbnail_status?->value ?? (string) $asset->thumbnail_status,
+                'analysis_status' => $asset->analysis_status,
+                'reason' => 'AssetCompletionService::isComplete() is false (e.g. thumbnail_status must be completed or skipped, not failed/processing)',
             ]);
             \App\Services\UploadDiagnosticLogger::jobSkip('PromoteAssetJob', $asset->id, 'processing_not_complete');
 

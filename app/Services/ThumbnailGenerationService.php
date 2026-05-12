@@ -985,6 +985,7 @@ class ThumbnailGenerationService
             // File type was already detected above, reuse it
             // This ensures consistent file type detection throughout the method
             $thumbnails = [];
+            $thumbnailEngineDiagnostics = [];
             $officePreviewPdfPath = null;
 
             // Step 6: Generate preview thumbnail FIRST (before final thumbnails)
@@ -1064,6 +1065,10 @@ class ThumbnailGenerationService
                         ]);
                     }
                 } catch (\Exception $e) {
+                    $thumbnailEngineDiagnostics[] = [
+                        'context' => 'preview',
+                        'message' => $e->getMessage(),
+                    ];
                     // Preview generation failure is non-fatal - continue with final thumbnails
                     Log::warning('[ThumbnailGenerationService] Failed to generate preview thumbnail (non-fatal)', [
                         'asset_id' => $asset->id,
@@ -1153,6 +1158,10 @@ class ThumbnailGenerationService
                         @unlink($thumbnailPath);
                     }
                 } catch (\Exception $e) {
+                    $thumbnailEngineDiagnostics[] = [
+                        'context' => 'style:'.$styleName,
+                        'message' => $e->getMessage(),
+                    ];
                     Log::warning("Failed to generate thumbnail style '{$styleName}' for asset", [
                         'asset_id' => $asset->id,
                         'style' => $styleName,
@@ -1258,6 +1267,7 @@ class ThumbnailGenerationService
                 'thumbnail_quality' => $degradedMode ? 'degraded_large_skipped' : null,
                 'pdf_page_count' => $pdfPageCount,
                 'office_preview_pdf_path' => $officePreviewPdfPath,
+                'thumbnail_engine_diagnostics' => $thumbnailEngineDiagnostics,
                 'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
             $profRow = $this->completeThumbnailProfiling(

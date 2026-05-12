@@ -40,6 +40,11 @@ export default function AdminReliabilitySectionSidebar({ tabSwitchRouteName = 'a
                 label: 'Failures & recovery',
                 links: [
                     { href: tabHref('incidents'), label: 'Incidents', active: tabActive('incidents') },
+                    {
+                        href: '/app/admin/asset-processing-issues',
+                        label: 'Asset processing issues',
+                        active: under('/app/admin/asset-processing-issues'),
+                    },
                     { href: tabHref('application-errors'), label: 'Application errors', active: tabActive('application-errors') },
                     { href: tabHref('failed-jobs'), label: 'Queue failed jobs', active: tabActive('failed-jobs') },
                     { href: tabHref('studio-exports'), label: 'Studio export failures', active: tabActive('studio-exports') },

@@ -168,13 +168,23 @@ class FinalizeAssetJob implements ShouldQueue
             'created_at' => now(),
         ]);
 
-        Log::info('[FinalizeAssetJob] Asset pipeline completed successfully', [
+        $asset = $asset->fresh();
+        $thumbState = $asset->thumbnail_status instanceof ThumbnailStatus
+            ? $asset->thumbnail_status->value
+            : (string) ($asset->thumbnail_status ?? '');
+        $finalizeContext = [
             'asset_id' => $asset->id,
             'original_filename' => $asset->original_filename,
-        ]);
+            'thumbnail_status' => $thumbState,
+        ];
+        if ($currentVersion) {
+            $finalizeContext['version_id'] = $currentVersion->id;
+            $finalizeContext['version_pipeline_status'] = $currentVersion->pipeline_status;
+            $finalizeContext['note'] = 'Version pipeline row is complete; asset thumbnail_status may still be failed — PromoteAssetJob waits for COMPLETED or SKIPPED (see AssetCompletionService).';
+        }
+        Log::info('[FinalizeAssetJob] Asset pipeline finalized', $finalizeContext);
         \App\Services\UploadDiagnosticLogger::jobComplete('FinalizeAssetJob', $asset->id);
 
-        $asset = $asset->fresh();
         $thumbnailStatus = $asset->thumbnail_status instanceof ThumbnailStatus
             ? $asset->thumbnail_status
             : null;

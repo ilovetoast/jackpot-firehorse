@@ -170,6 +170,7 @@ class GenerateThumbnailsJob implements ShouldQueue
         // Phase 3A: Load version first, fallback to legacy (asset ID) when version not found
         try {
             $pipelineTimer = null;
+            $thumbnailGenResult = null;
             $version = AssetVersion::find($this->assetVersionId);
             if ($version) {
                 $version->loadMissing('asset');
@@ -840,6 +841,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             $result = $version
             ? $thumbnailService->generateThumbnailsForVersion($version, $mode)
             : $thumbnailService->generateThumbnails($asset, null, null, null, $mode);
+            $thumbnailGenResult = $result;
             $pipelineTimer?->lap('after_thumbnail_service', $asset, $version);
 
             // Service returns structured array keyed by mode: thumbnails[mode][style], etc.
@@ -871,24 +873,49 @@ class GenerateThumbnailsJob implements ShouldQueue
             // (e.g., PDF conversion failed, all styles failed, etc.)
             if (empty($finalThumbnails)) {
                 $errorMessage = 'Thumbnail generation failed: No thumbnails were generated (all styles failed)';
+                $enginePatch = $this->thumbnailEngineFailureMetadataPatch($thumbnailGenResult ?? []);
+                $fullThumbnailError = $errorMessage;
+                if (($enginePatch['thumbnail_engine_error_summary'] ?? '') !== '') {
+                    $fullThumbnailError = $errorMessage."\n\n".$enginePatch['thumbnail_engine_error_summary'];
+                }
 
                 Log::warning('Thumbnail generation produced no final thumbnails (terminal — pipeline continues)', [
                     'asset_id' => $asset->id,
                     'preview_thumbnails' => count($previewThumbnails),
                     'final_thumbnails' => count($finalThumbnails),
+                    'thumbnail_engine_diagnostics' => $enginePatch['thumbnail_engine_diagnostics'] ?? [],
                 ]);
 
                 // Mark as FAILED immediately - job failed, not transient issue
                 // Clear thumbnail_started_at when failed (no longer needed)
+                // Record failure: version gets metadata; asset gets status + merged engine diagnostics
+                $assetMetaMerged = array_merge($asset->metadata ?? [], $enginePatch);
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_generation_failed' => true,
+                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
+                            'thumbnail_generation_error' => $errorMessage,
+                        ], $enginePatch),
+                        'pipeline_status' => 'complete',
+                    ]);
+                } else {
+                    $assetMetaMerged['thumbnail_generation_failed'] = true;
+                    $assetMetaMerged['thumbnail_generation_failed_at'] = now()->toIso8601String();
+                    $assetMetaMerged['thumbnail_generation_error'] = $errorMessage;
+                }
+
                 $asset->update([
                     'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $errorMessage,
-                    'thumbnail_started_at' => null, // Clear start time on failure
+                    'thumbnail_error' => $fullThumbnailError,
+                    'thumbnail_started_at' => null,
+                    'metadata' => $assetMetaMerged,
                 ]);
 
                 Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (no thumbnails generated)', [
                     'asset_id' => $asset->id,
                     'error' => $errorMessage,
+                    'engine_summary' => $enginePatch['thumbnail_engine_error_summary'] ?? null,
                 ]);
 
                 // Log failure event (truthful - job failed)
@@ -897,7 +924,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         $asset,
                         \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
                         [
-                            'error' => $errorMessage,
+                            'error' => $fullThumbnailError,
                             'reason' => 'No thumbnails were generated - all styles failed',
                         ]
                     );
@@ -908,26 +935,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
                 }
 
-                // Record failure: version gets metadata; asset gets status only
-                if ($version) {
-                    $version->update([
-                        'metadata' => array_merge($version->metadata ?? [], [
-                            'thumbnail_generation_failed' => true,
-                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
-                            'thumbnail_generation_error' => $errorMessage,
-                        ]),
-                        'pipeline_status' => 'complete',
-                    ]);
-                } else {
-                    $currentMetadata = $asset->metadata ?? [];
-                    $currentMetadata['thumbnail_generation_failed'] = true;
-                    $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
-                    $currentMetadata['thumbnail_generation_error'] = $errorMessage;
-                    $asset->update(['metadata' => $currentMetadata]);
-                }
-
                 $asset->refresh();
-                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $fullThumbnailError);
                 $pipelineTimer?->lap('terminal_no_final_thumbnails', $asset, $version);
 
                 return;
@@ -976,12 +985,12 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                 // Verify thumbnail file exists in S3 and is valid.
                 // Retry headObject on 404 (up to 2 retries, 2s delay) to handle S3/network eventual consistency after upload.
-                $result = null;
+                $headResult = null;
                 $headAttempts = 0;
                 $headMaxAttempts = 3;
                 while ($headAttempts < $headMaxAttempts) {
                     try {
-                        $result = $s3Client->headObject([
+                        $headResult = $s3Client->headObject([
                             'Bucket' => $bucket->name,
                             'Key' => $thumbnailPath,
                         ]);
@@ -1015,9 +1024,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                     }
                 }
 
-                if ($result !== null) {
+                if ($headResult !== null) {
                     // Verify file size > minimum threshold (only catch broken/corrupted files)
-                    $contentLength = $result['ContentLength'] ?? 0;
+                    $contentLength = $headResult['ContentLength'] ?? 0;
                     if ($contentLength < $minValidSize) {
                         $allThumbnailsValid = false;
                         $errorMsg = "Thumbnail file too small for style '{$styleName}' (size: {$contentLength} bytes, minimum: {$minValidSize} bytes)";
@@ -1049,24 +1058,47 @@ class GenerateThumbnailsJob implements ShouldQueue
             // - Return without throwing so chain continues; see finalizeTerminalThumbnailFailureAndContinuePipeline
             if (! $allThumbnailsValid) {
                 $errorMessage = 'Thumbnail generation failed: '.implode('; ', $verificationErrors);
+                $enginePatch = $this->thumbnailEngineFailureMetadataPatch($thumbnailGenResult ?? []);
+                $fullThumbnailError = $errorMessage;
+                if (($enginePatch['thumbnail_engine_error_summary'] ?? '') !== '') {
+                    $fullThumbnailError = $errorMessage."\n\n".$enginePatch['thumbnail_engine_error_summary'];
+                }
 
                 Log::warning('Thumbnail verification failed (terminal — pipeline continues)', [
                     'asset_id' => $asset->id,
                     'thumbnail_count' => count($finalThumbnails),
                     'errors' => $verificationErrors,
+                    'thumbnail_engine_diagnostics' => $enginePatch['thumbnail_engine_diagnostics'] ?? [],
                 ]);
 
-                // Mark as FAILED immediately - job failed, not transient issue
-                // Clear thumbnail_started_at when failed (no longer needed)
+                // Record failure: version gets metadata; asset gets status + merged engine diagnostics
+                $assetMetaMerged = array_merge($asset->metadata ?? [], $enginePatch);
+                if ($version) {
+                    $version->update([
+                        'metadata' => array_merge($version->metadata ?? [], [
+                            'thumbnail_generation_failed' => true,
+                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
+                            'thumbnail_generation_error' => $errorMessage,
+                        ], $enginePatch),
+                        'pipeline_status' => 'complete',
+                    ]);
+                } else {
+                    $assetMetaMerged['thumbnail_generation_failed'] = true;
+                    $assetMetaMerged['thumbnail_generation_failed_at'] = now()->toIso8601String();
+                    $assetMetaMerged['thumbnail_generation_error'] = $errorMessage;
+                }
+
                 $asset->update([
                     'thumbnail_status' => ThumbnailStatus::FAILED,
-                    'thumbnail_error' => $errorMessage,
-                    'thumbnail_started_at' => null, // Clear start time on failure
+                    'thumbnail_error' => $fullThumbnailError,
+                    'thumbnail_started_at' => null,
+                    'metadata' => $assetMetaMerged,
                 ]);
 
                 Log::info('[GenerateThumbnailsJob] Marked asset as FAILED (verification failed)', [
                     'asset_id' => $asset->id,
                     'error' => $errorMessage,
+                    'engine_summary' => $enginePatch['thumbnail_engine_error_summary'] ?? null,
                 ]);
 
                 // Log failure event (truthful - job failed)
@@ -1075,7 +1107,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         $asset,
                         \App\Enums\EventType::ASSET_THUMBNAIL_FAILED,
                         [
-                            'error' => $errorMessage,
+                            'error' => $fullThumbnailError,
                             'verification_errors' => $verificationErrors,
                         ]
                     );
@@ -1086,26 +1118,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                     ]);
                 }
 
-                // Record failure: version gets metadata; asset gets status only
-                if ($version) {
-                    $version->update([
-                        'metadata' => array_merge($version->metadata ?? [], [
-                            'thumbnail_generation_failed' => true,
-                            'thumbnail_generation_failed_at' => now()->toIso8601String(),
-                            'thumbnail_generation_error' => $errorMessage,
-                        ]),
-                        'pipeline_status' => 'complete',
-                    ]);
-                } else {
-                    $currentMetadata = $asset->metadata ?? [];
-                    $currentMetadata['thumbnail_generation_failed'] = true;
-                    $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
-                    $currentMetadata['thumbnail_generation_error'] = $errorMessage;
-                    $asset->update(['metadata' => $currentMetadata]);
-                }
-
                 $asset->refresh();
-                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $errorMessage);
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $fullThumbnailError);
                 $pipelineTimer?->lap('terminal_verification_failed', $asset, $version);
 
                 return;
@@ -1531,6 +1545,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $currentMetadata['thumbnail_generation_failed'] = true;
                 $currentMetadata['thumbnail_generation_failed_at'] = now()->toIso8601String();
                 $currentMetadata['thumbnail_generation_error'] = $errorMessage;
+                $currentMetadata = array_merge(
+                    $currentMetadata,
+                    $this->thumbnailEngineFailureMetadataPatch($thumbnailGenResult ?? [])
+                );
 
                 // CRITICAL: Detect DEAD asset — source file missing from storage (NoSuchKey)
                 // This is the most severe state: asset cannot be recovered without re-upload
@@ -1698,6 +1716,43 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         // Job chaining is handled by Bus::chain() in ProcessAssetJob
         // No need to dispatch next job here
+    }
+
+    /**
+     * Build metadata keys from {@see ThumbnailGenerationService} payload so admin UIs can show
+     * root causes (for example LibreOffice conversion errors) instead of only generic summaries.
+     *
+     * @param  array<string, mixed>  $serviceResult
+     * @return array<string, mixed>
+     */
+    private function thumbnailEngineFailureMetadataPatch(array $serviceResult): array
+    {
+        $diag = $serviceResult['thumbnail_engine_diagnostics'] ?? null;
+        if (! is_array($diag) || $diag === []) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($diag as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $ctx = (string) ($row['context'] ?? 'unknown');
+            $msg = (string) ($row['message'] ?? '');
+            if ($msg === '') {
+                continue;
+            }
+            $lines[] = "{$ctx}: {$msg}";
+        }
+
+        if ($lines === []) {
+            return [];
+        }
+
+        return [
+            'thumbnail_engine_diagnostics' => $diag,
+            'thumbnail_engine_error_summary' => implode("\n", $lines),
+        ];
     }
 
     /**

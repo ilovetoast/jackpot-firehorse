@@ -425,6 +425,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
     Route::get('/admin/stripe-status', [\App\Http\Controllers\SiteAdminController::class, 'stripeStatus'])->name('admin.stripe-status');
     Route::get('/admin/documentation', [\App\Http\Controllers\SiteAdminController::class, 'documentation'])->name('admin.documentation');
     Route::get('/admin/system-status', [\App\Http\Controllers\Admin\SystemStatusController::class, 'index'])->name('admin.system-status');
+    Route::get('/admin/asset-processing-issues', [\App\Http\Controllers\Admin\AdminAssetProcessingIssuesController::class, 'index'])->name('admin.asset-processing-issues');
     Route::get('/admin/performance', [\App\Http\Controllers\Admin\PerformanceController::class, 'index'])->name('admin.performance.index');
     Route::get('/admin/performance/api', [\App\Http\Controllers\Admin\PerformanceController::class, 'api'])->name('admin.performance.api');
     Route::get('/admin/brand-intelligence', [\App\Http\Controllers\Admin\AdminBrandIntelligenceController::class, 'index'])->name('admin.brand-intelligence.index');
