@@ -15,6 +15,27 @@ import { CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24
 import { Activity, AlertCircle, Slash, RefreshCw, History } from 'lucide-react'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
 
+/**
+ * Site staff (drawer passes audioAiAudience="operator"): show reason codes + errors for Audio AI skips.
+ * End users see a generic line from {@link AssetTimeline} instead.
+ */
+function formatAudioAiSkippedOperator(metadata) {
+    const r = metadata?.reason != null ? String(metadata.reason) : 'unknown'
+    const err = metadata?.error ? ` — ${String(metadata.error).slice(0, 220)}` : ''
+    const hints = {
+        no_provider: 'Set config `assets.audio_ai.provider` (default whisper) or remove an empty ASSET_AUDIO_AI_PROVIDER override.',
+        no_api_key: 'Set `OPENAI_API_KEY` (Whisper uses the same key via config).',
+        unknown_provider: 'Provider key is not registered in AudioAiAnalysisService::resolveProvider.',
+        agent_disabled: 'Re-enable the audio_insights agent in Admin → AI → Agents.',
+        plan_limit_exceeded: 'Workspace AI credits exhausted or AI disabled for tenant.',
+        ai_disabled: 'AI disabled for this workspace.',
+        budget_exceeded: 'Per-asset Whisper budget cap exceeded (config assets.audio_ai.whisper.budget_cents_per_asset).',
+        duration_exceeded: 'Clip longer than assets.audio_ai.whisper.max_duration_seconds.',
+    }
+    const hint = hints[r] ? ` ${hints[r]}` : ''
+    return `Audio AI skipped (operator): ${r}${err}.${hint}`
+}
+
 export default function AssetTimeline({
     events = [],
     loading = false,
@@ -22,10 +43,27 @@ export default function AssetTimeline({
     thumbnailRetryCount = 0,
     onVideoPreviewRetry = null,
     variant = 'default',
+    /** `'operator'` = site staff: show Audio AI skip/fail reason codes; default = generic copy for library users */
+    audioAiAudience = 'default',
 }) {
     const isDark = variant === 'dark'
     // Format event type to human-readable description
     const formatEventType = (eventType, metadata = {}) => {
+        if (eventType === 'asset.audio_ai.skipped') {
+            if (audioAiAudience === 'operator') {
+                return formatAudioAiSkippedOperator(metadata)
+            }
+            return 'Unable to run AI analysis on this audio right now.'
+        }
+        if (eventType === 'asset.audio_ai.failed') {
+            if (audioAiAudience === 'operator') {
+                const r = metadata?.reason != null ? String(metadata.reason) : 'unknown'
+                const err = metadata?.error ? ` — ${String(metadata.error).slice(0, 220)}` : ''
+                return `Audio AI failed (operator): ${r}${err}.`
+            }
+            return 'Unable to complete AI analysis on this audio.'
+        }
+
         const eventMap = {
             'asset.upload.finalized': 'Upload finalized',
             'asset.thumbnail.started': metadata?.triggered_by === 'user_manual_request' 
@@ -61,24 +99,9 @@ export default function AssetTimeline({
             'asset.audio_ai.completed': metadata?.credits_charged
                 ? `Audio AI analysis completed (${metadata.credits_charged} credit${metadata.credits_charged === 1 ? '' : 's'}${metadata?.detected_language ? `, ${metadata.detected_language}` : ''})`
                 : 'Audio AI analysis completed',
-            'asset.audio_ai.skipped': metadata?.reason === 'plan_limit_exceeded'
-                ? 'Audio AI skipped — plan credit limit exceeded'
-                : metadata?.reason === 'ai_disabled'
-                  ? 'Audio AI skipped — AI is disabled for this workspace'
-                  : metadata?.reason === 'agent_disabled'
-                    ? 'Audio AI skipped — agent disabled in admin'
-                    : metadata?.reason === 'no_provider'
-                      ? 'Audio AI skipped — no provider configured yet'
-                      : metadata?.reason === 'budget_exceeded'
-                        ? 'Audio AI skipped — per-asset budget exceeded'
-                        : metadata?.reason === 'duration_exceeded'
-                          ? 'Audio AI skipped — clip exceeds duration cap'
-                          : metadata?.reason === 'no_api_key'
-                            ? 'Audio AI skipped — provider API key missing'
-                            : 'Audio AI analysis skipped',
-            'asset.audio_ai.failed': metadata?.reason
-                ? `Audio AI analysis failed (${metadata.reason})`
-                : 'Audio AI analysis failed',
+            // asset.audio_ai.skipped / .failed: handled at top of formatEventType (operator vs library user)
+            'asset.audio_ai.skipped': 'Audio AI analysis skipped',
+            'asset.audio_ai.failed': 'Audio AI analysis failed',
             'asset.promoted': 'Asset promoted',
             'asset.ready': 'Asset ready',
             'asset.ai_tagging.completed': `AI tagging completed${metadata?.tag_count ? ` (${metadata.tag_count} tags)` : ''}`,

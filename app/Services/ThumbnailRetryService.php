@@ -233,6 +233,12 @@ class ThumbnailRetryService
                       ($mimeType === 'image/x-canon-cr2' || $extension === 'cr2') &&
                       extension_loaded('imagick')) {
                 $isNowSupported = true;
+            } elseif ($skipReason === 'office_libreoffice_missing' &&
+                in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'], true)) {
+                $lo = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
+                if ($lo->isAvailable()) {
+                    $isNowSupported = true;
+                }
             } elseif ($skipReason === 'unsupported_format:svg' &&
                       ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                 $isNowSupported = true;

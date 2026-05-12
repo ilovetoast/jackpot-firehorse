@@ -316,7 +316,7 @@ export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' })
             {!transcript && !summary && !mood && aiStatus && aiStatus !== 'completed' && (
                 <p className="text-xs italic text-slate-400">
                     {aiStatus === 'pending_provider'
-                        ? 'AI analysis is queued — configure ASSET_AUDIO_AI_PROVIDER to generate a transcript and mood.'
+                        ? 'AI analysis is not available for this file right now.'
                         : `AI analysis status: ${aiStatus}`}
                 </p>
             )}

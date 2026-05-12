@@ -44,9 +44,9 @@ use Illuminate\Support\Facades\Log;
  *     (`metadata.audio.transcript_search_blob`) so the asset search index
  *     can match audio by spoken words without re-fetching the chunks.
  *
- * Without a configured provider the service is a clean no-op — frontend
- * surfaces "AI analysis is queued" until the operator sets
- * ASSET_AUDIO_AI_PROVIDER (and provides the provider's API key).
+ * With default `whisper` in config, the usual requirement is `OPENAI_API_KEY`.
+ * If the provider key is empty or unknown, runs short-circuit with a skip/fail
+ * reason stored on the asset and in activity (operators see detail in admin UI).
  */
 class AudioAiAnalysisService
 {
@@ -76,7 +76,7 @@ class AudioAiAnalysisService
 
         $providerKey = config('assets.audio_ai.provider');
         if (! $providerKey) {
-            $this->markStatus($asset, 'pending_provider');
+            $this->markStatus($asset, 'pending_provider', ['reason' => 'no_provider']);
             Log::info('[AudioAiAnalysisService] No provider configured — marking pending', [
                 'asset_id' => $asset->id,
             ]);
@@ -97,7 +97,10 @@ class AudioAiAnalysisService
 
         $provider = $this->resolveProvider((string) $providerKey);
         if (! $provider) {
-            $this->markStatus($asset, 'failed', ['error' => "unknown provider: {$providerKey}"]);
+            $this->markStatus($asset, 'failed', [
+                'error' => "unknown provider: {$providerKey}",
+                'reason' => 'unknown_provider',
+            ]);
             $this->recordBlockedRun(
                 $asset,
                 $tenant,

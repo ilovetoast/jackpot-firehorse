@@ -1,6 +1,6 @@
 # Production worker software (single checklist)
 
-Use this document when **provisioning or auditing staging/production machines** (or container images) that run **queue workers** for Jackpot: **raster thumbnails**, **PDF** thumbnails and text, **SVG** rasterization, **video** previews and processing, **image OCR**, optional **Python/OpenCV** jobs, and **Studio** workloads: **FFmpeg-native composition export** (video + text rasterization) and/or **headless Chromium** on dedicated lanes where enabled.
+Use this document when **provisioning or auditing staging/production machines** (or container images) that run **queue workers** for Jackpot: **raster thumbnails**, **PDF** thumbnails and text, **Office** document previews (LibreOffice → PDF), **SVG** rasterization, **video** previews and processing, **image OCR**, optional **Python/OpenCV** jobs, and **Studio** workloads: **FFmpeg-native composition export** (video + text rasterization) and/or **headless Chromium** on dedicated lanes where enabled.
 
 **Web tier:** Often shares the same image as workers. If web does not run workers, it still needs any CLI tool invoked on the request path; matching the worker image avoids drift.
 
@@ -42,6 +42,8 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | **imagemagick** | Raster thumbnails, conversions (`convert` / `magick`), many formats |
 | **ghostscript** | Delegate ImageMagick needs for **PDF** read/write |
 | **poppler-utils** | PDF: `pdftotext`, `pdftoppm`, `pdfinfo` (text extraction and fallbacks) |
+| **libreoffice-nogui** | **Office** → PDF for thumbnails/previews (`soffice`); see [Office documents](#office-worker-libreoffice) |
+| **fonts-dejavu**, **fonts-liberation**, **fonts-noto** | **Basic font pack** — improves LibreOffice/PDF layout and glyph coverage on minimal server images (often missing desktop fonts) |
 | **librsvg2-bin** | **SVG → raster** (`rsvg-convert`). Without it, SVG thumbnails do not generate |
 | **librsvg2-dev** | Only if you compile extensions against librsvg on the host |
 | **ffmpeg** | Video thumbnails, previews, FFmpeg-driven processing, and **Studio `ffmpeg_native` composition export**; **`ffprobe`** is included with **`ffmpeg`** on Ubuntu/Debian (verify with `command -v ffprobe`) |
@@ -51,12 +53,15 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | **python3-opencv** | Only if workers run Python code using `import cv2` |
 | **tesseract-ocr** | `ImageOcrService` / `ExtractImageOcrJob` — install on workers that run OCR |
 
+
 ### One-shot install (typical Ubuntu worker)
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
   imagemagick ghostscript poppler-utils \
+  libreoffice-nogui \
+  fonts-dejavu fonts-liberation fonts-noto \
   librsvg2-bin librsvg2-dev \
   ffmpeg \
   fontconfig libfreetype6 libjpeg-turbo8 libpng16-16 \
@@ -128,6 +133,32 @@ grep -i pdf /etc/ImageMagick-6/policy.xml || grep -i pdf /etc/ImageMagick-7/poli
 
 Use `php artisan pdf:verify` from the deployed app tree when the app is configured (see [Verification](#verification)).
 
+<a id="office-worker-libreoffice"></a>
+
+### Office documents (Word / Excel / PowerPoint previews)
+
+Thumbnails and grid previews for **Office** uploads use **LibreOffice** in headless mode to convert the file to **PDF**, then the same **ImageMagick + Ghostscript + spatie/pdf-to-image** stack as native PDFs (page 1 only).
+
+| Package | Purpose |
+|---------|---------|
+| **libreoffice-nogui** | Provides `soffice` for `--headless --convert-to pdf` without a desktop stack |
+
+**Basic font pack (recommended):** Minimal worker/container images often ship without fonts referenced by Office and PDF pipelines. Install a small set of common families so substitutions and missing-glyph boxes are less likely:
+
+```bash
+sudo apt install -y fonts-dejavu fonts-liberation fonts-noto
+```
+
+**Security note:** Untrusted Office files can contain macros. Conversion runs on workers with the same trust model as PDF rasterization; keep workers isolated and sized appropriately.
+
+**Verify after install:**
+
+```bash
+command -v soffice && soffice --version
+```
+
+If `soffice` is missing, the app **skips** Office thumbnails (placeholder UX) and records a **system incident** on the admin reliability dashboard so operators can install the package.
+
 ### Retrofit (SVG thumbnails missing)
 
 ```bash
@@ -136,6 +167,7 @@ which rsvg-convert && rsvg-convert --version
 ```
 
 ---
+
 
 <a id="nodejs--playwright-video-heavy--studio"></a>
 

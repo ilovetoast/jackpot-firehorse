@@ -20,7 +20,7 @@ class ClearOldThumbnailSkipReasons extends Command
      * @var string
      */
     protected $signature = 'thumbnails:clear-skip-reasons 
-                            {--format= : Specific format to clear (tiff, cr2, avif, heic, psd, svg, or all)}
+                            {--format= : Specific format to clear (tiff, cr2, avif, heic, psd, svg, office, or all)}
                             {--dry-run : Show what would be cleared without making changes}
                             {--force : Force regeneration by setting status to PENDING}';
 
@@ -29,7 +29,7 @@ class ClearOldThumbnailSkipReasons extends Command
      *
      * @var string
      */
-    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, CR2, AVIF, HEIC, PSD, SVG)';
+    protected $description = 'Clear old thumbnail skip reasons for formats that are now supported (TIFF, CR2, AVIF, HEIC, PSD, SVG, Office/LibreOffice)';
 
     /**
      * Execute the console command.
@@ -120,6 +120,17 @@ class ClearOldThumbnailSkipReasons extends Command
                 if (extension_loaded('imagick')) {
                     $shouldClear = true;
                     $formatName = 'PSD';
+                }
+            }
+
+            // Office (LibreOffice + PDF stack now available)
+            if (($format === 'all' || $format === 'office') &&
+                $skipReason === 'office_libreoffice_missing' &&
+                in_array($extension, ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'], true)) {
+                $lo = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
+                if ($lo->isAvailable()) {
+                    $shouldClear = true;
+                    $formatName = 'Office';
                 }
             }
 

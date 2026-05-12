@@ -6731,6 +6731,74 @@ export default function AssetDrawer({
                                                             </p>
                                                         </div>
                                                     )}
+                                                    {isAudio && (
+                                                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+                                                            <div className="flex items-start gap-3">
+                                                                <span
+                                                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100"
+                                                                    aria-hidden
+                                                                >
+                                                                    <SparklesIcon className="h-5 w-5 text-amber-800" />
+                                                                </span>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="text-sm font-medium text-amber-950">
+                                                                        Audio AI (operator diagnostics)
+                                                                    </p>
+                                                                    <p className="mt-1 text-xs leading-snug text-amber-900/90">
+                                                                        Status:{' '}
+                                                                        <code className="rounded bg-amber-100/80 px-1 font-mono text-[11px]">
+                                                                            {String(
+                                                                                displayAsset?.metadata?.audio
+                                                                                    ?.ai_status || '—',
+                                                                            )}
+                                                                        </code>
+                                                                        {displayAsset?.metadata?.audio?.reason != null && (
+                                                                            <>
+                                                                                {' '}
+                                                                                · reason{' '}
+                                                                                <code className="rounded bg-amber-100/80 px-1 font-mono text-[11px]">
+                                                                                    {String(
+                                                                                        displayAsset.metadata.audio
+                                                                                            .reason,
+                                                                                    )}
+                                                                                </code>
+                                                                            </>
+                                                                        )}
+                                                                        {displayAsset?.metadata?.audio?.error !=
+                                                                            null && (
+                                                                            <>
+                                                                                {' '}
+                                                                                · error{' '}
+                                                                                <span className="break-words font-mono text-[11px]">
+                                                                                    {String(
+                                                                                        displayAsset.metadata.audio
+                                                                                            .error,
+                                                                                    )}
+                                                                                </span>
+                                                                            </>
+                                                                        )}
+                                                                    </p>
+                                                                    <p className="mt-2 text-[10px] leading-snug text-amber-900/80">
+                                                                        Defaults: OpenAI Whisper (
+                                                                        <code className="font-mono">whisper</code>
+                                                                        ) + <code className="font-mono">OPENAI_API_KEY</code>
+                                                                        . Blank <code className="font-mono">ASSET_AUDIO_AI_PROVIDER</code> in
+                                                                        .env still resolves to whisper in config.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <p className="mt-2 text-[10px] leading-snug text-amber-900/75">
+                                                                System audit:{' '}
+                                                                <Link
+                                                                    href="/app/admin/ai/activity?task_type=audio_insights"
+                                                                    className="font-medium text-indigo-700 hover:text-indigo-900"
+                                                                >
+                                                                    AI Activity (audio_insights)
+                                                                </Link>{' '}
+                                                                for blocked runs, costs, and errors.
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                     <ProcessingActionCard
                                                         icon="refreshDanger"
                                                         title="Reprocess entire asset"
@@ -7350,6 +7418,7 @@ export default function AssetDrawer({
                         <AssetTimeline 
                             events={activityEvents} 
                             loading={activityLoading}
+                            audioAiAudience={canSiteAdminPipeline ? 'operator' : 'default'}
                             onThumbnailRetry={() => {
                                 // Phase 3.0C: Call backend to retry thumbnail generation (max 2 retries)
                                 if (thumbnailRetryCount < 2 && canRetryThumbnail) {

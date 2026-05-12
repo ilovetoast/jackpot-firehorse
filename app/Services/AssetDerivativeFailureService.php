@@ -108,6 +108,9 @@ class AssetDerivativeFailureService
         if (str_contains($trace, 'ffmpeg') || str_contains($trace, 'video') && str_contains($trace, 'preview')) {
             return DerivativeProcessor::FFMPEG;
         }
+        if (str_contains($trace, 'libreoffice') || str_contains($trace, 'soffice')) {
+            return DerivativeProcessor::LIBREOFFICE;
+        }
         if (str_contains($trace, 'imagick') || str_contains($trace, 'imagemagick')) {
             return DerivativeProcessor::IMAGEMAGICK;
         }

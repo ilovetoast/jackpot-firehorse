@@ -604,7 +604,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $mimeType = strtolower($mimeForCheck ?? '');
                 $extension = strtolower($extForCheck);
                 $skipReason = $this->determineSkipReason($mimeType, $extension);
-                $skipMessage = $this->getThumbnailSkipMessage($mimeType, $extension);
+                $skipMessage = $this->getThumbnailSkipMessage($mimeType, $extension, $skipReason);
 
                 // Store skip reason and user-facing message in metadata for UI display
                 $metadata = $asset->metadata ?? [];
@@ -666,6 +666,31 @@ class GenerateThumbnailsJob implements ShouldQueue
                     'extension' => $extension,
                     'skip_reason' => $skipReason,
                 ]);
+
+                if ($skipReason === 'office_libreoffice_missing') {
+                    try {
+                        app(ReliabilityEngine::class)->report([
+                            'source_type' => 'system',
+                            'source_id' => null,
+                            'tenant_id' => $asset->tenant_id,
+                            'severity' => 'warning',
+                            'title' => 'LibreOffice missing on workers — Office previews skipped',
+                            'message' => 'Thumbnail workers need the `soffice` binary (Ubuntu: libreoffice-nogui). Office uploads stay in a placeholder state until workers match docs/environments/PRODUCTION_WORKER_SOFTWARE.md.',
+                            'retryable' => false,
+                            'requires_support' => false,
+                            'unique_signature' => 'worker:libreoffice_missing:'.app()->environment(),
+                            'metadata' => [
+                                'skip_reason' => $skipReason,
+                                'first_asset_id' => $asset->id,
+                            ],
+                        ]);
+                    } catch (\Throwable $reliabilityEx) {
+                        Log::warning('[GenerateThumbnailsJob] ReliabilityEngine report failed (LibreOffice missing)', [
+                            'asset_id' => $asset->id,
+                            'error' => $reliabilityEx->getMessage(),
+                        ]);
+                    }
+                }
 
                 // Version path: set pipeline_status=complete so FinalizeAssetJob can run (ZIP, ICO, etc.)
                 // Without this, version stays at 'processing' and analysis_status never reaches 'complete'
@@ -1480,7 +1505,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                     app(AssetDerivativeFailureService::class)->recordFailure(
                         $asset,
                         DerivativeType::THUMBNAIL,
-                        DerivativeProcessor::THUMBNAIL_GENERATOR,
+                        AssetDerivativeFailureService::inferProcessorFromException($e),
                         $e,
                         null,
                         null,
@@ -2099,6 +2124,11 @@ class GenerateThumbnailsJob implements ShouldQueue
 
                     return 'unsupported_format:video_ffmpeg_missing';
                 }
+                if (str_contains($missing, 'LibreOffice') || str_contains($missing, 'soffice')) {
+                    if ($fileType === 'office') {
+                        return 'office_libreoffice_missing';
+                    }
+                }
                 if (str_contains($missing, 'Imagick')) {
                     if ($fileType === 'tiff') {
                         return 'unsupported_format:tiff';
@@ -2114,6 +2144,14 @@ class GenerateThumbnailsJob implements ShouldQueue
                     }
                     if ($fileType === 'psd') {
                         return 'unsupported_format:psd';
+                    }
+                    if ($fileType === 'office') {
+                        return 'unsupported_format:office_imagick';
+                    }
+                }
+                if (str_contains($missing, 'spatie/pdf-to-image')) {
+                    if ($fileType === 'office' || $fileType === 'pdf') {
+                        return 'unsupported_format:pdf_stack';
                     }
                 }
             }
@@ -2198,8 +2236,12 @@ class GenerateThumbnailsJob implements ShouldQueue
      *
      * @return string User-friendly message (e.g., "Thumbnail generation is not supported for this file type.")
      */
-    protected function getThumbnailSkipMessage(string $mimeType, string $extension): string
+    protected function getThumbnailSkipMessage(string $mimeType, string $extension, ?string $skipReason = null): string
     {
+        if ($skipReason === 'office_libreoffice_missing') {
+            return 'Office previews require LibreOffice on the server. Install worker packages from docs/environments/PRODUCTION_WORKER_SOFTWARE.md, then re-run thumbnail generation.';
+        }
+
         $fileTypeService = app(\App\Services\FileTypeService::class);
         $unsupported = $fileTypeService->getUnsupportedReason($mimeType, $extension);
         if ($unsupported && ! empty($unsupported['message'])) {

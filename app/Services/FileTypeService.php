@@ -139,8 +139,20 @@ class FileTypeService
                         ]);
                     }
                 } elseif ($tool === 'libreoffice') {
-                    // @todo Implement LibreOffice checking when needed
-                    // For now, LibreOffice is not checked (future requirement)
+                    $lo = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
+                    $binary = $lo->findBinary();
+                    if ($binary === null) {
+                        $missing[] = 'External tool: LibreOffice (soffice) — required for Office document previews/thumbnails';
+                        \Illuminate\Support\Facades\Log::warning('[FileTypeService] LibreOffice not found during requirements check', [
+                            'file_type' => $fileType,
+                            'configured_binary' => config('assets.thumbnail.office.soffice_binary'),
+                        ]);
+                    } else {
+                        \Illuminate\Support\Facades\Log::debug('[FileTypeService] LibreOffice found during requirements check', [
+                            'file_type' => $fileType,
+                            'soffice_path' => $binary,
+                        ]);
+                    }
                 }
             }
         }

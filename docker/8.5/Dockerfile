@@ -102,6 +102,7 @@ RUN apt-get update \
         imagemagick \
         ghostscript \
         poppler-utils \
+        libreoffice-nogui \
     && apt-get -y autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -149,11 +150,13 @@ RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
 # End of PDF thumbnail support additions
 # ============================================================================
 
-# Studio FFmpeg-native composition export: TTF/OTF for TextOverlayRasterizer (Imagick/GD).
-# fonts-dejavu-core provides /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (see compose.yaml / .env.example).
+# Studio FFmpeg-native + LibreOffice/PDF: common TTF families (minimal images lack desktop fonts).
+# fonts-dejavu / fonts-liberation / fonts-noto — align with docs/environments/PRODUCTION_WORKER_SOFTWARE.md.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        fonts-dejavu-core \
+        fonts-dejavu \
+        fonts-liberation \
+        fonts-noto \
         fontconfig \
         libfreetype6 \
         libjpeg-turbo8 \

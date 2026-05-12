@@ -12,5 +12,6 @@ enum DerivativeProcessor: string
     case SHARP = 'sharp';
     case GD = 'gd'; // PHP GD library (images)
     case THUMBNAIL_GENERATOR = 'thumbnail_generator';
+    case LIBREOFFICE = 'libreoffice';
     case UNKNOWN = 'unknown';
 }

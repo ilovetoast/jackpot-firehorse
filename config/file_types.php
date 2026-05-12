@@ -456,11 +456,11 @@ return [
             ],
 
             'capabilities' => [
-                'thumbnail' => false,
+                'thumbnail' => true,
                 'metadata' => false,
-                'preview' => false,
+                'preview' => true,
                 'ai_analysis' => false,
-                'download_only' => true,
+                'download_only' => false,
             ],
 
             'handlers' => [
@@ -468,17 +468,21 @@ return [
             ],
 
             'requirements' => [
+                'php_extensions' => ['imagick'],
+                'php_packages' => ['spatie/pdf-to-image'],
                 'external_tools' => ['libreoffice'],
             ],
 
             'errors' => [
-                'not_implemented' => 'Office document thumbnail generation is not yet implemented.',
+                'processing_failed' => 'Unable to generate a preview for this Office document. The file may be corrupted, password-protected, or too large.',
+                'conversion_failed' => 'LibreOffice could not convert this document to a preview.',
+                'not_implemented' => 'Office document preview is not available on this server (missing worker software).',
             ],
 
             'frontend_hints' => [
-                'can_preview_inline' => false,
-                'preview_component' => 'placeholder',
-                'show_placeholder' => true,
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
         ],
@@ -929,6 +933,7 @@ return [
     'supported_thumbnail_extensions' => [
         'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'cr2', 'avif', 'heic', 'heif',
         'pdf', 'psd', 'psb', 'ai', 'eps', 'svg',
+        'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
         'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
         'mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba',
     ],

@@ -294,6 +294,15 @@ return [
         ],
 
         /*
+         * Office documents (Word / Excel / PowerPoint): LibreOffice headless → PDF → same raster path as PDF thumbnails.
+         */
+        'office' => [
+            'soffice_binary' => env('OFFICE_LIBREOFFICE_BINARY', ''),
+            'timeout_seconds' => (int) env('THUMBNAIL_OFFICE_TIMEOUT_SECONDS', 120),
+            'max_source_bytes' => (int) env('THUMBNAIL_OFFICE_MAX_SOURCE_BYTES', 52_428_800),
+        ],
+
+        /*
          * Canon CR2 / camera RAW thumbnails (Imagick + LibRaw delegate).
          *
          * Full RAW demosaic without proper WB/colorspace often shows green/magenta casts.
@@ -562,7 +571,16 @@ return [
         'auto_run_after_upload' => (bool) env('ASSET_AUDIO_AI_AUTO_RUN_AFTER_UPLOAD', true),
         // Registered keys: {@see \App\Services\Audio\AudioAiAnalysisService::resolveProvider}
         // Default `whisper` = OpenAI transcriptions API (aligned with ai.agents.audio_insights).
-        'provider' => env('ASSET_AUDIO_AI_PROVIDER', 'whisper'),
+        // Treat blank env as unset so `.env` lines like `ASSET_AUDIO_AI_PROVIDER=` still default to whisper.
+        'provider' => (static function (): string {
+            $raw = env('ASSET_AUDIO_AI_PROVIDER');
+            if ($raw === null || $raw === '') {
+                return 'whisper';
+            }
+            $t = trim((string) $raw);
+
+            return $t !== '' ? $t : 'whisper';
+        })(),
         'transcription_enabled' => (bool) env('ASSET_AUDIO_AI_TRANSCRIPTION', true),
         'mood_enabled' => (bool) env('ASSET_AUDIO_AI_MOOD', true),
         // Phase 4: Whisper provider settings — only used when provider='whisper'.

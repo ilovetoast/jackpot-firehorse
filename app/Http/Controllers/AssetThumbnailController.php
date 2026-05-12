@@ -60,9 +60,7 @@ use Illuminate\Support\Facades\Storage;
  * Future work notes (see ThumbnailGenerationService for implementation details):
  *
  * @todo PSD / PSB thumbnail generation (Imagick) - See ThumbnailGenerationService::generatePsdThumbnail()
- * @todo PDF first-page + multi-page previews - See ThumbnailGenerationService::generatePdfThumbnail()
- * @todo Video poster frame generation (FFmpeg) - See ThumbnailGenerationService::generateVideoThumbnail()
- * @todo Office document previews (LibreOffice) - See ThumbnailGenerationService::generateOfficeThumbnail()
+ * @todo PDF multi-page previews - See ThumbnailGenerationService::generatePdfThumbnail()
  * @todo Manual thumbnail regeneration endpoint (future admin-only) - Create admin endpoint to retry failed thumbnails
  * @todo Asset versioning (future phase) - Handle thumbnail paths for asset versions
  * @todo Activity timeline integration - Log thumbnail generation/view events in activity timeline

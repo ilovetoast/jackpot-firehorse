@@ -4,7 +4,7 @@ Native Studio composition export needs a **readable TTF/OTF on disk** inside the
 
 ## `docker/8.5/Dockerfile`
 
-The Sail image installs **`fonts-dejavu-core`** (DejaVu Sans at `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`), plus **`fontconfig`**, **FreeType**, and JPEG/PNG runtime libs used when rasterizing text to PNG. **`fc-cache -f`** refreshes the font cache after install.
+The Sail image installs **`fonts-dejavu`**, **`fonts-liberation`**, and **`fonts-noto`** (DejaVu Sans remains at `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`), plus **`fontconfig`**, **FreeType**, and JPEG/PNG runtime libs used when rasterizing text to PNG. **`fc-cache -f`** refreshes the font cache after install.
 
 Rebuild after Dockerfile changes:
 

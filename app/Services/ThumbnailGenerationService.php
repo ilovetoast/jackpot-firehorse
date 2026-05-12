@@ -11,6 +11,7 @@ use App\Support\ThumbnailMode;
 use App\Support\VideoDisplayProbe;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -27,6 +28,7 @@ use Illuminate\Support\Str;
  * - TIFF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - AVIF: thumbnail generation via Imagick (requires Imagick PHP extension) ✓ IMPLEMENTED
  * - PDF: first page extraction (page 1 only, via spatie/pdf-to-image) ✓ IMPLEMENTED
+ * - Office (Word / Excel / PowerPoint): LibreOffice headless → PDF → same stack as PDF ✓ IMPLEMENTED
  *
  * Thumbnail output format:
  * - Configurable: WebP (default, better compression) or JPEG (maximum compatibility)
@@ -34,8 +36,7 @@ use Illuminate\Support\Str;
  * - Modern browser support is excellent (Chrome, Firefox, Safari, Edge)
  * - PSD/PSB: flattened preview (best-effort) - @todo Implement
  * - AI: best-effort preview - @todo Implement
- * - Office (Word/Excel/PowerPoint): icon or first-page render (best-effort) - @todo Implement
- * - Video: mp4, mov → first frame extraction - @todo Implement
+ * - Video: mp4, mov → first frame extraction (FFmpeg) ✓ IMPLEMENTED
  *
  * All thumbnails are stored in S3 alongside the original asset.
  * Thumbnail paths follow pattern: {asset_path_base}/thumbnails/{mode}/{style}/{filename}
@@ -48,8 +49,6 @@ use Illuminate\Support\Str;
  *
  * @todo PSD / PSB thumbnail generation (Imagick)
  * @todo PDF multi-page previews (future enhancement - currently page 1 only)
- * @todo Video poster frame generation (FFmpeg)
- * @todo Office document previews (LibreOffice)
  * @todo Asset versioning (future phase)
  * @todo Activity timeline integration
  *
@@ -85,6 +84,13 @@ class ThumbnailGenerationService
     protected ?string $preferredPdfRasterCachePath = null;
 
     protected ?string $preferredVideoRasterCachePath = null;
+
+    /**
+     * One LibreOffice conversion per {@see generateThumbnails} run; PDF path lives under {@see $officeLibreOfficeWorkDir}.
+     */
+    protected ?string $officeLibreOfficeWorkDir = null;
+
+    protected ?string $officeIntermediatePdfPath = null;
 
     /** @var array<string, mixed>|null First raster orientation profile for this generateThumbnails run (profiling). */
     protected ?array $rasterOrientationProfile = null;
@@ -463,6 +469,8 @@ class ThumbnailGenerationService
         $this->preferredCropSummary = null;
         $this->preferredPdfRasterCachePath = null;
         $this->preferredVideoRasterCachePath = null;
+        $this->officeLibreOfficeWorkDir = null;
+        $this->officeIntermediatePdfPath = null;
     }
 
     /**
@@ -680,6 +688,8 @@ class ThumbnailGenerationService
         $this->preferredCropSummary = null;
         $this->preferredPdfRasterCachePath = null;
         $this->preferredVideoRasterCachePath = null;
+        $this->officeLibreOfficeWorkDir = null;
+        $this->officeIntermediatePdfPath = null;
 
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
@@ -1362,6 +1372,16 @@ class ThumbnailGenerationService
             @unlink($this->preferredVideoRasterCachePath);
         }
         $this->preferredVideoRasterCachePath = null;
+
+        if ($this->officeLibreOfficeWorkDir !== null && is_dir($this->officeLibreOfficeWorkDir)) {
+            try {
+                File::deleteDirectory($this->officeLibreOfficeWorkDir);
+            } catch (\Throwable) {
+                // best-effort cleanup
+            }
+        }
+        $this->officeLibreOfficeWorkDir = null;
+        $this->officeIntermediatePdfPath = null;
     }
 
     protected function copyRasterToTemp(string $sourcePath): string
@@ -3661,25 +3681,28 @@ class ThumbnailGenerationService
     /**
      * Generate thumbnail for Office files (Word, Excel, PowerPoint).
      *
-     * @todo Implement Office document previews (LibreOffice)
-     *   - Option 1: Use LibreOffice headless to convert to PDF first, then generate thumbnail
-     *     (libreoffice --headless --convert-to pdf --outdir /tmp document.docx)
-     *   - Option 2: Use library to extract embedded preview/thumbnail (e.g., PHPOffice)
-     *   - Option 3: Generate icon based on file type (fallback)
-     *   - Note: Office files may contain embedded previews that can be extracted directly
+     * Pipeline: LibreOffice headless converts the document to PDF once per {@see generateThumbnails}
+     * run, then {@see generatePdfThumbnail} rasterizes page 1 for each style (shared raster cache in preferred mode).
      *
-     * NOTE: Requires external tools or libraries to extract preview/icon.
-     * This is a placeholder implementation.
+     * @return string Path to generated thumbnail image (WebP/JPEG per config)
      *
-     * @return string|null Path to generated thumbnail, or null if not supported
+     * @throws \RuntimeException When conversion or PDF rasterization fails
      */
-    protected function generateOfficeThumbnail(string $sourcePath, array $styleConfig): ?string
+    protected function generateOfficeThumbnail(string $sourcePath, array $styleConfig): string
     {
-        Log::info('Office thumbnail generation not yet implemented', [
-            'source_path' => $sourcePath,
-        ]);
+        if (! file_exists($sourcePath) || ! is_readable($sourcePath)) {
+            throw new \RuntimeException("Source Office file does not exist or is not readable: {$sourcePath}");
+        }
 
-        return null;
+        $converter = app(\App\Services\Office\LibreOfficeDocumentPreviewService::class);
+
+        if ($this->officeIntermediatePdfPath === null || ! is_file($this->officeIntermediatePdfPath)) {
+            $result = $converter->convertToPdf($sourcePath);
+            $this->officeLibreOfficeWorkDir = $result['work_dir'];
+            $this->officeIntermediatePdfPath = $result['pdf_path'];
+        }
+
+        return $this->generatePdfThumbnail($this->officeIntermediatePdfPath, $styleConfig);
     }
 
     /**
