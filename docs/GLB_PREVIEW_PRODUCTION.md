@@ -7,7 +7,7 @@
 
 ## Configuration
 
-- **`DAM_3D`**: `config/dam_3d.php` / `DAM_3D_ENABLED` gates registry 3D thumbnail generation and the GLB `<model-viewer>` path. When disabled, GLB assets do not get interactive viewer URLs even if metadata contains a native viewer key.
+- **`DAM_3D`**: `config/dam_3d.php` (`env('DAM_3D', false)` → `dam_3d.enabled`) gates registry 3D thumbnail generation and the GLB `<model-viewer>` path. When disabled, GLB assets do not get interactive viewer URLs even if metadata contains a native viewer key.
 - **Posters**: `metadata.preview_3d.poster_path` holds the **raster** poster object key; the API exposes `preview_3d_poster_url` and `preview_3d_revision` (opaque) for cache busting — never raw S3 keys in tenant JSON.
 
 ## Browsers
@@ -17,7 +17,7 @@
 ## CDN, signed URLs, and CORS
 
 - Delivery runs through **`AssetDeliveryService`** and CloudFront (non-local). Viewer and poster URLs must be **reachable by the browser** from the app origin (typical same-site CDN host).
-- **CORS** on the bucket / distribution must allow **GET** for model and image fetches the viewer issues. If signing fails, structured logs use `preview_3d.signed_url_resolution_failed` or `preview_3d.signed_url_empty` (see `Preview3dDeliveryUrls`).
+- **CORS** on the bucket / distribution must allow **GET** for model and image fetches the viewer issues. The app sets **`crossorigin="anonymous"`** on `<model-viewer>` so the browser performs a CORS-enabled fetch (required for WebGL); the CDN must respond with a matching **`Access-Control-Allow-Origin`** (often your staging/prod site origin, or `*` during bring-up). If signing fails, structured logs use `preview_3d.signed_url_resolution_failed` or `preview_3d.signed_url_empty` (see `Preview3dDeliveryUrls`).
 
 ## Operational limits
 

@@ -159,6 +159,7 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                 src={modelSrc}
                 poster={modelViewerPoster}
                 alt={alt}
+                crossOrigin="anonymous"
                 style={{
                     width: '100%',
                     height: '100%',

@@ -63,6 +63,7 @@ export default function MetadataCandidateReview({
         }
 
         setLoading(true)
+        let cancelled = false
         fetch(`/app/assets/${assetId}/metadata/review`, {
             method: 'GET',
             headers: {
@@ -71,15 +72,26 @@ export default function MetadataCandidateReview({
             },
             credentials: 'same-origin',
         })
-            .then((res) => res.json())
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`)
+                }
+                return res.json()
+            })
             .then((data) => {
+                if (cancelled) return
                 setReviewItems(data.review_items || [])
                 setLoading(false)
             })
             .catch((err) => {
+                if (cancelled) return
                 console.error('[MetadataCandidateReview] Failed to fetch review items', err)
                 setLoading(false)
             })
+
+        return () => {
+            cancelled = true
+        }
     }, [assetId, canViewSuggestions])
 
     useEffect(() => {
