@@ -59,7 +59,7 @@ export default function useAudioPlayer({ token, src, asset = null }) {
     const [buffered, setBuffered] = useState(null)
     const [playbackRate, setPlaybackRateState] = useState(1)
 
-    const logAudioCdn = useCallback((reason, { displayCategory, probe, mediaErrorCode } = {}) {
+    const logAudioCdn = useCallback((reason, { displayCategory, probe, mediaErrorCode } = {}) => {
         const a = assetRef.current
         const url = srcRef.current
         const hint =
