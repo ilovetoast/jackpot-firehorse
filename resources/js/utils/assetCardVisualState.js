@@ -5,7 +5,7 @@
 
 import { originalImageGridFallbackUrl } from './originalImageGridFallbackUrl.js'
 import { getThumbnailState, supportsThumbnail } from './thumbnailUtils.js'
-import { isRegistryModel3dAsset } from './resolveAsset3dPreviewImage.js'
+import { isRegistryModel3dAsset, isRegistryModel3dPosterStub } from './resolveAsset3dPreviewImage.js'
 
 const RAW_EXTENSIONS = new Set([
     'cr2',
@@ -38,12 +38,10 @@ function extensionOf(asset) {
 
 export function hasServerRasterThumbnail(asset) {
     if (!asset) return false
-    if (
-        isRegistryModel3dAsset(asset) &&
-        typeof asset.preview_3d_poster_url === 'string' &&
-        asset.preview_3d_poster_url.trim().length > 0
-    ) {
-        return true
+    if (isRegistryModel3dAsset(asset)) {
+        const poster =
+            typeof asset.preview_3d_poster_url === 'string' && asset.preview_3d_poster_url.trim().length > 0
+        return poster && !isRegistryModel3dPosterStub(asset)
     }
     if (asset.final_thumbnail_url || asset.preview_thumbnail_url) return true
     const ts = normalizeThumbStatus(asset)
@@ -101,7 +99,7 @@ function hasVideoPoster(asset) {
 }
 
 /**
- * @typedef {'ready'|'local_preview'|'generating_preview'|'raw_processing'|'document_processing'|'video_processing'|'preview_unavailable'|'failed'|'unknown_processing'} AssetCardVisualKind
+ * @typedef {'ready'|'local_preview'|'generating_preview'|'raw_processing'|'document_processing'|'video_processing'|'preview_unavailable'|'model_3d_stub_raster'|'failed'|'unknown_processing'} AssetCardVisualKind
  * @typedef {'neutral'|'processing'|'warning'|'danger'} AssetCardBadgeTone
  * @returns {{
  *   kind: AssetCardVisualKind,
@@ -170,6 +168,26 @@ export function getAssetCardVisualState(asset, options = {}) {
             showFileTypeCard: false,
             badgeTone: 'neutral',
             badgeShort: '',
+            extensionLabel: extUpper,
+        }
+    }
+
+    if (
+        isRegistryModel3dAsset(asset) &&
+        typeof asset.preview_3d_poster_url === 'string' &&
+        asset.preview_3d_poster_url.trim().length > 0 &&
+        isRegistryModel3dPosterStub(asset)
+    ) {
+        return {
+            kind: 'model_3d_stub_raster',
+            label: '3D model',
+            description:
+                'No raster grid preview for this file yet. Open the asset for an interactive 3D preview.',
+            showThumbnail: false,
+            showLocalPreview: false,
+            showFileTypeCard: true,
+            badgeTone: 'neutral',
+            badgeShort: '3D',
             extensionLabel: extUpper,
         }
     }

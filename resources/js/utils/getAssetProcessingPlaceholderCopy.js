@@ -77,6 +77,20 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
         }
     }
 
+    if (visualState.kind === 'model_3d_stub_raster') {
+        return {
+            headline: visualState.label,
+            helper: visualState.description,
+            badgeShort: visualState.badgeShort || '3D',
+            badgeTitle: `${visualState.label}. ${visualState.description}`,
+            badgeTone: visualState.badgeTone === 'warning' ? 'warning' : 'neutral',
+            animate: false,
+            typeMark: extUp,
+            showFaintTypeWatermark: true,
+            videoPlaySlot: false,
+        }
+    }
+
     if (visualState.kind === 'preview_unavailable') {
         return {
             headline: visualState.label,

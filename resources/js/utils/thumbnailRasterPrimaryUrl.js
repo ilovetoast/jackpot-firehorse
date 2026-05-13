@@ -4,7 +4,11 @@
  */
 
 import { originalImageGridFallbackUrl } from './originalImageGridFallbackUrl.js'
-import { getRegistryModel3dPosterDisplayUrl } from './resolveAsset3dPreviewImage.js'
+import {
+    getRegistryModel3dPosterDisplayUrl,
+    isRegistryModel3dAsset,
+    isRegistryModel3dPosterStub,
+} from './resolveAsset3dPreviewImage.js'
 
 /**
  * @param {object|null|undefined} asset
@@ -25,6 +29,11 @@ export function resolveRasterPrimaryThumbnailUrl(
     const poster = getRegistryModel3dPosterDisplayUrl(asset, failedThumbnailUrls, damFileTypes)
     if (poster) {
         return poster
+    }
+
+    // Stub pipeline uploads thumb/medium/large from the same synthetic master — hide those too in the grid.
+    if (isRegistryModel3dAsset(asset, damFileTypes) && isRegistryModel3dPosterStub(asset)) {
+        return null
     }
 
     const isSvg =

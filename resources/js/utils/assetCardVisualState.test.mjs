@@ -172,7 +172,7 @@ test('computeThumbnailPipelineGridSummary counts rawProcessing', () => {
     assert.equal(s.attention, 0)
 })
 
-test('GLB with preview_3d_poster_url counts as server raster thumbnail', () => {
+test('GLB with real preview_3d_poster_url counts as server raster thumbnail', () => {
     syncDamFileTypesFromPage({
         props: {
             dam_file_types: {
@@ -189,8 +189,36 @@ test('GLB with preview_3d_poster_url counts as server raster thumbnail', () => {
         mime_type: 'model/gltf-binary',
         thumbnail_status: 'pending',
         preview_3d_poster_url: 'https://cdn.example.com/p.webp',
+        preview_3d_poster_is_stub: false,
     }
     assert.equal(hasServerRasterThumbnail(asset), true)
     const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
     assert.equal(vs.kind, 'ready')
+})
+
+test('GLB with stub poster does not count as server raster; grid uses 3D placeholder state', () => {
+    syncDamFileTypesFromPage({
+        props: {
+            dam_file_types: {
+                ...DAM_MINIMAL,
+                types_for_help: [
+                    { key: 'model_glb', name: 'glTF Binary', extensions: ['glb'], status: 'enabled', enabled: true },
+                ],
+            },
+        },
+    })
+    const asset = {
+        id: 202,
+        file_extension: 'glb',
+        mime_type: 'model/gltf-binary',
+        thumbnail_status: 'completed',
+        preview_3d_poster_url: 'https://cdn.example.com/stub.webp',
+        preview_3d_poster_is_stub: true,
+        final_thumbnail_url: 'https://cdn.example.com/final-from-stub.webp',
+    }
+    assert.equal(hasServerRasterThumbnail(asset), false)
+    const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
+    assert.equal(vs.kind, 'model_3d_stub_raster')
+    assert.equal(vs.showFileTypeCard, true)
+    assert.equal(vs.badgeShort, '3D')
 })

@@ -30,9 +30,13 @@ final class Preview3dDeliveryUrls
         $dbg = is_array($p3['debug'] ?? null) ? $p3['debug'] : [];
         $posterIsStub = (bool) ($dbg['poster_stub'] ?? false);
         $failure = $p3['failure_message'] ?? null;
-        $stubReason = $posterIsStub && is_string($failure) && trim($failure) !== ''
-            ? Str::limit(trim($failure), 280)
+        $failureTrimmed = is_string($failure) ? trim($failure) : '';
+        $stubReasonFromFailure = $posterIsStub && $failureTrimmed !== ''
+            ? Str::limit($failureTrimmed, 280)
             : null;
+        $stubReason = $stubReasonFromFailure ?? ($posterIsStub
+            ? 'Raster 3D preview (Blender) did not produce an image; the file may still preview interactively in the browser.'
+            : null);
         $expectsPoster = isset($p3['poster_path']) && is_string($p3['poster_path']) && trim($p3['poster_path']) !== '';
         $expectsViewer = isset($p3['viewer_path']) && is_string($p3['viewer_path']) && trim($p3['viewer_path']) !== '';
 

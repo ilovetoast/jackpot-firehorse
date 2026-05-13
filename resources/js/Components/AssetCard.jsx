@@ -94,7 +94,7 @@ export default function AssetCard({
     /** Public share: title + extension row under thumb (main asset grid style); hides ext pill on image */
     splitTitleFooter = false,
 }) {
-    const { auth } = usePage().props
+    const { auth, dam_file_types: damFileTypes } = usePage().props
     /** Brand Guidelines Google Fonts (no DAM file) — grid preview only, no drawer */
     const isVirtualGoogleFont = Boolean(asset?.is_virtual_google_font)
     const [googleFontReady, setGoogleFontReady] = useState(false)
@@ -262,13 +262,20 @@ export default function AssetCard({
         asset?.thumbnail_url,
         asset?.thumbnail_status?.value || asset?.thumbnail_status,
         asset?.updated_at,
+        asset?.final_thumbnail_url,
+        asset?.preview_thumbnail_url,
+        asset?.preview_3d_poster_url,
+        asset?.preview_3d_poster_is_stub,
+        asset?.preview_3d_viewer_url,
+        asset?.preview_3d_revision,
     ])
     
     // Phase 3.1: Get thumbnail state for processing badge
     // Recompute only when asset id or thumbnailVersion changes (same as thumbnailVersion memo)
-    const thumbnailState = useMemo(() => getThumbnailState(asset), [
-        asset?.id,
+    const thumbnailState = useMemo(() => getThumbnailState(asset, 0, damFileTypes), [
+        asset,
         thumbnailVersion,
+        damFileTypes,
     ])
 
     const aiVideoBusy =

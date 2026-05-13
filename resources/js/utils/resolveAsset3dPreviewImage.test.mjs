@@ -5,6 +5,7 @@ import {
     getRegistryModel3dPosterDisplayUrl,
     getRegistryModelGlbModelSourceUrl,
     isRegistryModel3dAsset,
+    isRegistryModel3dPosterStub,
     isRegistryModelGlbAsset,
     getRegistryModelGlbViewerDisplayUrl,
     shouldShowRealtimeGlbModelViewer,
@@ -42,6 +43,25 @@ test('model_glb with glb extension is registry 3D', () => {
     const asset = { file_extension: 'glb', mime_type: 'model/gltf-binary' }
     assert.equal(isRegistryModel3dAsset(asset, DAM_STUB), true)
     assert.equal(isRegistryModel3dAsset({ file_extension: 'jpg' }, DAM_STUB), false)
+})
+
+test('poster URL omitted when pipeline stub (API flag)', () => {
+    const asset = {
+        file_extension: 'glb',
+        preview_3d_poster_url: 'https://cdn.example.com/stub.webp',
+        preview_3d_poster_is_stub: true,
+    }
+    assert.equal(isRegistryModel3dPosterStub(asset), true)
+    assert.equal(getRegistryModel3dPosterDisplayUrl(asset, new Set(), DAM_STUB), null)
+})
+
+test('poster URL omitted when pipeline stub (metadata debug)', () => {
+    const asset = {
+        file_extension: 'glb',
+        preview_3d_poster_url: 'https://cdn.example.com/stub.webp',
+        metadata: { preview_3d: { debug: { poster_stub: true } } },
+    }
+    assert.equal(getRegistryModel3dPosterDisplayUrl(asset, new Set(), DAM_STUB), null)
 })
 
 test('poster URL returned for model asset when present', () => {

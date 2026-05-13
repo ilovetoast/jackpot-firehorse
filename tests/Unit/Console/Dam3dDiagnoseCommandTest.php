@@ -19,5 +19,6 @@ class Dam3dDiagnoseCommandTest extends TestCase
         $this->assertStringContainsString('PATH blender (command -v):', $out);
         $this->assertStringContainsString('Blender exists:', $out);
         $this->assertStringContainsString('Bundled Blender script:', $out);
+        $this->assertStringContainsString('interactive viewer', $out);
     }
 }

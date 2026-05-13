@@ -35,7 +35,7 @@ export default function MosaicProcessingPlaceholder({
         if (visualState.kind === 'failed' || placeholderHint === 'failed') {
             return 'failed'
         }
-        if (visualState.kind === 'preview_unavailable') {
+        if (visualState.kind === 'preview_unavailable' || visualState.kind === 'model_3d_stub_raster') {
             return 'unavailable'
         }
         if (copy.animate) {

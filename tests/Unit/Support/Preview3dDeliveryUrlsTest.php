@@ -114,4 +114,31 @@ class Preview3dDeliveryUrlsTest extends TestCase
         $this->assertTrue($urls['preview_3d_poster_is_stub']);
         $this->assertSame('Blender binary not found or not executable.', $urls['preview_3d_poster_stub_reason']);
     }
+
+    public function test_preview_3d_poster_stub_reason_defaults_when_no_failure_message(): void
+    {
+        $posterUrl = 'https://cdn.example.com/stub.webp';
+
+        $asset = $this->assetMockWithMetadata([
+            'preview_3d' => [
+                'status' => 'ready',
+                'poster_path' => 'p',
+                'debug' => ['poster_stub' => true],
+            ],
+        ]);
+        $asset->shouldReceive('deliveryUrl')
+            ->once()
+            ->with(AssetVariant::PREVIEW_3D_POSTER, DeliveryContext::AUTHENTICATED)
+            ->andReturn($posterUrl);
+        $asset->shouldReceive('deliveryUrl')
+            ->once()
+            ->with(AssetVariant::PREVIEW_3D_GLB, DeliveryContext::AUTHENTICATED)
+            ->andReturn('');
+
+        $urls = Preview3dDeliveryUrls::forAuthenticatedAsset($asset);
+
+        $this->assertTrue($urls['preview_3d_poster_is_stub']);
+        $this->assertNotNull($urls['preview_3d_poster_stub_reason']);
+        $this->assertStringContainsString('Blender', (string) $urls['preview_3d_poster_stub_reason']);
+    }
 }

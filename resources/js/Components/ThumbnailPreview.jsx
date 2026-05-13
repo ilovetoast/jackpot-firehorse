@@ -63,7 +63,7 @@ import { useAnimatedGifPlayback } from '../hooks/useAnimatedGifPlayback'
 import GifPlaybackOverlay from './GifPlaybackOverlay'
 import { resolveRasterPrimaryThumbnailUrl } from '../utils/thumbnailRasterPrimaryUrl'
 import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
-import { isRegistryModel3dAsset } from '../utils/resolveAsset3dPreviewImage'
+import { isRegistryModel3dAsset, isRegistryModel3dPosterStub } from '../utils/resolveAsset3dPreviewImage'
 
 /**
  * LQIP URL for image assets only (tiny blurred preview on S3).
@@ -271,7 +271,7 @@ export default function ThumbnailPreview({
             // Asset became null (drawer closed) - reset tracking
             prevAssetIdRef.current = null
         }
-    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, asset?.preview_3d_poster_url, asset?.mime_type, thumbnailVersion, lockedUrl])
+    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, asset?.preview_3d_poster_url, asset?.preview_3d_poster_is_stub, asset?.mime_type, thumbnailVersion, lockedUrl])
     
     // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
     useEffect(() => {
@@ -303,8 +303,8 @@ export default function ThumbnailPreview({
     // Grid: first locked URL is stable; preview/LQIP/blob may upgrade once to the server final
     // (see shouldUpdate above). Arbitrary URL churn is still avoided.
     const { state } = useMemo(() => {
-        return getThumbnailState(asset, retryCount)
-    }, [asset?.id, retryCount])
+        return getThumbnailState(asset, retryCount, damFileTypes)
+    }, [asset, retryCount, damFileTypes])
 
     const fileExtForThumb = useMemo(
         () =>
@@ -331,18 +331,23 @@ export default function ThumbnailPreview({
         if (state === 'FAILED' || state === 'SKIPPED' || ts === 'failed' || ts === 'skipped') {
             return true
         }
+        const stub3dRaster =
+            isRegistryModel3dAsset(asset, damFileTypes) && isRegistryModel3dPosterStub(asset)
+        const effectiveFinalForPlaceholder = stub3dRaster ? null : asset?.final_thumbnail_url
+        const effectivePreviewForPlaceholder = stub3dRaster ? null : asset?.preview_thumbnail_url
         const hasLegacyCompletedThumb =
             !!asset?.thumbnail_url && (ts === 'completed' || asset?.thumbnail_status?.value === 'completed')
-        const hasModel3dPoster =
+        const hasModel3dNonStubPoster =
             isRegistryModel3dAsset(asset, damFileTypes) &&
             typeof asset?.preview_3d_poster_url === 'string' &&
-            asset.preview_3d_poster_url.trim().length > 0
+            asset.preview_3d_poster_url.trim().length > 0 &&
+            !isRegistryModel3dPosterStub(asset)
         const awaitingServerRaster =
             state === 'PENDING' &&
-            !asset?.final_thumbnail_url &&
-            !asset?.preview_thumbnail_url &&
+            !effectiveFinalForPlaceholder &&
+            !effectivePreviewForPlaceholder &&
             !hasLegacyCompletedThumb &&
-            !hasModel3dPoster
+            !hasModel3dNonStubPoster
         return Boolean(awaitingServerRaster && ts !== 'failed' && ts !== 'skipped')
     }, [
         asset?.id,
@@ -354,6 +359,8 @@ export default function ThumbnailPreview({
         asset?.preview_thumbnail_url,
         asset?.thumbnail_url,
         asset?.preview_3d_poster_url,
+        asset?.preview_3d_poster_is_stub,
+        asset?.metadata?.preview_3d?.debug?.poster_stub,
         state,
         fileExtForThumb,
         damFileTypes,

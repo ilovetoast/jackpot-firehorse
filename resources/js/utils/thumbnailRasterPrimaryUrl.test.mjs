@@ -10,6 +10,18 @@ const DAM = {
 test.beforeEach(() => {
     failedRasterThumbnailUrls.clear()
 })
+test('stub 3D poster skips poster and stub-derived finals in resolver', () => {
+    const failed = new Set()
+    const asset = {
+        file_extension: 'glb',
+        preview_3d_poster_url: 'https://cdn.example.com/stub-p.webp',
+        final_thumbnail_url: 'https://cdn.example.com/stub-final.webp',
+        preview_3d_poster_is_stub: true,
+        thumbnail_status: 'completed',
+    }
+    assert.equal(resolveRasterPrimaryThumbnailUrl(asset, false, failed, DAM), null)
+})
+
 test('3D poster wins over final_thumbnail_url', () => {
     const failed = new Set()
     const asset = {

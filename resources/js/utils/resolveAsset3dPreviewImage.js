@@ -12,8 +12,29 @@ function extensionOf(asset) {
 }
 
 /**
+ * True when the server marked the 3D raster poster as a pipeline stub (not a Blender render).
+ * Uses API `preview_3d_poster_is_stub` first, then `metadata.preview_3d.debug.poster_stub` for older payloads.
+ *
  * @param {object|null|undefined} asset
- * @param {import('./damFileTypes.js').DamFileTypesPayload|null|undefined} [damOverride] Inertia `dam_file_types` when available (tests may pass a stub).
+ * @returns {boolean}
+ */
+export function isRegistryModel3dPosterStub(asset) {
+    if (!asset) {
+        return false
+    }
+    if (asset.preview_3d_poster_is_stub === true) {
+        return true
+    }
+    const dbg = asset.metadata?.preview_3d?.debug
+    if (dbg && typeof dbg === 'object' && dbg.poster_stub === true) {
+        return true
+    }
+    return false
+}
+
+/**
+ * @param {object|null|undefined} asset
+ * @param {import('./damFileTypes.js').DamFileTypesPayload|null|undefined} [damOverride]
  * @returns {boolean}
  */
 export function isRegistryModel3dAsset(asset, damOverride) {
@@ -46,6 +67,9 @@ export function isRegistryModel3dAsset(asset, damOverride) {
  */
 export function getRegistryModel3dPosterDisplayUrl(asset, failedUrlSet, damOverride) {
     if (!isRegistryModel3dAsset(asset, damOverride)) {
+        return null
+    }
+    if (isRegistryModel3dPosterStub(asset)) {
         return null
     }
     const u = asset?.preview_3d_poster_url

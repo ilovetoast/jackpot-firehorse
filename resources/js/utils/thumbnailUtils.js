@@ -7,7 +7,7 @@
  */
 
 import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes.js'
-import { isRegistryModel3dAsset } from './resolveAsset3dPreviewImage.js'
+import { isRegistryModel3dAsset, isRegistryModel3dPosterStub } from './resolveAsset3dPreviewImage.js'
 import {
     getThumbnailUrl as getThumbnailUrlFromResolve,
     getThumbnailUrlModeOnly,
@@ -150,10 +150,13 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
 
     const poster3d =
         typeof asset?.preview_3d_poster_url === 'string' ? asset.preview_3d_poster_url.trim() : ''
-    const model3dWithPoster = isRegistryModel3dAsset(asset, damFileTypes) && poster3d.length > 0
+    const model3dWithRealPoster =
+        isRegistryModel3dAsset(asset, damFileTypes) &&
+        poster3d.length > 0 &&
+        !isRegistryModel3dPosterStub(asset)
 
     // Phase 3.1E: State A) NOT_SUPPORTED — unless a registry 3D poster URL exists (Phase 5A).
-    if (!supportsThumbnail(mimeType, fileExtension) && !model3dWithPoster) {
+    if (!supportsThumbnail(mimeType, fileExtension) && !model3dWithRealPoster) {
         return {
             state: 'NOT_SUPPORTED',
             thumbnailUrl: null,
@@ -163,7 +166,7 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
         }
     }
 
-    if (model3dWithPoster) {
+    if (model3dWithRealPoster) {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: poster3d,
@@ -175,7 +178,10 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
 
     // Check thumbnail status from backend
     const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
-    
+
+    const suppressStub3dDerivedRaster =
+        isRegistryModel3dAsset(asset, damFileTypes) && isRegistryModel3dPosterStub(asset)
+
     // ============================================================================
     // ABSOLUTE PRIORITY: REAL THUMBNAILS ALWAYS WIN OVER STATE
     // ============================================================================
@@ -199,7 +205,7 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
     // Priority 1: Final thumbnail (permanent, full-quality, versioned)
     // Backend sends final_thumbnail_url only when thumbnails exist (completed or metadata-resilient)
     // Use it whenever provided - don't require status===completed (resilient to thumbnail status timing; see docs/MEDIA_PIPELINE.md)
-    if (asset?.final_thumbnail_url) {
+    if (!suppressStub3dDerivedRaster && asset?.final_thumbnail_url) {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.final_thumbnail_url,
@@ -212,7 +218,7 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
     // Priority 2: Preview thumbnail (temporary, low-quality / LQIP)
     // Use whenever the API exposes a URL. Even if thumbnail_status is failed, a tiny blur may
     // have been persisted early (partial pipeline); grid should still prefer it over icon for images.
-    if (asset?.preview_thumbnail_url && thumbnailStatus !== 'skipped') {
+    if (!suppressStub3dDerivedRaster && asset?.preview_thumbnail_url && thumbnailStatus !== 'skipped') {
         return {
             state: 'PENDING', // Still processing, but preview available
             thumbnailUrl: asset.preview_thumbnail_url,
@@ -224,7 +230,7 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
     
     // Legacy support: fallback to thumbnail_url if new fields not available
     // CRITICAL: Only use if status is completed (prevents loading stale URLs after file replacement)
-    if (asset?.thumbnail_url && thumbnailStatus === 'completed') {
+    if (!suppressStub3dDerivedRaster && asset?.thumbnail_url && thumbnailStatus === 'completed') {
         return {
             state: 'AVAILABLE',
             thumbnailUrl: asset.thumbnail_url,
