@@ -67,7 +67,7 @@ import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
 import { computeUploadCounts } from '../utils/uploadTrayCounts'
 import { computeOverallBatchUploadPercent } from '../utils/uploadQueueProgress'
-import { uploadModalScrollbarCssVars } from '../utils/colorUtils'
+import { uploadModalScrollbarCssVars, getSolidFillButtonForegroundHex } from '../utils/colorUtils'
 
 /** Tailwind class merge (additive; avoids new dependencies) */
 function cn(...parts) {
@@ -191,6 +191,7 @@ export default function UploadAssetDialog({
     )
     const uploadAcceptAttribute = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
+    const brandPrimaryOnButton = useMemo(() => getSolidFillButtonForegroundHex(brandPrimary), [brandPrimary])
     const uploadScrollbarCssVars = useMemo(() => uploadModalScrollbarCssVars(brandPrimary), [brandPrimary])
 
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
@@ -3278,6 +3279,16 @@ export default function UploadAssetDialog({
         }
     }, [batchStatus, canFinalizeV2, finalizeElapsedSec, selectedCategoryId])
 
+    /** Primary-filled finalize CTA — align with disabled logic so brand primary #fff never gets white label text */
+    const uploadFinalizePrimaryActive = useMemo(
+        () =>
+            canFinalizeV2 &&
+            batchStatus !== 'finalizing' &&
+            batchStatus !== 'processing_followup' &&
+            !isFinalizeSuccess,
+        [canFinalizeV2, batchStatus, isFinalizeSuccess],
+    )
+
     /**
      * ═══════════════════════════════════════════════════════════════
      * CLEAN UPLOADER V2 — Finalize execution (manifest-driven)
@@ -5281,8 +5292,8 @@ export default function UploadAssetDialog({
                                 <button
                                     type="button"
                                     onClick={handleSuccessViewAssets}
-                                    className="rounded-md px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                                    style={{ backgroundColor: brandPrimary }}
+                                    className="rounded-md px-4 py-2 text-sm font-medium hover:opacity-90"
+                                    style={{ backgroundColor: brandPrimary, color: brandPrimaryOnButton }}
                                 >
                                     {defaultAssetType === 'asset'
                                         ? 'View assets'
@@ -6156,11 +6167,15 @@ export default function UploadAssetDialog({
                                         batchStatus === 'processing_followup' ||
                                         isFinalizeSuccess}
                                         className={`inline-flex min-w-[17.5rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium tabular-nums ${
-                                            canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess
-                                                ? 'text-white hover:opacity-90'
+                                            uploadFinalizePrimaryActive
+                                                ? 'hover:opacity-90'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
-                                        style={canFinalizeV2 && batchStatus !== 'finalizing' && !isFinalizeSuccess ? { backgroundColor: brandPrimary } : undefined}
+                                        style={
+                                            uploadFinalizePrimaryActive
+                                                ? { backgroundColor: brandPrimary, color: brandPrimaryOnButton }
+                                                : undefined
+                                        }
                                         title={!selectedCategoryId ? 'Choose a folder to finalize uploads' : undefined}
                                         aria-describedby={showCategoryRequiredHint ? 'jp-upload-category-required-hint' : undefined}
                                     >

@@ -4,6 +4,9 @@
  * Expanded: optional file list (failed first, muted completed); capped with "Show all".
  */
 
+import { useMemo } from 'react'
+import { getSolidFillButtonForegroundHex } from '../utils/colorUtils'
+
 const LIST_CAP_DEFAULT = 10
 
 function cn(...parts) {
@@ -58,6 +61,7 @@ export function FloatingUploadProgressTray({
     onRetryFile,
 }) {
     const totalFiles = fileRows.length
+    const finalizeBtnFg = useMemo(() => getSolidFillButtonForegroundHex(brandPrimary), [brandPrimary])
     const visibleCap = listShowAll ? fileRows.length : Math.min(listCap, fileRows.length)
     const visibleRows = listExpanded ? fileRows.slice(0, visibleCap) : []
     const hasMoreRows = listExpanded && totalFiles > listCap && !listShowAll
@@ -229,8 +233,8 @@ export function FloatingUploadProgressTray({
                         <button
                             type="button"
                             onClick={onFinalize}
-                            className="rounded-md px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm"
-                            style={{ backgroundColor: brandPrimary }}
+                            className="rounded-md px-2.5 py-1 text-[11px] font-semibold shadow-sm"
+                            style={{ backgroundColor: brandPrimary, color: finalizeBtnFg }}
                         >
                             Finalize
                         </button>
