@@ -48,7 +48,6 @@
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
-import { originalImageGridFallbackUrl } from '../utils/originalImageGridFallbackUrl'
 import { getThumbnailState, supportsThumbnail } from '../utils/thumbnailUtils'
 import { trackImageLoad } from '../utils/performanceTracking'
 import { analyzeLogoLightOnWhiteRisk } from '../utils/imageUtils'
@@ -62,10 +61,9 @@ import AssetPlaceholder from './AssetPlaceholder'
 import { getAssetPlaceholderTheme } from '../utils/getAssetPlaceholderTheme.js'
 import { useAnimatedGifPlayback } from '../hooks/useAnimatedGifPlayback'
 import GifPlaybackOverlay from './GifPlaybackOverlay'
-
-// Cache of thumbnail URLs that have failed (404, etc.) - prevents retrying across instances
-// Enables graceful fallback when thumbnails are processing or missing from S3
-const failedThumbnailUrls = new Set()
+import { resolveRasterPrimaryThumbnailUrl } from '../utils/thumbnailRasterPrimaryUrl'
+import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
+import { isRegistryModel3dAsset } from '../utils/resolveAsset3dPreviewImage'
 
 /**
  * LQIP URL for image assets only (tiny blurred preview on S3).
@@ -84,30 +82,10 @@ function lqipPreviewUrlForAsset(asset) {
  * `final_thumbnail_url` (optional large SVG variant), else legacy `thumbnail_url` when status is completed.
  * List payloads often omit `final_thumbnail_url` / `preview_thumbnail_url` while still sending legacy `thumbnail_url`;
  * without this, the grid shows a placeholder while the drawer (batch poll) shows the image.
+ *
+ * Registry `model_*` assets: primary raster comes from `preview_3d_poster_url` when present
+ * (see {@link ../utils/thumbnailRasterPrimaryUrl.js}).
  */
-function resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector) {
-    if (!asset) {
-        return null
-    }
-    const isSvg =
-        asset.mime_type === 'image/svg+xml' ||
-        String(asset.original_filename || '')
-            .toLowerCase()
-            .endsWith('.svg') ||
-        asset.file_extension === 'svg'
-    const useLarge = Boolean(preferLargeForVector && isSvg && asset.id)
-    if (asset.final_thumbnail_url && useLarge) {
-        return asset.thumbnail_url_large ?? asset.final_thumbnail_url
-    }
-    if (asset.final_thumbnail_url) {
-        return asset.final_thumbnail_url
-    }
-    const ts = String(asset.thumbnail_status?.value || asset.thumbnail_status || '').toLowerCase()
-    if (asset.thumbnail_url && ts === 'completed') {
-        return asset.thumbnail_url
-    }
-    return originalImageGridFallbackUrl(asset)
-}
 
 export default function ThumbnailPreview({
     asset,
@@ -132,7 +110,7 @@ export default function ThumbnailPreview({
     /** Drawer/lightbox: animated GIF poster + play to swap in original file (grid must stay false). */
     gifPlaybackControl = false,
 }) {
-    const { auth } = usePage().props
+    const { auth, dam_file_types: damFileTypes } = usePage().props
     /**
      * Grid chrome passes `primaryColor` from getWorkspaceButtonColor (can be white/black/context).
      * Placeholder hue + AssetProcessingPlaceholder must anchor to **brand primary** when available
@@ -160,6 +138,8 @@ export default function ThumbnailPreview({
     const [isAnimating, setIsAnimating] = useState(false)
     const animationCompletedRef = useRef(false)
     const imgRef = useRef(null)
+    /** Bumps when a 3D poster URL is marked failed so {@link resolveRasterPrimaryThumbnailUrl} can fall back. */
+    const [rasterResolveTick, setRasterResolveTick] = useState(0)
 
     // HARD STABILIZATION: Lock thumbnail URL on first render for grid context
     // Once a thumbnail is visible, it never reloads or flashes.
@@ -176,8 +156,8 @@ export default function ThumbnailPreview({
         (asset?.original_filename?.toLowerCase().endsWith('.svg') || asset?.file_extension === 'svg')
     const useLargeForVector = preferLargeForVector && isSvg && asset?.id
     const effectiveFinalUrl = useMemo(
-        () => resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector),
-        [asset, preferLargeForVector],
+        () => resolveRasterPrimaryThumbnailUrl(asset, preferLargeForVector, failedRasterThumbnailUrls, damFileTypes),
+        [asset, preferLargeForVector, damFileTypes, rasterResolveTick],
     )
 
     // SVG fallback: when no rasterized WebP thumbnail exists, use the original SVG file
@@ -193,7 +173,7 @@ export default function ThumbnailPreview({
      */
     const serverLqipBlocksEphemeral = Boolean(
         lqipUrl &&
-            !failedThumbnailUrls.has(lqipUrl) &&
+            !failedRasterThumbnailUrls.has(lqipUrl) &&
             !(hasLocalUploadBlob && !effectiveFinalUrl),
     )
 
@@ -204,7 +184,12 @@ export default function ThumbnailPreview({
     // Lock the URL on first render for grid, but allow updates for drawer.
     // Priority for SVG: final > SVG original > LQIP. For everything else: final > LQIP.
     const [lockedUrl, setLockedUrl] = useState(() => {
-        const initialFinal = resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector)
+        const initialFinal = resolveRasterPrimaryThumbnailUrl(
+            asset,
+            preferLargeForVector,
+            failedRasterThumbnailUrls,
+            damFileTypes,
+        )
         const initialPreview = lqipPreviewUrlForAsset(asset)
         if (initialFinal) return initialFinal
         const svgFb =
@@ -216,7 +201,12 @@ export default function ThumbnailPreview({
     })
 
     const [lockedType, setLockedType] = useState(() => {
-        const initialRaster = resolveEffectiveFinalThumbnailUrl(asset, preferLargeForVector)
+        const initialRaster = resolveRasterPrimaryThumbnailUrl(
+            asset,
+            preferLargeForVector,
+            failedRasterThumbnailUrls,
+            damFileTypes,
+        )
         if (initialRaster) return 'final'
         const svgFb = isSvg && !initialRaster ? (asset?.original || null) : null
         if (svgFb) return 'final'
@@ -281,7 +271,7 @@ export default function ThumbnailPreview({
             // Asset became null (drawer closed) - reset tracking
             prevAssetIdRef.current = null
         }
-    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, asset?.mime_type, thumbnailVersion, lockedUrl])
+    }, [isDrawerContext, asset?.id, effectiveFinalUrl, asset?.preview_thumbnail_url, asset?.preview_3d_poster_url, asset?.mime_type, thumbnailVersion, lockedUrl])
     
     // Handle case where preview was removed - if locked URL exists but asset data shows no preview, clear it
     useEffect(() => {
@@ -304,7 +294,7 @@ export default function ThumbnailPreview({
     // Final thumbnails only win AFTER they successfully load
     // If final exists but failed to load (imageError), fall back to preview
     // Skip URLs we've already seen fail (404, etc.) - prevents retries and console noise
-    const urlKnownFailed = lockedUrl ? failedThumbnailUrls.has(lockedUrl) : false
+    const urlKnownFailed = lockedUrl ? failedRasterThumbnailUrls.has(lockedUrl) : false
     const canUseFinal = lockedIsFinal && !imageError && !urlKnownFailed
     const activeThumbnailUrl = lockedUrl
     const isPreview = lockedIsPreview
@@ -343,11 +333,16 @@ export default function ThumbnailPreview({
         }
         const hasLegacyCompletedThumb =
             !!asset?.thumbnail_url && (ts === 'completed' || asset?.thumbnail_status?.value === 'completed')
+        const hasModel3dPoster =
+            isRegistryModel3dAsset(asset, damFileTypes) &&
+            typeof asset?.preview_3d_poster_url === 'string' &&
+            asset.preview_3d_poster_url.trim().length > 0
         const awaitingServerRaster =
             state === 'PENDING' &&
             !asset?.final_thumbnail_url &&
             !asset?.preview_thumbnail_url &&
-            !hasLegacyCompletedThumb
+            !hasLegacyCompletedThumb &&
+            !hasModel3dPoster
         return Boolean(awaitingServerRaster && ts !== 'failed' && ts !== 'skipped')
     }, [
         asset?.id,
@@ -358,8 +353,10 @@ export default function ThumbnailPreview({
         asset?.final_thumbnail_url,
         asset?.preview_thumbnail_url,
         asset?.thumbnail_url,
+        asset?.preview_3d_poster_url,
         state,
         fileExtForThumb,
+        damFileTypes,
     ])
 
     /** Rich grid tile copy — {@link AssetPlaceholder} */
@@ -559,7 +556,20 @@ export default function ThumbnailPreview({
 
     const handleImageError = () => {
         if (activeThumbnailUrl) {
-            failedThumbnailUrls.add(activeThumbnailUrl)
+            if (
+                isRegistryModel3dAsset(asset, damFileTypes) &&
+                asset?.preview_3d_poster_url &&
+                activeThumbnailUrl === String(asset.preview_3d_poster_url).trim()
+            ) {
+                failedRasterThumbnailUrls.add(activeThumbnailUrl)
+                setLockedUrl(null)
+                setLockedType(null)
+                setImageLoaded(false)
+                setImageError(false)
+                setRasterResolveTick((t) => t + 1)
+                return
+            }
+            failedRasterThumbnailUrls.add(activeThumbnailUrl)
         }
         // Recovery path: an SVG whose rasterized thumbnail 404s should fall back to the original
         // SVG bytes. Without this, the tile goes to the "unavailable" state even though the vector
@@ -688,7 +698,7 @@ export default function ThumbnailPreview({
             if (!forcedPendingUrl) {
                 return
             }
-            failedThumbnailUrls.add(forcedPendingUrl)
+            failedRasterThumbnailUrls.add(forcedPendingUrl)
             forcedFailedOnceRef.current.add(forcedPendingUrl)
             setForcedPendingUrl(null)
         }
@@ -699,7 +709,7 @@ export default function ThumbnailPreview({
 
         const handleForcedStableError = () => {
             if (forcedStableUrl) {
-                failedThumbnailUrls.add(forcedStableUrl)
+                failedRasterThumbnailUrls.add(forcedStableUrl)
             }
         }
 

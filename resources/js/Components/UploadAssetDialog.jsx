@@ -2910,13 +2910,16 @@ export default function UploadAssetDialog({
         
         const totalCount = activeV2Files.length
 
-        // Check if all files are finalized/completed
+        // "Transfer complete" (all bytes on S3 / direct uploaded) — but finalize or upload can still have failures.
         const totalCompleted = finalizedCount + completedMultipartCount + uploadedDirectCount
         if (totalCompleted === totalCount && totalCount > 0) {
+            if (failedCount > 0) {
+                return 'partial_success'
+            }
             return 'complete'
         }
 
-        // Check if some completed and some failed
+        // Some transfers finished and some rows failed (mixed upload / finalize outcomes)
         if (totalCompleted > 0 && failedCount > 0) {
             return 'partial_success'
         }
@@ -3831,6 +3834,28 @@ export default function UploadAssetDialog({
             })
 
             // batchStatus is now computed from v2Files, no manual update needed
+
+            const failedFinalizeResults = results.filter((r) => r.status === 'failed')
+            if (failedFinalizeResults.length > 0) {
+                const msgs = failedFinalizeResults
+                    .map((r) => (typeof r.error?.message === 'string' ? r.error.message.trim() : ''))
+                    .filter(Boolean)
+                const summary =
+                    msgs.length === 1
+                        ? msgs[0]
+                        : `${failedFinalizeResults.length} file(s) could not be finalized. ${msgs[0] || 'See the list below for each file.'}`
+                setFinalizeError(summary)
+                handleExpandFromTray()
+                try {
+                    if (typeof window !== 'undefined' && typeof window.toast === 'function') {
+                        window.toast(summary, 'error')
+                    }
+                } catch (_) {
+                    /* ignore */
+                }
+            }
+
+            setFinalizeUiBackground(false)
             
             // TASK 1: Set approval info once after processing all results
             if (totalApprovalRequired || totalPendingMetadataCount > 0) {
@@ -3840,11 +3865,15 @@ export default function UploadAssetDialog({
                 })
             }
 
-            queueMicrotask(() => {
-                if (typeof onFinalizeAccepted === 'function') {
-                    onFinalizeAccepted()
-                }
-            })
+            // Do not soft-reload the grid when any row failed finalize — parent `router.reload` remounts
+            // the page tree and makes the error surface flash away before the user can read it.
+            if (failedFinalizeResults.length === 0) {
+                queueMicrotask(() => {
+                    if (typeof onFinalizeAccepted === 'function') {
+                        onFinalizeAccepted()
+                    }
+                })
+            }
             
         } catch (error) {
             console.error('[FINALIZE_V2] Error during finalize', error)
@@ -4170,88 +4199,6 @@ export default function UploadAssetDialog({
     
     // Check if waiting for backend stability (all complete but not yet stable)
     const isWaitingForStability = allUploadsComplete && !allUploadsBackendStable
-
-    // Collect blocking validation errors for form-level alert
-    // These explain why the Finalize button is disabled
-    const blockingErrors = useMemo(() => {
-        const errors = []
-        
-        // Category not selected
-        if (!phase3Manager.context.categoryId) {
-            errors.push('A folder is required before finalizing assets.')
-        }
-        
-        // Required metadata fields missing
-        const missingRequiredWarnings = phase3Manager.warnings.filter(
-            w => w.type === 'missing_required_field' && w.severity === 'error'
-        )
-        if (missingRequiredWarnings.length > 0) {
-            // Aggregate missing fields from all warnings
-            const missingFields = new Set()
-            missingRequiredWarnings.forEach(warning => {
-                if (warning.affectedFields) {
-                    warning.affectedFields.forEach(fieldKey => {
-                        const field = phase3Manager.availableMetadataFields.find(f => f.key === fieldKey)
-                        if (field) {
-                            missingFields.add(field.label || fieldKey)
-                        }
-                    })
-                }
-            })
-            if (missingFields.size > 0) {
-                errors.push(`One or more required metadata fields are missing: ${Array.from(missingFields).join(', ')}.`)
-            } else {
-                errors.push('One or more required metadata fields are missing.')
-            }
-        }
-        
-        // Uploads still in progress or not backend-stable
-        // Check that ALL uploads are backend-stable (backend session status must be 'completed')
-        if (!allUploadsBackendStable && phase3Manager.items.length > 0) {
-            const hasNonTerminalUploads = phase3Manager.items.some(item => 
-                item.uploadStatus !== 'complete' && item.uploadStatus !== 'failed'
-            )
-            
-            if (hasNonTerminalUploads) {
-                errors.push('Waiting for all uploads to finish...')
-            } else {
-                // All uploads are complete but backend sessions may still be processing
-                errors.push('Finalizing will unlock once uploads finish processing')
-            }
-        }
-        
-        // No completed uploads (only show if all uploads failed)
-        if (phase3Manager.completedItems.length === 0 && phase3Manager.items.length > 0) {
-            const allFailed = phase3Manager.items.every(item => item.uploadStatus === 'failed')
-            if (allFailed) {
-                errors.push('At least one upload must complete before finalizing.')
-            }
-        }
-        
-        // Finalize error (from previous finalize attempt)
-        if (finalizeError) {
-            // Only show user-friendly message, not technical errors
-            const userFriendlyError = finalizeError.includes('Upload session ID missing') 
-                ? 'One or more uploads are missing required information.'
-                : finalizeError.includes('category')
-                ? 'Please choose a folder before finalizing.'
-                : finalizeError.includes('No completed uploads')
-                ? 'At least one upload must complete before finalizing.'
-                : finalizeError
-            errors.push(userFriendlyError)
-        }
-        
-        // Remove duplicates
-        return Array.from(new Set(errors))
-    }, [
-        phase3Manager.context.categoryId,
-        phase3Manager.warnings,
-        phase3Manager.availableMetadataFields,
-        phase3Manager.items,
-        phase3Manager.completedItems.length,
-        allUploadsBackendStable,
-        finalizeError
-    ])
 
     /**
      * CLEAN UPLOADER V2 — Handle category change callback
@@ -4700,12 +4647,15 @@ export default function UploadAssetDialog({
                 const defaultResolvedFilename = extension ? `${slugified}.${extension}` : slugified
                 
                 const rawErr = uploadManagerUpload.error || uploadManagerUpload.errorInfo?.message || null
-                const normalizedError =
+                const uploadStageError =
                     typeof rawErr === 'string'
                         ? { message: rawErr, stage: 'upload' }
                         : rawErr && typeof rawErr === 'object'
                           ? rawErr
                           : null
+                // Finalize (and other post-upload) errors live on v2File; UploadManager only reflects S3 transfer.
+                const mergedError =
+                    v2File.error && typeof v2File.error === 'object' ? v2File.error : uploadStageError
 
                 return {
                     clientId: v2File.clientId,
@@ -4717,7 +4667,7 @@ export default function UploadAssetDialog({
                     title: v2File.title || null,
                     resolvedFilename: v2File.resolvedFilename || defaultResolvedFilename,
                     metadataDraft: v2File.metadataDraft || {},
-                    error: normalizedError,
+                    error: mergedError,
                     assetId: v2File.assetId ?? null,
                     pipelineThumbStatus: v2File.pipelineThumbStatus ?? null,
                     pipelineThumbError: v2File.pipelineThumbError ?? null,
@@ -5413,6 +5363,16 @@ export default function UploadAssetDialog({
                                 uploadModalLayoutLock && '[scrollbar-gutter:stable]',
                             )}
                         >
+                            {finalizeError && !isFinalizeSuccess ? (
+                                <div
+                                    className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 shadow-sm"
+                                    role="alert"
+                                    aria-live="assertive"
+                                >
+                                    <p className="text-sm font-semibold text-red-900">Finalize did not complete</p>
+                                    <p className="mt-1 text-sm leading-snug text-red-800">{finalizeError}</p>
+                                </div>
+                            ) : null}
                             {isContributor && (assetApprovalRequired || approvalInfo.approvalRequired) && (
                                 <div className="mb-4">
                                     <ApprovalNotice
@@ -6213,12 +6173,11 @@ export default function UploadAssetDialog({
                                 </div>
                             </div>
                             
-                            {/* Error message (only show if not already in blockingErrors) */}
-                            {finalizeError && !blockingErrors.some(e => finalizeError.includes(e) || e.includes(finalizeError)) && (
-                                <div className="mt-2 text-right text-sm text-red-600">
+                            {finalizeError ? (
+                                <div className="mt-2 text-right text-sm text-red-600" role="status">
                                     {finalizeError}
                                 </div>
-                            )}
+                            ) : null}
                         </div>
                     </div>
                 </div>

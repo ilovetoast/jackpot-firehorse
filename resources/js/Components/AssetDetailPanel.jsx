@@ -29,6 +29,7 @@ import {
     RectangleStackIcon,
 } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
+import Model3dViewer from './Model3dViewer'
 import FileTypeIcon from './FileTypeIcon'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -46,6 +47,9 @@ import { router, usePage } from '@inertiajs/react'
 import { resolveTrackedSingleAssetFileUrl, saveUrlAsDownload } from '../utils/singleAssetDownload'
 import { resolve, isExcludedFromGenericLoop, hasCollectionField, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { hexToRgba } from '../utils/colorUtils'
+import { resolveRasterPrimaryThumbnailUrl } from '../utils/thumbnailRasterPrimaryUrl'
+import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
+import { shouldShowRealtimeGlbModelViewer } from '../utils/resolveAsset3dPreviewImage'
 
 const GROUP_LABELS = {
     classification: 'Classification',
@@ -113,7 +117,8 @@ export default function AssetDetailPanel({
     /** Lightbox CTA: return user to drawer (parent closes lightbox and focuses drawer) */
     onManageInDrawer = null,
 }) {
-    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false } = usePage().props
+    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false, dam_file_types: damFileTypes, dam_3d_enabled: dam3dEnabled } =
+        usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const readonlyMode = mode === 'readonly'
     const selection = useSelectionOptional()
@@ -186,6 +191,15 @@ export default function AssetDetailPanel({
         const m = asset?.mime_type || ''
         return !isVideo && m.startsWith('image/') && !m.includes('svg')
     }, [asset?.mime_type, isVideo])
+
+    const showRealtimeGlbInPanel = useMemo(
+        () =>
+            Boolean(
+                asset?.id &&
+                    shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true),
+            ),
+        [asset, damFileTypes, dam3dEnabled],
+    )
 
     const aiEnabled = auth?.permissions?.ai_enabled !== false
 
@@ -529,7 +543,11 @@ export default function AssetDetailPanel({
                     type: 'asset',
                     name: asset.title ?? asset.original_filename ?? '',
                     thumbnail_url:
-                        asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? null,
+                        resolveRasterPrimaryThumbnailUrl(asset, false, null, damFileTypes) ??
+                        asset.final_thumbnail_url ??
+                        asset.thumbnail_url ??
+                        asset.preview_thumbnail_url ??
+                        null,
                     category_id: asset.metadata?.category_id ?? asset.category_id ?? null,
                 })
             } else if (bucket) {
@@ -551,6 +569,8 @@ export default function AssetDetailPanel({
         asset?.final_thumbnail_url,
         asset?.thumbnail_url,
         asset?.preview_thumbnail_url,
+        asset?.preview_3d_poster_url,
+        damFileTypes,
         asset?.metadata?.category_id,
         asset?.category_id,
         bucket,
@@ -817,13 +837,17 @@ export default function AssetDetailPanel({
                             {/* Preview: hidden in lightbox embed — main stage already shows the asset */}
                             <div className="relative rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center" style={{ maxHeight: previewExpanded ? '70vh' : '360px', minHeight: '200px' }}>
                             {asset?.id && (
-                                <ThumbnailPreview
-                                    asset={asset}
-                                    alt={asset?.title || asset?.original_filename || 'Preview'}
-                                    className="w-full h-full object-contain"
-                                    size="lg"
-                                    preferLargeForVector
-                                />
+                                showRealtimeGlbInPanel ? (
+                                    <Model3dViewer asset={asset} className="h-full w-full min-h-[280px] !border-0 rounded-none bg-transparent" />
+                                ) : (
+                                    <ThumbnailPreview
+                                        asset={asset}
+                                        alt={asset?.title || asset?.original_filename || 'Preview'}
+                                        className="w-full h-full object-contain"
+                                        size="lg"
+                                        preferLargeForVector
+                                    />
+                                )
                             )}
                             <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm border border-gray-200">
                                 <FileTypeIcon
@@ -2108,10 +2132,12 @@ export default function AssetDetailPanel({
                         open={focalModalOpen}
                         onClose={() => setFocalModalOpen(false)}
                         imageUrl={
-                            asset?.final_thumbnail_url ||
-                            asset?.thumbnail_url ||
-                            asset?.preview_thumbnail_url ||
-                            null
+                            resolveRasterPrimaryThumbnailUrl(
+                                asset,
+                                false,
+                                failedRasterThumbnailUrls,
+                                damFileTypes,
+                            ) ?? null
                         }
                         initialFocal={metadata?.focal_point ?? asset?.metadata?.focal_point}
                         assetId={asset?.id}

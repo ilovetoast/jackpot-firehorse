@@ -132,6 +132,49 @@ class MagicByteVerifier
         if (str_starts_with($h, "fLaC")) {
             return 'flac';
         }
+
+        // ── 3D registry formats (Phase 5D / upload finalize): libmagic often reports
+        // `text/plain` or `application/octet-stream` for OBJ/STL; GLB is binary but
+        // not in finfo's small built-in DB. Without these labels, verify() treats the
+        // head as "no_signature" and rejects any non-text/* canonical MIME — blocking
+        // legitimate mesh uploads at {@see UploadCompletionService::enforceMagicByteVerification}.
+        if (strlen($h) >= 12 && str_starts_with($h, 'glTF')) {
+            return 'glb';
+        }
+        if (str_starts_with($h, 'BLENDER')) {
+            return 'blend';
+        }
+        $hScan = substr($head, 0, 24);
+        if (stripos($hScan, 'Kaydara FBX Binary') !== false) {
+            return 'fbx_binary';
+        }
+        $fbxTrim = ltrim($head);
+        if (str_starts_with($fbxTrim, ';') && stripos(substr($head, 0, 256), 'FBX') !== false) {
+            return 'fbx_ascii';
+        }
+        $stlTrim = ltrim($head);
+        if ($stlTrim !== '' && stripos($stlTrim, 'solid') === 0) {
+            return 'stl_ascii';
+        }
+        if (strlen($head) >= 84) {
+            $triCount = unpack('V', substr($head, 80, 4))[1] ?? 0;
+            if ($triCount > 0 && $triCount < 500_000_000) {
+                return 'stl_binary';
+            }
+        }
+        $firstLine = strtok(ltrim($head), "\r\n");
+        if (is_string($firstLine) && preg_match(
+            '/^\s*(#|v\s|vn\s|vt\s|vp\s|f\s|l\s|s\s|o\s|g\s|mtllib\s|usemtl\s)/',
+            $firstLine
+        ) === 1) {
+            return 'obj_wavefront';
+        }
+        $jsonHead = ltrim($head);
+        if (str_starts_with($jsonHead, '{')
+            && str_contains(substr($head, 0, min(2048, strlen($head))), '"asset"')) {
+            return 'gltf_json';
+        }
+
         // SVG / HTML / generic XML — sniff up to first '<' run.
         $stripped = ltrim($h);
         if (str_starts_with($stripped, '<svg') || (str_starts_with($stripped, '<?xml') && stripos($head, '<svg') !== false)) {
@@ -195,6 +238,12 @@ class MagicByteVerifier
             'audio/ogg' => ['ogg'],
             'audio/flac' => ['flac'],
             'video/mp4', 'video/quicktime', 'video/x-m4v' => ['mp4_video'],
+            'model/gltf-binary' => ['glb'],
+            'model/gltf+json' => ['gltf_json'],
+            'model/stl', 'application/vnd.ms-pki.stl' => ['stl_ascii', 'stl_binary'],
+            'model/obj' => ['obj_wavefront'],
+            'application/vnd.autodesk.fbx' => ['fbx_binary', 'fbx_ascii'],
+            'application/x-blender' => ['blend'],
             default => null,
         };
     }

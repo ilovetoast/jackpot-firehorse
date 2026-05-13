@@ -739,6 +739,9 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
             Route::post('/assets/{asset}/ocr/rerun', [\App\Http\Controllers\AssetImageOcrController::class, 'rerun'])
                 ->name('assets.ocr.rerun');
             Route::get('/assets/{asset}/view', [\App\Http\Controllers\AssetController::class, 'view'])->name('assets.view');
+            Route::post('/assets/{asset}/preview-3d/telemetry', [\App\Http\Controllers\AssetController::class, 'preview3dTelemetry'])
+                ->middleware('throttle:300,1')
+                ->name('assets.preview-3d.telemetry');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingGuardStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/activity', [\App\Http\Controllers\AssetController::class, 'activity'])->name('assets.activity');
             Route::get('/assets/{asset}/versions', [\App\Http\Controllers\AssetVersionController::class, 'index'])->name('assets.versions.index');

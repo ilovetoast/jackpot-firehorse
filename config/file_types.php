@@ -715,6 +715,287 @@ return [
                 'disable_upload_reason' => null,
             ],
         ],
+
+        /*
+        | 3D models — one registry key per extension (capabilities differ by format).
+        | Upload is always controlled here; DAM_3D env only gates preview/thumbnail/conversion (see config/dam_3d.php).
+        */
+        'model_glb' => [
+            'name' => '3D model (GLB)',
+            'description' => 'Binary glTF 2.0 — preferred single-file format for previews and realtime spin when enabled.',
+
+            'mime_types' => [
+                'model/gltf-binary',
+            ],
+            'extensions' => ['glb'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => true,
+                'requires_sidecars' => false,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateModel3dRasterThumbnail',
+            ],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this GLB file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'model_gltf' => [
+            'name' => '3D model (glTF)',
+            'description' => 'glTF JSON; previews require resolvable .bin and texture sidecars or packaging.',
+
+            'mime_types' => [
+                'model/gltf+json',
+                'application/json',
+            ],
+            'extensions' => ['gltf'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => true,
+                'requires_sidecars' => true,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => false,
+            ],
+
+            'handlers' => [],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this glTF file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'model_obj' => [
+            'name' => '3D model (OBJ)',
+            'description' => 'Wavefront OBJ; basic/conditional previews depend on companion MTL/textures.',
+
+            'mime_types' => [
+                'model/obj',
+            ],
+            'extensions' => ['obj'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => true,
+                'requires_sidecars' => false,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => false,
+            ],
+
+            'handlers' => [],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this OBJ file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'model_stl' => [
+            'name' => '3D model (STL)',
+            'description' => 'Stereolithography mesh; basic shaded preview when pipeline is enabled.',
+
+            'mime_types' => [
+                'model/stl',
+                'application/sla',
+                'application/vnd.ms-pki.stl',
+            ],
+            'extensions' => ['stl'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => true,
+                'requires_sidecars' => false,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateModel3dRasterThumbnail',
+            ],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this STL file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'model_fbx' => [
+            'name' => '3D model (FBX)',
+            'description' => 'Autodesk FBX — archive/exchange; raster previews require conversion to GLB when enabled.',
+
+            'mime_types' => [
+                'application/vnd.autodesk.fbx',
+            ],
+            'extensions' => ['fbx'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => false,
+                'metadata' => true,
+                'preview' => false,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => false,
+                'requires_sidecars' => false,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => true,
+            ],
+
+            'handlers' => [],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this FBX file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        'model_blend' => [
+            'name' => '3D model (Blender)',
+            'description' => 'Blender native — source/archive; previews require conversion to GLB when enabled.',
+
+            'mime_types' => [
+                'application/x-blender',
+            ],
+            'extensions' => ['blend'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => false,
+                'metadata' => true,
+                'preview' => false,
+                'ai_analysis' => false,
+                'download_only' => false,
+                'realtime_3d_preview' => false,
+                'requires_sidecars' => false,
+                'preferred_normalized_format' => 'glb',
+                'conversion_required' => true,
+            ],
+
+            'handlers' => [],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to process this Blender file.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => false,
+                'preview_component' => 'model_3d',
+                'show_placeholder' => true,
+                'disable_upload_reason' => null,
+            ],
+        ],
     ],
 
     /*
@@ -734,6 +1015,7 @@ return [
             ['key' => 'documents', 'label' => 'Documents', 'order' => 20],
             ['key' => 'design', 'label' => 'Design', 'order' => 30],
             ['key' => 'video_audio', 'label' => 'Video & audio', 'order' => 40],
+            ['key' => '3d', 'label' => '3D models', 'order' => 45],
             ['key' => 'other', 'label' => 'Other', 'order' => 999],
         ],
         'type_group' => [
@@ -749,6 +1031,12 @@ return [
             'ai' => 'design',
             'video' => 'video_audio',
             'audio' => 'video_audio',
+            'model_glb' => '3d',
+            'model_gltf' => '3d',
+            'model_obj' => '3d',
+            'model_stl' => '3d',
+            'model_fbx' => '3d',
+            'model_blend' => '3d',
         ],
         'type_order' => [
             'image' => 10,
@@ -763,6 +1051,12 @@ return [
             'ai' => 20,
             'video' => 10,
             'audio' => 20,
+            'model_glb' => 10,
+            'model_gltf' => 20,
+            'model_obj' => 30,
+            'model_stl' => 40,
+            'model_fbx' => 50,
+            'model_blend' => 60,
         ],
     ],
 

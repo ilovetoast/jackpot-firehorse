@@ -6,6 +6,7 @@ use App\Enums\AssetStatus;
 use App\Enums\EventType;
 use App\Models\Asset;
 use App\Models\User;
+use App\Support\Preview3dMetadata;
 use App\Support\ThumbnailMetadata;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\DB;
@@ -296,8 +297,11 @@ class AssetArchiveService
         foreach (ThumbnailMetadata::allThumbnailObjectPaths($metadata) as $thumbPath) {
             $paths[] = $thumbPath;
         }
+        foreach (Preview3dMetadata::derivativeStorageKeysForCleanup($metadata, $asset->storage_root_path) as $p3Path) {
+            $paths[] = $p3Path;
+        }
 
-        return array_filter($paths); // Remove any null/empty paths
+        return array_values(array_unique(array_filter($paths)));
     }
 
     /**

@@ -24,6 +24,7 @@ use App\Services\MetadataFilterService;
 use App\Services\MetadataVisibilityResolver;
 use App\Support\Roles\RoleRegistry;
 use App\Support\DerivativeFailureUserMessaging;
+use App\Support\Preview3dDeliveryUrls;
 use App\Support\Typography\CampaignBannerFontEnricher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1668,7 +1669,7 @@ class CollectionController extends Controller
             'url' => null,
             'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
             'type' => $asset->type instanceof AssetType ? $asset->type->value : (string) $asset->type,
-        ];
+        ] + Preview3dDeliveryUrls::forAuthenticatedAsset($asset);
     }
 
     /**

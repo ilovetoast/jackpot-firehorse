@@ -28,9 +28,20 @@ class FileTypeService
     {
         $types = config('file_types.types', []);
         $mimeType = $mimeType ? strtolower($mimeType) : null;
-        $extension = $extension ? strtolower($extension) : null;
+        $extension = $extension ? strtolower(ltrim(trim((string) $extension), '.')) : null;
 
-        // MIME and extension from FileInspectionService / version; no extension-based MIME inference
+        // DAM 3D: browsers often send empty, generic, or flat-out wrong MIME (e.g. image/svg+xml) for
+        // .stl / .obj / .glb. Prefer the registry entry implied by the extension (same idea as office docs).
+        if ($extension !== null && $extension !== '') {
+            foreach ($this->model3dRegistryTypeKeys() as $typeKey) {
+                $typeExts = array_map('strtolower', $types[$typeKey]['extensions'] ?? []);
+                if (in_array($extension, $typeExts, true)) {
+                    return $typeKey;
+                }
+            }
+        }
+
+        // MIME and extension from FileInspectionService / version; 3D extensions handled above.
         foreach ($types as $typeKey => $typeConfig) {
             if ($mimeType && in_array($mimeType, $typeConfig['mime_types'] ?? [])) {
                 return $typeKey;
@@ -52,6 +63,32 @@ class FileTypeService
         $extension = pathinfo($asset->original_filename ?? '', PATHINFO_EXTENSION);
 
         return $this->detectFileType($mimeType, $extension);
+    }
+
+    /**
+     * Registry keys for 3D model uploads (DAM 3D).
+     *
+     * @return list<string>
+     */
+    public function model3dRegistryTypeKeys(): array
+    {
+        return [
+            'model_glb',
+            'model_gltf',
+            'model_obj',
+            'model_stl',
+            'model_fbx',
+            'model_blend',
+        ];
+    }
+
+    public function isModel3dRegistryType(?string $registryTypeKey): bool
+    {
+        if ($registryTypeKey === null || $registryTypeKey === '') {
+            return false;
+        }
+
+        return in_array($registryTypeKey, $this->model3dRegistryTypeKeys(), true);
     }
 
     /**
@@ -434,6 +471,32 @@ class FileTypeService
         $typeConfig = config("file_types.types.{$fileType}", []);
 
         return $typeConfig['capabilities'] ?? [];
+    }
+
+    /**
+     * Help-panel capabilities: fixed booleans plus any extra registry keys (e.g. 3D flags).
+     *
+     * @param  array<string, mixed>  $fromRegistry
+     * @return array<string, mixed>
+     */
+    protected function buildCapabilitiesForHelpPayload(array $fromRegistry): array
+    {
+        $base = [
+            'preview' => (bool) ($fromRegistry['preview'] ?? false),
+            'thumbnail' => (bool) ($fromRegistry['thumbnail'] ?? false),
+            'ai_analysis' => (bool) ($fromRegistry['ai_analysis'] ?? false),
+            'download_only' => (bool) ($fromRegistry['download_only'] ?? false),
+            'web_playback_derivative' => (bool) ($fromRegistry['web_playback_derivative'] ?? false),
+        ];
+
+        foreach ($fromRegistry as $k => $v) {
+            if (array_key_exists($k, $base)) {
+                continue;
+            }
+            $base[(string) $k] = $v;
+        }
+
+        return $base;
     }
 
     /**
@@ -1066,13 +1129,7 @@ class FileTypeService
                 'enabled' => $enabled,
                 'disabled_message' => $upload['disabled_message'] ?? null,
                 'max_size_bytes' => is_numeric($maxBytes) ? (int) $maxBytes : null,
-                'capabilities' => [
-                    'preview' => (bool) ($typeConfig['capabilities']['preview'] ?? false),
-                    'thumbnail' => (bool) ($typeConfig['capabilities']['thumbnail'] ?? false),
-                    'ai_analysis' => (bool) ($typeConfig['capabilities']['ai_analysis'] ?? false),
-                    'download_only' => (bool) ($typeConfig['capabilities']['download_only'] ?? false),
-                    'web_playback_derivative' => (bool) ($typeConfig['capabilities']['web_playback_derivative'] ?? false),
-                ],
+                'capabilities' => $this->buildCapabilitiesForHelpPayload($typeConfig['capabilities'] ?? []),
                 // Optional per-format notes (currently audio-only). When present
                 // the help panel renders one short line per codec so users can
                 // see which formats are converted vs streamed natively.
@@ -1256,6 +1313,29 @@ class FileTypeService
      */
     public function canonicalizeSniffedMime(?string $sniffedMime, ?string $extension = null): ?string
     {
+        $ext = $extension !== null && $extension !== '' ? strtolower(ltrim(trim((string) $extension), '.')) : null;
+
+        // Align declared/sniffed MIME with the 3D registry when bytes/extension are 3D but libmagic or the
+        // client sent something else — otherwise MagicByteVerifier applies image/svg rules to mesh bytes.
+        if ($ext !== null && $ext !== '') {
+            foreach ($this->model3dRegistryTypeKeys() as $typeKey) {
+                $typeExts = array_map('strtolower', config("file_types.types.{$typeKey}.extensions", []));
+                if (! in_array($ext, $typeExts, true)) {
+                    continue;
+                }
+                $allowed = array_map('strtolower', array_map('strval', config("file_types.types.{$typeKey}.mime_types", [])));
+                if ($allowed === []) {
+                    break;
+                }
+                $sn = $sniffedMime !== null && $sniffedMime !== '' ? strtolower(trim($sniffedMime)) : '';
+                if ($sn === '' || ! in_array($sn, $allowed, true)) {
+                    return $allowed[0];
+                }
+
+                break;
+            }
+        }
+
         if ($sniffedMime === null || $sniffedMime === '') {
             return $sniffedMime;
         }

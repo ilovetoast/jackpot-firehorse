@@ -18,6 +18,7 @@ import { useSelectionOptional } from '../contexts/SelectionContext'
 import { TrashIcon } from '@heroicons/react/24/outline'
 import { PauseIcon, PlayIcon, StarIcon } from '@heroicons/react/24/solid'
 import ThumbnailPreview from './ThumbnailPreview'
+import Model3dGridBadge from './Model3dGridBadge'
 import ExecutionPresentationFrame from './execution/ExecutionPresentationFrame'
 import AudioCardVisual from './Audio/AudioCardVisual'
 import { audioMasonryWrapperStyle } from '../utils/audioCardSizing'
@@ -885,6 +886,7 @@ export default function AssetCard({
                                     masonryMinHeight={isMasonry ? masonryThumbnailMinHeightPx : null}
                                     ephemeralLocalPreviewUrl={ephemeralLocalPreviewUrl}
                                 />
+                                <Model3dGridBadge asset={asset} />
                             </>
                         )}
 

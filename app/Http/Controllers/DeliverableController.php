@@ -20,6 +20,7 @@ use App\Services\SystemCategoryService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
 use App\Support\DerivativeFailureUserMessaging;
+use App\Support\Preview3dDeliveryUrls;
 use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -795,6 +796,7 @@ class DeliverableController extends Controller
                     // Phase 3: Audio playback + waveform — keys parallel to video_preview_url for consistency.
                     'audio_playback_url' => $this->audioPlaybackUrl($asset),
                     'audio_waveform_url' => $this->audioWaveformUrl($asset),
+                ] + Preview3dDeliveryUrls::forAuthenticatedAsset($asset) + [
                     'analysis_status' => $asset->analysis_status ?? 'uploading',
                     'health_status' => $asset->computeHealthStatus($incidentSeverityByAsset[$asset->id] ?? null),
                     'brand_intelligence' => $asset->brandIntelligencePayloadForFrontend($brandIntelligenceReferenceAssetsById),

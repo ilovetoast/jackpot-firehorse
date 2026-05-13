@@ -246,6 +246,12 @@ class AssetProcessingBudgetService
         if ($isPsdLike) {
             return $this->mbToBytes($profileRow['max_psd_mb'] ?? null);
         }
+        if ($fileType !== null && app(FileTypeService::class)->isModel3dRegistryType($fileType)) {
+            $cap = (int) config('dam_3d.max_upload_bytes', 0);
+            if ($cap > 0) {
+                return $cap;
+            }
+        }
         if ($fileType === 'video') {
             return $this->mbToBytes($profileRow['max_video_mb'] ?? null);
         }

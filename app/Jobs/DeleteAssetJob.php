@@ -7,6 +7,7 @@ use App\Models\Asset;
 use App\Models\AssetEvent;
 use App\Models\DeletionError;
 use App\Models\StorageBucket;
+use App\Support\Preview3dMetadata;
 use App\Support\ThumbnailMetadata;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
@@ -273,6 +274,13 @@ class DeleteAssetJob implements ShouldQueue
                     if ($thumbnailPath && $s3Client->doesObjectExist($bucket->name, $thumbnailPath)) {
                         $s3Client->deleteObject(['Bucket' => $bucket->name, 'Key' => $thumbnailPath]);
                         $deletedPaths[] = $thumbnailPath;
+                    }
+                }
+
+                foreach (Preview3dMetadata::derivativeStorageKeysForCleanup($metadata, $mainPath) as $p3Path) {
+                    if ($p3Path && $s3Client->doesObjectExist($bucket->name, $p3Path)) {
+                        $s3Client->deleteObject(['Bucket' => $bucket->name, 'Key' => $p3Path]);
+                        $deletedPaths[] = $p3Path;
                     }
                 }
 

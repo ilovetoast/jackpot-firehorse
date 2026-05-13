@@ -1,16 +1,10 @@
 import { supportsThumbnail } from './thumbnailUtils.js'
-import { getAssetCardVisualState } from './assetCardVisualState.js'
+import { getAssetCardVisualState, hasServerRasterThumbnail } from './assetCardVisualState.js'
 
 function extensionForAsset(a) {
     return (a?.file_extension || a?.original_filename?.split?.('.')?.pop() || '')
         .toLowerCase()
         .replace(/^\./, '')
-}
-
-function hasServerRasterThumbnail(a) {
-    if (a?.final_thumbnail_url || a?.preview_thumbnail_url) return true
-    const ts = String(a?.thumbnail_status?.value ?? a.thumbnail_status ?? '').toLowerCase()
-    return !!(a?.thumbnail_url && ts === 'completed')
 }
 
 /** Matches {@link computeThumbnailPipelineGridSummary} “attention” count (current page only). */

@@ -7,6 +7,7 @@
  */
 
 import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes.js'
+import { isRegistryModel3dAsset } from './resolveAsset3dPreviewImage.js'
 import {
     getThumbnailUrl as getThumbnailUrlFromResolve,
     getThumbnailUrlModeOnly,
@@ -72,7 +73,10 @@ export function getThumbnailVersion(asset) {
     const thumbnailUrl = asset.thumbnail_url || ''
     const finalThumbnailUrl = asset.final_thumbnail_url || ''
     const previewThumbnailUrl = asset.preview_thumbnail_url || ''
-    
+    const preview3dPosterUrl = asset.preview_3d_poster_url || ''
+    const preview3dViewerUrl = asset.preview_3d_viewer_url || ''
+    const preview3dRevision = asset.preview_3d_revision || ''
+
     // Secondary: thumbnail_status (changes when processing completes)
     const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || ''
     
@@ -93,7 +97,7 @@ export function getThumbnailVersion(asset) {
     
     // Combine into stable version string
     // This will change when any thumbnail-related field changes
-    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${thumbnailStatus}|${updatedAt}|${modeUrlsKey}|${modesStatusKey}|${modeMetaCacheKey}`
+    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${preview3dPosterUrl}|${preview3dViewerUrl}|${preview3dRevision}|${thumbnailStatus}|${updatedAt}|${modeUrlsKey}|${modesStatusKey}|${modeMetaCacheKey}`
 }
 
 /**
@@ -134,17 +138,21 @@ export function getThumbnailVersion(asset) {
  * 
  * @param {Object} asset - Asset object with thumbnail_url, thumbnail_status, mime_type, file_extension
  * @param {number} retryCount - Number of retry attempts (for UI-only retry logic)
+ * @param {import('./damFileTypes.js').DamFileTypesPayload|null|undefined} [damFileTypes] Inertia `dam_file_types` for `model_*` detection (optional).
  * @returns {Object} { state, thumbnailUrl, canRetry }
  */
-export function getThumbnailState(asset, retryCount = 0) {
+export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
     const mimeType = asset?.mime_type || asset?.file?.type
     const fileExtension = asset?.file_extension || 
                          asset?.original_filename?.split('.').pop()?.toLowerCase() ||
                          asset?.file?.name?.split('.').pop()?.toLowerCase()
-    
-    // Phase 3.1E: State A) NOT_SUPPORTED - determined by extension/mime only
-    // Check if file type supports thumbnails
-    if (!supportsThumbnail(mimeType, fileExtension)) {
+
+    const poster3d =
+        typeof asset?.preview_3d_poster_url === 'string' ? asset.preview_3d_poster_url.trim() : ''
+    const model3dWithPoster = isRegistryModel3dAsset(asset, damFileTypes) && poster3d.length > 0
+
+    // Phase 3.1E: State A) NOT_SUPPORTED — unless a registry 3D poster URL exists (Phase 5A).
+    if (!supportsThumbnail(mimeType, fileExtension) && !model3dWithPoster) {
         return {
             state: 'NOT_SUPPORTED',
             thumbnailUrl: null,
@@ -153,7 +161,17 @@ export function getThumbnailState(asset, retryCount = 0) {
             canRetry: false,
         }
     }
-    
+
+    if (model3dWithPoster) {
+        return {
+            state: 'AVAILABLE',
+            thumbnailUrl: poster3d,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: poster3d,
+            canRetry: false,
+        }
+    }
+
     // Check thumbnail status from backend
     const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
     

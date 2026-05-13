@@ -12,9 +12,9 @@
  * @param {Function} [props.onDetailDataReplace] - After classification save, merge full modal payload without closing
  * @param {boolean} props.showThumbnail - When true, show a compact thumbnail above the tab content
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import JsonView from '@uiw/react-json-view'
-import { Link } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import {
     XMarkIcon,
     ArrowPathIcon,
@@ -29,6 +29,7 @@ import {
     XCircleIcon,
 } from '@heroicons/react/24/outline'
 import { getPipelineStageTooltip } from '../../utils/pipelineStatusUtils'
+import { resolveRasterPrimaryThumbnailUrl } from '../../utils/thumbnailRasterPrimaryUrl'
 
 /** Standard derivative sizes (original thumbnail pipeline). */
 const ADMIN_THUMB_SIZE_LINKS = [
@@ -107,6 +108,21 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
         brand_categories_for_admin = [],
     } = data || {}
 
+    const { dam_file_types: damFileTypes } = usePage().props
+    const thumbnailUrl = useMemo(() => {
+        const admin =
+            typeof asset?.admin_thumbnail_url === 'string' && asset.admin_thumbnail_url.trim()
+                ? asset.admin_thumbnail_url.trim()
+                : null
+        if (admin) return admin
+        return (
+            resolveRasterPrimaryThumbnailUrl(asset, false, null, damFileTypes) ??
+            (typeof asset?.thumbnail_url === 'string' && asset.thumbnail_url.trim()
+                ? asset.thumbnail_url.trim()
+                : null)
+        )
+    }, [asset, damFileTypes])
+
     const [typeDraft, setTypeDraft] = useState(() => asset?.asset_type?.value ?? '')
     const [categoryDraft, setCategoryDraft] = useState(() =>
         asset?.category_id != null && asset?.category_id !== '' ? String(asset.category_id) : ''
@@ -140,7 +156,6 @@ export default function AssetDetailModal({ data, onClose, onAction, onRefresh, o
         { id: 'tickets', label: 'Support Tickets' },
     ]
 
-    const thumbnailUrl = asset?.admin_thumbnail_url ?? asset?.thumbnail_url
     const hasThumbnail = showThumbnail && thumbnailUrl
 
     return (

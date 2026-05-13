@@ -468,6 +468,8 @@ class HandleInertiaRequests extends Middleware
 
                 return $payload;
             })(),
+            /** Phase 5B: GLB realtime viewer (model-viewer) only when DAM_3D is enabled server-side. */
+            'dam_3d_enabled' => (bool) config('dam_3d.enabled', false),
             'video_ai' => [
                 'show_cost_in_drawer' => (bool) config('assets.video_ai.show_cost_in_drawer', false),
                 'auto_run_after_upload' => (bool) config('assets.video_ai.auto_run_after_upload', false),

@@ -15,17 +15,21 @@
  * @param {Object} props.asset - Asset object with id, title, metadata, etc.
  * @param {Function} props.onClose - Callback when drawer should close
  */
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
+import { usePage } from '@inertiajs/react'
 import {
     XMarkIcon,
     ArrowDownTrayIcon,
     PhotoIcon,
     DocumentIcon,
     FilmIcon,
-    ArrowPathIcon,
 } from '@heroicons/react/24/outline'
-import AssetImage from './AssetImage'
+import ThumbnailPreview from './ThumbnailPreview'
+import Model3dViewer from './Model3dViewer'
 import AssetTimeline from './AssetTimeline'
+import { resolveRasterPrimaryThumbnailUrl } from '../utils/thumbnailRasterPrimaryUrl'
+import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
+import { shouldShowRealtimeGlbModelViewer } from '../utils/resolveAsset3dPreviewImage'
 
 export default function AssetDetailDrawer({ asset, onClose }) {
     const drawerRef = useRef(null)
@@ -33,6 +37,32 @@ export default function AssetDetailDrawer({ asset, onClose }) {
     const [isOpen, setIsOpen] = useState(false) // For animation control
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
+    const [zoomRasterTick, setZoomRasterTick] = useState(0)
+    const { dam_file_types: damFileTypes, dam_3d_enabled: dam3dEnabled } = usePage().props
+
+    const showRealtimeGlb = useMemo(
+        () => shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true),
+        [asset, damFileTypes, dam3dEnabled],
+    )
+
+    const thumbnailUrlLarge =
+        typeof asset?.thumbnail_url_large === 'string' && asset.thumbnail_url_large.trim()
+            ? asset.thumbnail_url_large.trim()
+            : null
+    const zoomRasterSrc = useMemo(() => {
+        return (
+            thumbnailUrlLarge ??
+            resolveRasterPrimaryThumbnailUrl(asset, true, failedRasterThumbnailUrls, damFileTypes)
+        )
+    }, [asset, damFileTypes, thumbnailUrlLarge, zoomRasterTick])
+
+    const zoomClickable = !showRealtimeGlb && Boolean(zoomRasterSrc)
+
+    useEffect(() => {
+        if (showZoomModal && !zoomRasterSrc) {
+            setShowZoomModal(false)
+        }
+    }, [showZoomModal, zoomRasterSrc])
 
     // Handle ESC key to close drawer
     useEffect(() => {
@@ -98,7 +128,6 @@ export default function AssetDetailDrawer({ asset, onClose }) {
 
     // Determine file type and if it's an image
     const fileExtension = asset.file_extension || asset.original_filename?.split('.').pop()?.toLowerCase() || 'file'
-    const isImage = asset.mime_type?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tif', 'tiff'].includes(fileExtension.toLowerCase())
     const isVideo = asset.mime_type?.startsWith('video/') || ['mp4', 'mov', 'avi', 'webm', 'mpg', 'mpeg'].includes(fileExtension.toLowerCase())
     const isPDF = fileExtension.toLowerCase() === 'pdf'
     const isDesignFile = ['psd', 'psb', 'ai', 'eps', 'sketch', 'xd'].includes(fileExtension.toLowerCase())
@@ -106,12 +135,6 @@ export default function AssetDetailDrawer({ asset, onClose }) {
     // Check if asset is processing (not completed)
     const isProcessing = asset.status && asset.status !== 'completed'
     const isCompleted = asset.status === 'completed'
-    
-    // Check thumbnail status - hide loading spinner when thumbnails are complete
-    // Handle both string and object (enum) values from backend
-    const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status
-    const thumbnailsComplete = thumbnailStatus === 'completed' || !thumbnailStatus // null means legacy asset (considered complete for display)
-    const thumbnailsProcessing = thumbnailStatus === 'pending' || thumbnailStatus === 'processing'
 
     // Format file size
     const formatFileSize = (bytes) => {
@@ -210,38 +233,46 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                     {/* Preview Section */}
                     <div className="space-y-3">
                         <h3 className="text-sm font-medium text-gray-900">Preview</h3>
-                        
-                        {thumbnailsProcessing ? (
-                            // Thumbnail processing state
-                            <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center border border-gray-200">
-                                <div className="text-center">
-                                    <ArrowPathIcon className="h-12 w-12 text-gray-400 mx-auto animate-spin" />
-                                    <p className="mt-3 text-sm text-gray-500">Processing preview...</p>
-                                    <p className="mt-1 text-xs text-gray-400">This may take a moment</p>
-                                </div>
-                            </div>
-                        ) : isImage && asset.id && thumbnailsComplete ? (
-                            // Image preview using AssetImage component
+
+                        {asset.id ? (
                             <div className="relative">
                                 <div
-                                    className="aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 cursor-pointer group"
-                                    onClick={() => setShowZoomModal(true)}
+                                    className={`aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${
+                                        zoomClickable ? 'cursor-pointer group' : ''
+                                    }`}
+                                    onClick={() => zoomClickable && setShowZoomModal(true)}
+                                    role={zoomClickable ? 'button' : undefined}
+                                    tabIndex={zoomClickable ? 0 : undefined}
+                                    onKeyDown={(e) => {
+                                        if (!zoomClickable) return
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault()
+                                            setShowZoomModal(true)
+                                        }
+                                    }}
                                 >
-                                    <AssetImage
-                                        thumbnailUrl={asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url}
-                                        thumbnailUrlLarge={asset.thumbnail_url_large}
-                                        alt={asset.title || asset.original_filename || 'Asset preview'}
-                                        className="w-full h-full object-contain"
-                                        containerWidth={448}
-                                        lazy={false}
-                                    />
-                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                                        <span className="text-white text-sm font-medium">Click to zoom</span>
-                                    </div>
+                                    {showRealtimeGlb ? (
+                                        <Model3dViewer asset={asset} className="h-full w-full min-h-[280px] border-0 bg-transparent" />
+                                    ) : (
+                                        <ThumbnailPreview
+                                            asset={asset}
+                                            alt={asset.title || asset.original_filename || 'Asset preview'}
+                                            className="w-full h-full object-contain"
+                                            size="lg"
+                                            liveThumbnailUpdates
+                                            preferLargeForVector
+                                        />
+                                    )}
+                                    {zoomClickable && (
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                                            <span className="text-white text-sm font-medium drop-shadow">
+                                                Click to zoom
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ) : (
-                            // Non-image file type
                             <div className="aspect-video bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
                                 {getFileTypeIcon()}
                             </div>
@@ -376,7 +407,7 @@ export default function AssetDetailDrawer({ asset, onClose }) {
             </div>
 
             {/* Zoom Modal for Images (optional enhancement) */}
-            {showZoomModal && isImage && asset.id && (
+            {showZoomModal && asset.id && zoomRasterSrc && (
                 <div
                     className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
                     onClick={() => setShowZoomModal(false)}
@@ -389,14 +420,16 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                         <XMarkIcon className="h-8 w-8" />
                     </button>
                     <img
-                        src={(() => {
-                            const zoomUrl = asset.thumbnail_url_large ?? asset.final_thumbnail_url ?? asset.thumbnail_url ?? asset.preview_thumbnail_url ?? ''
-                            if (zoomUrl) console.log('IMAGE LARGE URL FROM API:', zoomUrl)
-                            return zoomUrl
-                        })()}
+                        src={zoomRasterSrc}
                         alt={asset.title || asset.original_filename || 'Asset preview'}
                         className="max-w-full max-h-full object-contain"
                         onClick={(e) => e.stopPropagation()}
+                        onError={() => {
+                            if (zoomRasterSrc) {
+                                failedRasterThumbnailUrls.add(zoomRasterSrc)
+                            }
+                            setZoomRasterTick((t) => t + 1)
+                        }}
                     />
                 </div>
             )}

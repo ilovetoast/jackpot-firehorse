@@ -52,6 +52,8 @@ class AssetVariantPathResolver
             AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
             AssetVariant::AUDIO_WAVEFORM => $this->resolveAudioWaveformPath($asset, $basePath),
             AssetVariant::AUDIO_WEB => $this->resolveAudioWebPlaybackPath($asset, $basePath),
+            AssetVariant::PREVIEW_3D_POSTER => $this->resolvePreview3dPosterPath($asset),
+            AssetVariant::PREVIEW_3D_GLB => $this->resolvePreview3dGlbPath($asset),
         };
     }
 
@@ -88,6 +90,48 @@ class AssetVariantPathResolver
         }
 
         return '';
+    }
+
+    /**
+     * 3D poster path from `metadata.preview_3d.poster_path` (storage key only).
+     */
+    protected function resolvePreview3dPosterPath(Asset $asset): string
+    {
+        $meta = $asset->metadata['preview_3d'] ?? null;
+        if (! is_array($meta)) {
+            return '';
+        }
+
+        return $this->resolvePreview3dStoredPath($meta['poster_path'] ?? null);
+    }
+
+    /**
+     * GLB path for future viewer from `metadata.preview_3d.viewer_path` (storage key only).
+     */
+    protected function resolvePreview3dGlbPath(Asset $asset): string
+    {
+        $meta = $asset->metadata['preview_3d'] ?? null;
+        if (! is_array($meta)) {
+            return '';
+        }
+
+        return $this->resolvePreview3dStoredPath($meta['viewer_path'] ?? null);
+    }
+
+    /**
+     * @param  mixed  $path
+     */
+    protected function resolvePreview3dStoredPath(mixed $path): string
+    {
+        if (! is_string($path)) {
+            return '';
+        }
+        $path = trim($path);
+        if ($path === '' || str_starts_with($path, 'http') || str_contains($path, '://')) {
+            return '';
+        }
+
+        return $path;
     }
 
     /**

@@ -46,6 +46,8 @@ use App\Support\DeliveryContext;
 use App\Support\DerivativeFailureUserMessaging;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Metadata\CategoryTypeResolver;
+use App\Support\Preview3dDeliveryUrls;
+use App\Support\Preview3dMetadata;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailModeDeliveryUrls;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -999,6 +1001,8 @@ class AssetController extends Controller
                         $firstPageUrl = $finalThumbnailUrl ?? $previewThumbnailUrl;
                     }
 
+                    $thumbnailVersion = $this->mergeThumbnailVersionWithPreview3d($thumbnailVersion, $metadata);
+
                     return [
                         'id' => $asset->id,
                         'title' => $title,
@@ -1077,6 +1081,7 @@ class AssetController extends Controller
                         // upload pipeline completes (frontend falls back to synthetic waveform).
                         'audio_playback_url' => $this->audioPlaybackUrl($asset),
                         'audio_waveform_url' => $this->audioWaveformUrl($asset),
+                    ] + Preview3dDeliveryUrls::forAuthenticatedAsset($asset) + [
                         // Pipeline status for visible progression (uploading → complete)
                         'analysis_status' => $asset->analysis_status ?? 'uploading',
                         // Asset health badge (healthy|warning|critical) for support visibility
@@ -1146,6 +1151,9 @@ class AssetController extends Controller
                         'video_poster_url' => null,
                         'audio_playback_url' => null,
                         'audio_waveform_url' => null,
+                        'preview_3d_poster_url' => null,
+                        'preview_3d_viewer_url' => null,
+                        'preview_3d_revision' => null,
                         'analysis_status' => 'uploading',
                         'health_status' => 'healthy',
                         'brand_intelligence' => null,
@@ -1953,6 +1961,8 @@ class AssetController extends Controller
 
                     $modesStatus = $metadata['thumbnail_modes_status'] ?? null;
 
+                    $thumbnailVersion = $this->mergeThumbnailVersionWithPreview3d($thumbnailVersion, $metadata);
+
                     return [
                         'asset_id' => $asset->id,
                         'analysis_status' => $asset->analysis_status ?? 'uploading',
@@ -1966,7 +1976,7 @@ class AssetController extends Controller
                         'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
                         'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset, $includeEnhancedOutputFreshness),
                         'thumbnail_modes_status' => is_array($modesStatus) ? $modesStatus : null,
-                    ];
+                    ] + Preview3dDeliveryUrls::forAuthenticatedAsset($asset);
                 })
                 ->values()
                 ->toArray();
@@ -1986,6 +1996,49 @@ class AssetController extends Controller
                 'degraded' => true,
             ]);
         }
+    }
+
+    /**
+     * Append opaque preview_3d revision so grid/poller memo keys invalidate when poster/viewer metadata changes.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    protected function mergeThumbnailVersionWithPreview3d(?string $thumbnailVersion, array $metadata): ?string
+    {
+        $p3 = Preview3dMetadata::cacheRevisionToken($metadata);
+        if ($p3 === '') {
+            return $thumbnailVersion;
+        }
+        $base = $thumbnailVersion ?? '';
+
+        return ($base !== '' ? $base.'|' : '').'p3d='.$p3;
+    }
+
+    /**
+     * Lightweight client-reported events for GLB model-viewer (ops correlation).
+     *
+     * POST /app/assets/{asset}/preview-3d/telemetry
+     */
+    public function preview3dTelemetry(Request $request, Asset $asset): JsonResponse
+    {
+        $this->authorize('view', $asset);
+
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
+        }
+
+        $validated = $request->validate([
+            'kind' => 'required|string|in:model_viewer_error,model_viewer_retry,model_viewer_open_full,model_viewer_fallback_active',
+        ]);
+
+        Log::info('preview_3d.client_event', [
+            'event' => 'preview_3d.client_event',
+            'kind' => $validated['kind'],
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+        ]);
+
+        return response()->json(['ok' => true]);
     }
 
     /**
@@ -2055,6 +2108,8 @@ class AssetController extends Controller
                 }
             }
 
+            $thumbnailVersion = $this->mergeThumbnailVersionWithPreview3d($thumbnailVersion, $metadata);
+
             $modesStatus = $metadata['thumbnail_modes_status'] ?? null;
 
             return response()->json([
@@ -2071,7 +2126,7 @@ class AssetController extends Controller
                 'thumbnail_mode_urls' => ThumbnailModeDeliveryUrls::map($asset),
                 'thumbnail_modes_meta' => ThumbnailModeDeliveryUrls::modesMetaForApi($asset, true),
                 'thumbnail_modes_status' => is_array($modesStatus) ? $modesStatus : null,
-            ], 200);
+            ] + Preview3dDeliveryUrls::forAuthenticatedAsset($asset), 200);
         } catch (\Throwable $e) {
             Log::warning('[AssetController::processingStatus] Degraded JSON response (thumbnail poll)', [
                 'asset_id' => $asset->id,
@@ -2112,6 +2167,9 @@ class AssetController extends Controller
             'thumbnail_mode_urls' => [],
             'thumbnail_modes_meta' => [],
             'thumbnail_modes_status' => null,
+            'preview_3d_poster_url' => null,
+            'preview_3d_viewer_url' => null,
+            'preview_3d_revision' => null,
             'degraded' => true,
         ], 200);
     }
@@ -2344,6 +2402,9 @@ class AssetController extends Controller
             'thumbnail_mode_urls' => [],
             'thumbnail_modes_meta' => [],
             'thumbnail_modes_status' => null,
+            'preview_3d_poster_url' => null,
+            'preview_3d_viewer_url' => null,
+            'preview_3d_revision' => null,
             'analysis_status' => null,
             'actions' => [],
         ], 200);

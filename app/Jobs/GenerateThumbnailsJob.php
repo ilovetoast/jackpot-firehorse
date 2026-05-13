@@ -23,6 +23,7 @@ use App\Support\Logging\PipelineLogger;
 use App\Support\Logging\PipelineStepTimer;
 use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\PipelineQueueResolver;
+use App\Support\Preview3dMetadata;
 use App\Support\ProcessingMetrics;
 use App\Support\DerivativeFailureUserMessaging;
 use App\Support\ThumbnailMetadata;
@@ -407,6 +408,10 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $dimensionsFromRendering = true;
                     break;
                 }
+                if ($fileTypeService->isModel3dRegistryType((string) $ft)) {
+                    $dimensionsFromRendering = true;
+                    break;
+                }
                 if ($fileTypeService->isOfficeDocument($m !== '' ? $m : null, $ext !== '' ? $ext : null)) {
                     $dimensionsFromRendering = true;
                     break;
@@ -417,6 +422,15 @@ class GenerateThumbnailsJob implements ShouldQueue
             // flag — yet dimensions are legitimately unknown until Imagick decodes. Same pattern as
             // {@see ThumbnailGenerationService::detectFileType} fallbacks for HEIC/CR2/AVIF.
             if (in_array($ext, ['heic', 'heif', 'cr2', 'avif'], true)) {
+                $dimensionsFromRendering = true;
+            }
+            // SVG (and optional compressed SVG): no reliable width/height on the asset row until rsvg-convert
+            // rasterizes; do not soft-skip as dimensions_unknown when extension is present but MIME/gate loop
+            // did not classify the row as `svg` (e.g. empty extension from storage path + sparse version row).
+            if (in_array($ext, ['svg', 'svgz'], true)) {
+                $dimensionsFromRendering = true;
+            }
+            if (in_array($ext, ['glb', 'gltf', 'obj', 'stl', 'fbx', 'blend'], true)) {
                 $dimensionsFromRendering = true;
             }
 
@@ -644,6 +658,21 @@ class GenerateThumbnailsJob implements ShouldQueue
                 $metadata['thumbnail_skip_reason'] = $skipReason;
                 $metadata['thumbnail_skip_message'] = $skipMessage;
                 $metadata['thumbnails_generated'] = false;
+
+                $skipFt = $fileTypeService->detectFileType($mimeType !== '' ? $mimeType : null, $extension !== '' ? $extension : null);
+                if ($skipFt && $fileTypeService->isModel3dRegistryType($skipFt)) {
+                    $metadata['preview_3d'] = \App\Support\Preview3dMetadata::merge(
+                        $metadata['preview_3d'] ?? [],
+                        \App\Support\Preview3dMetadata::forThumbnailJobSkipped($skipReason, $skipMessage)
+                    );
+                    Log::info('preview_3d.preview_pipeline_skipped', [
+                        'event' => 'preview_3d.preview_pipeline_skipped',
+                        'asset_id' => $asset->id,
+                        'tenant_id' => $asset->tenant_id,
+                        'registry_type' => $skipFt,
+                        'skip_reason' => $skipReason,
+                    ]);
+                }
 
                 // Guard: only mutate analysis_status when in expected previous state
                 $expectedStatus = 'generating_thumbnails';
@@ -1210,6 +1239,46 @@ class GenerateThumbnailsJob implements ShouldQueue
                     if ($prevOffice !== []) {
                         $thumbnailMetadata['office'] = $prevOffice;
                     }
+                }
+            }
+
+            if ($detectedFileType !== null
+                && in_array($detectedFileType, ['model_glb', 'model_stl'], true)
+                && (bool) config('dam_3d.enabled')) {
+                $posterPath = $finalThumbnails['medium']['path'] ?? $finalThumbnails['large']['path'] ?? null;
+                $thumbP = $finalThumbnails['thumb']['path'] ?? null;
+                if (is_string($posterPath) && $posterPath !== '' && is_string($thumbP) && $thumbP !== '') {
+                    $prevDbg = is_array(($metaBaseForMerge['preview_3d']['debug'] ?? null))
+                        ? $metaBaseForMerge['preview_3d']['debug']
+                        : [];
+                    $existingNativeGlbViewer = $detectedFileType === 'model_glb'
+                        ? ($metaBaseForMerge['preview_3d']['viewer_path'] ?? null)
+                        : null;
+                    $preservedViewerPath = is_string($existingNativeGlbViewer) && trim($existingNativeGlbViewer) !== ''
+                        ? trim($existingNativeGlbViewer)
+                        : null;
+                    $thumbnailMetadata['preview_3d'] = Preview3dMetadata::merge(
+                        $metaBaseForMerge['preview_3d'] ?? [],
+                        [
+                            'status' => Preview3dMetadata::STATUS_READY,
+                            'poster_path' => $posterPath,
+                            'thumbnail_path' => $thumbP,
+                            'viewer_path' => $preservedViewerPath,
+                            'skip_reason' => null,
+                            'failure_message' => null,
+                            'debug' => array_merge($prevDbg, [
+                                'poster_generated_at' => now()->toIso8601String(),
+                                'poster_stub' => true,
+                            ]),
+                        ]
+                    );
+                    Log::info('preview_3d.poster_generated', [
+                        'event' => 'preview_3d.poster_generated',
+                        'asset_id' => $asset->id,
+                        'tenant_id' => $asset->tenant_id,
+                        'registry_type' => $detectedFileType,
+                        'poster_stub' => true,
+                    ]);
                 }
             }
 
@@ -2264,6 +2333,34 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (! $fileType) {
                 continue;
             }
+
+            if ($fileTypeService->isModel3dRegistryType($fileType)) {
+                if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+                    continue;
+                }
+                if (! (bool) config('dam_3d.enabled')) {
+                    continue;
+                }
+                $handler = $fileTypeService->getHandler($fileType, 'thumbnail');
+                if (! is_string($handler) || $handler === '' || ! method_exists(\App\Services\ThumbnailGenerationService::class, $handler)) {
+                    continue;
+                }
+                $requirements = $fileTypeService->checkRequirements($fileType);
+                if (! $requirements['met']) {
+                    Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
+                        'asset_id' => $asset->id,
+                        'file_type' => $fileType,
+                        'missing' => $requirements['missing'],
+                        'mime_type' => $rawMime,
+                        'filename' => $asset->original_filename,
+                    ]);
+
+                    continue;
+                }
+
+                return true;
+            }
+
             if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
                 continue;
             }
@@ -2309,6 +2406,21 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         if (! $fileType) {
             return 'unsupported_file_type';
+        }
+
+        if ($fileTypeService->isModel3dRegistryType($fileType)) {
+            if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
+                return "unsupported_format:{$fileType}";
+            }
+            if (! (bool) config('dam_3d.enabled')) {
+                return 'dam_3d_preview_disabled';
+            }
+            $handler = $fileTypeService->getHandler($fileType, 'thumbnail');
+            if (! is_string($handler) || $handler === '' || ! method_exists(\App\Services\ThumbnailGenerationService::class, $handler)) {
+                return 'model_3d_thumbnail_pipeline_pending';
+            }
+
+            return 'model_3d_thumbnail_pipeline_pending';
         }
 
         // Check requirements to determine specific skip reason
@@ -2439,6 +2551,13 @@ class GenerateThumbnailsJob implements ShouldQueue
      */
     protected function getThumbnailSkipMessage(string $mimeType, string $extension, ?string $skipReason = null): string
     {
+        if ($skipReason === 'dam_3d_preview_disabled') {
+            return '3D previews are disabled in this environment. The file was uploaded successfully; enable DAM_3D on workers when the preview pipeline is ready.';
+        }
+        if ($skipReason === 'model_3d_thumbnail_pipeline_pending') {
+            return '3D thumbnail rendering is not deployed yet. The file is stored safely and will show previews when the pipeline is enabled.';
+        }
+
         if ($skipReason === 'office_libreoffice_missing') {
             return 'Office previews require LibreOffice on the server. Install worker packages from docs/environments/PRODUCTION_WORKER_SOFTWARE.md, then re-run thumbnail generation.';
         }

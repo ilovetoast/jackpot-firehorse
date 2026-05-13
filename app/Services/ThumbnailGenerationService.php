@@ -1314,6 +1314,15 @@ class ThumbnailGenerationService
 
             $this->thumbProfilingLap('post_styles_metadata_ms');
 
+            if (in_array($fileType, ['model_glb', 'model_stl'], true)) {
+                $mw = (int) ($thumbnails['medium']['width'] ?? $thumbnails['thumb']['width'] ?? 0);
+                $mh = (int) ($thumbnails['medium']['height'] ?? $thumbnails['thumb']['height'] ?? 0);
+                if ($mw > 0 && $mh > 0) {
+                    $sourceImageWidth = $mw;
+                    $sourceImageHeight = $mh;
+                }
+            }
+
             $payload = [
                 'thumbnails' => [$mode => $thumbnails],
                 'preview_thumbnails' => [$mode => $previewThumbnails],
@@ -2237,6 +2246,128 @@ class ThumbnailGenerationService
                 imagedestroy($thumbImage);
             }
         }
+    }
+
+    /**
+     * Phase 4A: Branded static poster for GLB/STL when DAM_3D is enabled (not a real 3D render).
+     *
+     * @param  string  $sourcePath  Downloaded original (validated; mesh binary is not decoded)
+     * @param  array<string, mixed>  $styleConfig  width/height/quality/blur + _original_filename
+     * @return string Path to generated WebP or JPEG in temp dir
+     */
+    protected function generateModel3dRasterThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (! extension_loaded('gd')) {
+            throw new \RuntimeException('GD extension is required for 3D poster stub thumbnails');
+        }
+        if (! is_file($sourcePath)) {
+            throw new \RuntimeException("Source 3D file not found: {$sourcePath}");
+        }
+        if (! (bool) config('dam_3d.enabled')) {
+            throw new \RuntimeException('3D poster stub thumbnails require DAM_3D=true');
+        }
+
+        $targetWidth = max(32, min(4096, (int) ($styleConfig['width'] ?? 320)));
+        $targetHeight = max(32, min(4096, (int) ($styleConfig['height'] ?? 320)));
+        $quality = (int) ($styleConfig['quality'] ?? 88);
+
+        $bgRgb = $this->parseStubHexRgb((string) config('dam_3d.poster_stub_background_hex', '#0f172a'), [15, 23, 42]);
+        $accentRgb = $this->parseStubHexRgb((string) config('dam_3d.poster_stub_accent_hex', '#38bdf8'), [56, 189, 248]);
+
+        $img = imagecreatetruecolor($targetWidth, $targetHeight);
+        if ($img === false) {
+            throw new \RuntimeException('Failed to allocate GD image for 3D poster stub');
+        }
+
+        imagealphablending($img, true);
+        $bg = imagecolorallocate($img, $bgRgb[0], $bgRgb[1], $bgRgb[2]);
+        imagefill($img, 0, 0, $bg);
+
+        $accent = imagecolorallocate($img, $accentRgb[0], $accentRgb[1], $accentRgb[2]);
+        $lineY = (int) round($targetHeight * 0.42);
+        $barH = max(2, (int) ($targetHeight * 0.008));
+        imagefilledrectangle($img, (int) ($targetWidth * 0.15), $lineY, (int) ($targetWidth * 0.85), $lineY + $barH, $accent);
+
+        $fg = imagecolorallocate($img, 248, 250, 252);
+        $ext = strtoupper(pathinfo((string) ($styleConfig['_original_filename'] ?? ''), PATHINFO_EXTENSION));
+        if ($ext === '') {
+            $ext = '3D';
+        }
+        $title = '3D PREVIEW';
+        $subtitle = $ext.' · STUB';
+
+        $this->drawStubCenteredString($img, $title, $targetWidth, (int) ($targetHeight * 0.32), $fg, 5);
+        $muted = imagecolorallocate($img, 148, 163, 184);
+        $this->drawStubCenteredString($img, $subtitle, $targetWidth, (int) ($targetHeight * 0.52), $muted, 3);
+
+        if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            for ($i = 0; $i < 2; $i++) {
+                imagefilter($img, IMG_FILTER_GAUSSIAN_BLUR);
+            }
+        }
+
+        $outputFormat = config('assets.thumbnail.output_format', 'webp');
+        if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+            $out = tempnam(sys_get_temp_dir(), 'dam3d_stub_').'.webp';
+            if (! imagewebp($img, $out, $quality)) {
+                imagedestroy($img);
+                throw new \RuntimeException('Failed to encode 3D poster stub as WebP');
+            }
+        } else {
+            $out = tempnam(sys_get_temp_dir(), 'dam3d_stub_').'.jpg';
+            if (! imagejpeg($img, $out, $quality)) {
+                imagedestroy($img);
+                throw new \RuntimeException('Failed to encode 3D poster stub as JPEG');
+            }
+        }
+
+        imagedestroy($img);
+
+        Log::info('[ThumbnailGenerationService] 3D poster stub raster generated', [
+            'asset_id' => $styleConfig['_asset_id'] ?? null,
+            'style_width' => $targetWidth,
+            'style_height' => $targetHeight,
+        ]);
+
+        return $out;
+    }
+
+    /**
+     * @param  array{0: int, 1: int, 2: int}  $fallbackRgb
+     * @return array{0: int, 1: int, 2: int}
+     */
+    protected function parseStubHexRgb(string $hex, array $fallbackRgb): array
+    {
+        $hex = trim($hex);
+        if ($hex !== '' && $hex[0] === '#') {
+            $hex = substr($hex, 1);
+        }
+        if (strlen($hex) === 3) {
+            $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+        }
+        if (strlen($hex) === 6 && ctype_xdigit($hex)) {
+            return [
+                (int) hexdec(substr($hex, 0, 2)),
+                (int) hexdec(substr($hex, 2, 2)),
+                (int) hexdec(substr($hex, 4, 2)),
+            ];
+        }
+
+        return $fallbackRgb;
+    }
+
+    /**
+     * @param  resource|\GdImage  $img
+     */
+    protected function drawStubCenteredString($img, string $text, int $canvasWidth, int $centerY, int $color, int $font): void
+    {
+        $text = strlen($text) > 42 ? substr($text, 0, 40).'…' : $text;
+        $charW = imagefontwidth($font);
+        $charH = imagefontheight($font);
+        $tw = strlen($text) * $charW;
+        $x = (int) max(0, ($canvasWidth - $tw) / 2);
+        $y = (int) max(0, $centerY - $charH / 2);
+        imagestring($img, $font, $x, $y, $text, $color);
     }
 
     /**
@@ -4495,6 +4626,18 @@ class ThumbnailGenerationService
         // we may get 'image' or 'unknown'. For .svg extension, route to svg to avoid getimagesize() failure.
         if (in_array($ext, ['svg'], true) && in_array($resolved, ['image', 'unknown'], true)) {
             return 'svg';
+        }
+
+        $modelExtToType = [
+            'glb' => 'model_glb',
+            'gltf' => 'model_gltf',
+            'obj' => 'model_obj',
+            'stl' => 'model_stl',
+            'fbx' => 'model_fbx',
+            'blend' => 'model_blend',
+        ];
+        if (isset($modelExtToType[$ext]) && in_array($resolved, ['unknown', 'image', 'video', 'audio'], true)) {
+            return $modelExtToType[$ext];
         }
 
         $officeMimeCandidates = $version

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Asset;
 use App\Models\StorageBucket;
+use App\Support\Preview3dMetadata;
 use Aws\S3\S3Client;
 use Aws\S3\Exception\S3Exception;
 use Illuminate\Console\Command;
@@ -357,6 +358,20 @@ class AssetsCleanupLegacy extends Command
                 } catch (S3Exception $e) {
                     // Ignore errors when listing thumbnails (they may not exist)
                     $this->logWarning("Failed to list thumbnails for asset {$asset->id}: {$e->getMessage()}");
+                }
+
+                $meta = $asset->metadata ?? [];
+                foreach (Preview3dMetadata::derivativeStorageKeysForCleanup($meta, $asset->storage_root_path) as $extraKey) {
+                    if ($extraKey === '' || in_array($extraKey, $objects, true)) {
+                        continue;
+                    }
+                    try {
+                        if ($s3Client->doesObjectExist($bucket->name, $extraKey)) {
+                            $objects[] = $extraKey;
+                        }
+                    } catch (S3Exception) {
+                        // non-fatal
+                    }
                 }
             }
         } catch (S3Exception $e) {

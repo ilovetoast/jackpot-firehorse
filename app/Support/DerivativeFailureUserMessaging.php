@@ -31,7 +31,12 @@ final class DerivativeFailureUserMessaging
             return [];
         }
 
-        return array_diff_key($metadata, array_flip(self::METADATA_KEYS_HIDDEN_FROM_WORKSPACE_JSON));
+        $out = array_diff_key($metadata, array_flip(self::METADATA_KEYS_HIDDEN_FROM_WORKSPACE_JSON));
+        if (isset($out['preview_3d']) && is_array($out['preview_3d'])) {
+            $out['preview_3d'] = Preview3dMetadata::workspacePublicSnapshot($out['preview_3d']);
+        }
+
+        return $out;
     }
 
     /**

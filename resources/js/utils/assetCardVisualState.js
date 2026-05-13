@@ -5,6 +5,7 @@
 
 import { originalImageGridFallbackUrl } from './originalImageGridFallbackUrl.js'
 import { getThumbnailState, supportsThumbnail } from './thumbnailUtils.js'
+import { isRegistryModel3dAsset } from './resolveAsset3dPreviewImage.js'
 
 const RAW_EXTENSIONS = new Set([
     'cr2',
@@ -37,6 +38,13 @@ function extensionOf(asset) {
 
 export function hasServerRasterThumbnail(asset) {
     if (!asset) return false
+    if (
+        isRegistryModel3dAsset(asset) &&
+        typeof asset.preview_3d_poster_url === 'string' &&
+        asset.preview_3d_poster_url.trim().length > 0
+    ) {
+        return true
+    }
     if (asset.final_thumbnail_url || asset.preview_thumbnail_url) return true
     const ts = normalizeThumbStatus(asset)
     if (asset.thumbnail_url && ts === 'completed') return true

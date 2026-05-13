@@ -36,4 +36,24 @@ final class DerivativeFailureUserMessagingTest extends TestCase
         $this->assertArrayNotHasKey('thumbnail_engine_error_summary', $pruned);
         $this->assertArrayNotHasKey('thumbnail_error_technical', $pruned);
     }
+
+    public function test_workspace_metadata_strips_preview_3d_storage_paths(): void
+    {
+        $meta = [
+            'preview_3d' => [
+                'status' => 'ready',
+                'viewer_path' => 'secret/viewer.glb',
+                'poster_path' => 'secret/poster.webp',
+                'thumbnail_path' => 'secret/thumb.webp',
+                'debug' => ['poster_stub' => true],
+            ],
+        ];
+        $pruned = DerivativeFailureUserMessaging::workspaceMetadata($meta);
+        $this->assertArrayHasKey('preview_3d', $pruned);
+        $this->assertArrayNotHasKey('viewer_path', $pruned['preview_3d']);
+        $this->assertArrayNotHasKey('poster_path', $pruned['preview_3d']);
+        $this->assertArrayNotHasKey('thumbnail_path', $pruned['preview_3d']);
+        $this->assertSame('ready', $pruned['preview_3d']['status']);
+        $this->assertTrue($pruned['preview_3d']['poster_stub']);
+    }
 }

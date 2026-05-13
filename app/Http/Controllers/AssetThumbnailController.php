@@ -13,6 +13,7 @@ use App\Services\FeatureGate;
 use App\Services\FileTypeService;
 use App\Services\ThumbnailEnhancementAiTaskRecorder;
 use App\Support\PipelineQueueResolver;
+use App\Support\Preview3dMetadata;
 use App\Support\ThumbnailMetadata;
 use App\Support\ThumbnailMode;
 use Aws\S3\Exception\S3Exception;
@@ -1155,7 +1156,12 @@ class AssetThumbnailController extends Controller
 
         try {
             $metadata = $asset->metadata ?? [];
-            $thumbnailPaths = ThumbnailMetadata::allThumbnailObjectPaths($metadata);
+            $previewThumbnails = is_array($metadata['preview_thumbnails'] ?? null) ? $metadata['preview_thumbnails'] : [];
+            $finalThumbnails = is_array($metadata['thumbnails'] ?? null) ? $metadata['thumbnails'] : [];
+            $thumbnailPaths = array_values(array_unique(array_merge(
+                ThumbnailMetadata::allThumbnailObjectPaths($metadata),
+                Preview3dMetadata::derivativeStorageKeysForCleanup($metadata, $asset->storage_root_path),
+            )));
 
             // Check if there are any thumbnails to remove (preview or final)
             $hasPreviewThumbnails = ThumbnailMetadata::previewPath($metadata) !== null;
@@ -1163,8 +1169,9 @@ class AssetThumbnailController extends Controller
             $hasPreviewUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_PREVIEW, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
             $hasFinalUrl = $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_MEDIUM, \App\Support\DeliveryContext::AUTHENTICATED) !== ''
                 || $asset->deliveryUrl(\App\Support\AssetVariant::THUMB_SMALL, \App\Support\DeliveryContext::AUTHENTICATED) !== '';
+            $has3dDerivatives = Preview3dMetadata::derivativeStorageKeysForCleanup($metadata, $asset->storage_root_path) !== [];
 
-            if (! $hasPreviewThumbnails && ! $hasFinalThumbnails && ! $hasPreviewUrl && ! $hasFinalUrl) {
+            if (! $hasPreviewThumbnails && ! $hasFinalThumbnails && ! $hasPreviewUrl && ! $hasFinalUrl && ! $has3dDerivatives) {
                 return response()->json([
                     'success' => true,
                     'message' => 'No thumbnails to remove',
@@ -1215,6 +1222,15 @@ class AssetThumbnailController extends Controller
             // Also clear preview_thumbnail_url if it exists in metadata (some assets might store it there)
             if (isset($metadata['preview_thumbnail_url'])) {
                 unset($metadata['preview_thumbnail_url']);
+            }
+
+            if (isset($metadata['preview_3d']) && is_array($metadata['preview_3d'])) {
+                $metadata['preview_3d'] = Preview3dMetadata::merge($metadata['preview_3d'], [
+                    'poster_path' => null,
+                    'thumbnail_path' => null,
+                    'status' => Preview3dMetadata::STATUS_PENDING,
+                    'failure_message' => null,
+                ]);
             }
 
             // Update asset metadata

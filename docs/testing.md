@@ -61,6 +61,8 @@ composer test:preflight    # fastest: pure preflight tests only
 
 Use `-w /var/www/html` (or your `APP_SERVICE` workdir) if `exec` defaults to the wrong directory.
 
+**`RefreshDatabase` + Sail:** the MySQL **`testing`** database must exist and be migrated for many suites. Do **not** point destructive commands at your dev DB from `.env`. See **[TESTING_DATABASE.md — Sail MySQL testing database](./TESTING_DATABASE.md#sail-mysql-testing-database)** and **`./scripts/ensure-sail-testing-database.sh`** / **`./scripts/test-db-fresh.sh`**.
+
 ### Xdebug and speed
 
 Xdebug can slow PHPUnit by a large factor. For a quick run inside Sail:

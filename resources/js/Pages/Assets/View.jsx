@@ -2,14 +2,21 @@
  * Single-asset view page. Used when opening an asset in a new tab (e.g. from CollectionOnlyView).
  * Supports collection_only back link and download.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 import { Link } from '@inertiajs/react'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
+import { resolveRasterPrimaryThumbnailUrl } from '../../utils/thumbnailRasterPrimaryUrl'
+import { failedRasterThumbnailUrls } from '../../utils/thumbnailRasterFailedCache'
 
 export default function AssetView({ asset }) {
-    const { auth } = usePage().props
+    const { auth, dam_file_types: damFileTypes } = usePage().props
+    const [viewRasterTick, setViewRasterTick] = useState(0)
+    const displayRasterUrl = useMemo(
+        () => resolveRasterPrimaryThumbnailUrl(asset, false, failedRasterThumbnailUrls, damFileTypes),
+        [asset, damFileTypes, viewRasterTick],
+    )
     const isImage = asset?.mime_type?.startsWith('image/')
     const isVideo = asset?.mime_type?.startsWith('video/')
     const isNativePdf = (asset?.mime_type || '').toLowerCase().includes('pdf')
@@ -213,12 +220,12 @@ export default function AssetView({ asset }) {
                                             controls
                                             playsInline
                                             preload="metadata"
-                                            poster={asset.thumbnail_url || undefined}
+                                            poster={displayRasterUrl || undefined}
                                             className="w-full max-h-[70vh] rounded border border-gray-200 bg-black/5 object-contain shadow-sm"
                                         >
                                             Your browser does not support embedded video.
                                         </video>
-                                        {!asset.thumbnail_url && (
+                                        {!displayRasterUrl && (
                                             <p className="mt-2 text-center text-xs text-gray-500">
                                                 Thumbnail is still processing — video playback should work.
                                             </p>
@@ -231,23 +238,35 @@ export default function AssetView({ asset }) {
                                     </p>
                                 )}
                                 {/* Images: show raster preview (not used for video — avoids broken img when video thumb is pending). */}
-                                {!usesPdfPagePreview && !isVideo && isImage && asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && isImage && displayRasterUrl && (
                                     <div className="flex max-h-[60vh] w-full max-w-4xl flex-shrink-0 justify-center">
                                         <img
-                                            src={asset.thumbnail_url}
+                                            src={displayRasterUrl}
                                             alt={asset.title || asset.original_filename || 'Asset'}
                                             className="max-h-[60vh] w-auto max-w-full object-contain rounded border border-gray-200 shadow-sm"
+                                            onError={() => {
+                                                if (displayRasterUrl) {
+                                                    failedRasterThumbnailUrls.add(displayRasterUrl)
+                                                }
+                                                setViewRasterTick((t) => t + 1)
+                                            }}
                                         />
                                     </div>
                                 )}
                                 {/* Non-image, non-video (e.g. font): thumbnail + note */}
-                                {!usesPdfPagePreview && !isVideo && !isImage && asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && !isImage && displayRasterUrl && (
                                     <div className="w-full max-w-4xl text-center">
                                         <div className="flex max-h-[60vh] w-full justify-center">
                                             <img
-                                                src={asset.thumbnail_url}
+                                                src={displayRasterUrl}
                                                 alt={asset.title || asset.original_filename || 'Asset thumbnail'}
                                                 className="max-h-[60vh] w-auto max-w-full object-contain rounded border border-gray-200 shadow-sm"
+                                                onError={() => {
+                                                    if (displayRasterUrl) {
+                                                        failedRasterThumbnailUrls.add(displayRasterUrl)
+                                                    }
+                                                    setViewRasterTick((t) => t + 1)
+                                                }}
                                             />
                                         </div>
                                         <p className="mt-2 text-sm text-gray-500">Preview is thumbnail only for this file type.</p>
@@ -261,7 +280,7 @@ export default function AssetView({ asset }) {
                                         )}
                                     </div>
                                 )}
-                                {!usesPdfPagePreview && !isVideo && !isImage && !asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && !isImage && !displayRasterUrl && (
                                     <div className="text-center text-gray-500">
                                         <p className="mb-2">No preview available.</p>
                                         {asset.download_url && (
@@ -274,7 +293,7 @@ export default function AssetView({ asset }) {
                                         )}
                                     </div>
                                 )}
-                                {!usesPdfPagePreview && !isVideo && isImage && !asset.thumbnail_url && (
+                                {!usesPdfPagePreview && !isVideo && isImage && !displayRasterUrl && (
                                     <div className="text-center text-gray-500">
                                         <p className="mb-2">No thumbnail yet.</p>
                                         {asset.download_url && (

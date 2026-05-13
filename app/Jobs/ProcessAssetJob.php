@@ -533,6 +533,38 @@ class ProcessAssetJob implements ShouldQueue
                 ]);
             }
 
+            $fileTypeService3d = app(\App\Services\FileTypeService::class);
+            $assetFor3d = $asset->fresh();
+            $mime3d = $version ? ($version->fresh()->mime_type ?? null) : ($assetFor3d->mime_type ?? null);
+            $ext3d = strtolower(pathinfo($assetFor3d->original_filename ?? '', PATHINFO_EXTENSION));
+            $ft3d = $fileTypeService3d->detectFileType($mime3d, $ext3d !== '' ? $ext3d : null);
+            if ($ft3d && $fileTypeService3d->isModel3dRegistryType($ft3d)) {
+                $caps = $fileTypeService3d->getCapabilities($ft3d);
+                $vSize = $version ? (int) ($version->fresh()->file_size ?? 0) : 0;
+                $aSize = (int) ($assetFor3d->size_bytes ?? 0);
+                $size3d = max($vSize, $aSize);
+                $nativeGlbKey = $ft3d === 'model_glb'
+                    ? \App\Support\Preview3dMetadata::safeNativeGlbViewerStorageKey($assetFor3d, $version)
+                    : null;
+                $preview3d = \App\Support\Preview3dMetadata::initialFromInspection(
+                    $ext3d,
+                    $size3d > 0 ? $size3d : null,
+                    $caps,
+                    $nativeGlbKey,
+                );
+                $asset->update([
+                    'metadata' => array_merge($assetFor3d->metadata ?? [], ['preview_3d' => $preview3d]),
+                ]);
+                Log::info('preview_3d.viewer_path_initialized', [
+                    'event' => 'preview_3d.viewer_path_initialized',
+                    'asset_id' => $asset->id,
+                    'tenant_id' => $asset->tenant_id,
+                    'registry_type' => $ft3d,
+                    'native_glb_viewer' => $nativeGlbKey !== null && $nativeGlbKey !== '',
+                    'preview_3d_status' => $preview3d['status'] ?? null,
+                ]);
+            }
+
             $vFresh = $version?->fresh();
             $aFresh = $asset->fresh();
             $this->pipelineStepTimer?->lap('processing_marked_started', $aFresh, $vFresh);

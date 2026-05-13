@@ -27,9 +27,48 @@ If your **real** application data lives in a MySQL database named **`testing`**,
 
 | Goal | Command |
 |------|---------|
+| Ensure the MySQL **`testing`** database exists inside Sail (no migrations, no drops) | `./scripts/ensure-sail-testing-database.sh` |
 | Refresh **only** the test DB | `./scripts/test-db-fresh.sh` |
 | Run tests (Sail) | `./vendor/bin/sail test` or `./vendor/bin/sail exec laravel.test php artisan test` |
 | Wipe **dev** DB and seed (explicit) | Set `ALLOW_DATABASE_DESTRUCTION=true` then `./vendor/bin/sail artisan migrate:fresh --seed` — **only when you intend to destroy dev data** (destructive commands are blocked for non-sandbox DB names by default) |
+
+## Sail MySQL testing database
+
+**Never** run `migrate:fresh`, `migrate:refresh`, or `db:wipe` against the database named in your primary **`.env`** (for example `laravel`) unless you fully intend to destroy that data. This project keeps disposable test data in a **separate** MySQL database named **`testing`** (see **`.env.testing`**: `DB_DATABASE=testing`). Full PHPUnit runs that **`use RefreshDatabase`** expect that schema to exist and migrations to have been applied there.
+
+Prefer **`./scripts/test-db-fresh.sh`** for a guarded refresh (it forces `DB_DATABASE=testing` inside Sail). If you run Artisan yourself, use **`--env=testing`** so Laravel loads **`.env.testing`**, not your dev connection defaults alone.
+
+**Fast 3D delivery unit tests** (`Preview3dVariantPathResolverTest`, `Preview3dDeliveryUrlsTest`) do **not** use `RefreshDatabase` and do **not** require a migrated database; they are safe for quick CI loops once the app container boots.
+
+### Manual checklist (Sail)
+
+Run from the Laravel app root (`jackpot/`).
+
+1. **Confirm Sail MySQL lists `testing`:**
+
+   ```bash
+   ./vendor/bin/sail mysql -u sail -ppassword -e "SHOW DATABASES;"
+   ```
+
+2. **Create the `testing` database if it is missing** (does not drop or alter any other database):
+
+   ```bash
+   ./vendor/bin/sail mysql -u sail -ppassword -e "CREATE DATABASE IF NOT EXISTS testing;"
+   ```
+
+3. **Apply fresh migrations to the testing connection only** (uses `.env.testing` → `DB_DATABASE=testing`):
+
+   ```bash
+   ./vendor/bin/sail artisan migrate:fresh --force --env=testing
+   ```
+
+4. **Run the fast 3D delivery unit tests** (no `RefreshDatabase`):
+
+   ```bash
+   ./vendor/bin/sail phpunit tests/Unit/Services/Preview3dVariantPathResolverTest.php tests/Unit/Support/Preview3dDeliveryUrlsTest.php
+   ```
+
+Step 1–2 are also wrapped in **`./scripts/ensure-sail-testing-database.sh`** (read-only `SHOW` plus `CREATE DATABASE IF NOT EXISTS` only).
 
 ## For agents / CI
 

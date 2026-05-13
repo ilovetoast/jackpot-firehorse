@@ -32,6 +32,7 @@ use App\Services\TenantBucketService;
 use App\Services\ThumbnailRetryService;
 use App\Support\AssetVariant;
 use App\Support\DeliveryContext;
+use App\Support\Preview3dMetadata;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -396,6 +397,7 @@ class AdminAssetController extends Controller
             'versions' => $versions,
             'plan_allows_versions' => $planAllowsVersions,
             'embedded_metadata_debug' => EmbeddedMetadataDebugPayload::assemble($asset->fresh()),
+            'preview_3d_support' => Preview3dMetadata::adminDebugSummary($metadata, (bool) config('dam_3d.enabled')),
         ];
     }
 

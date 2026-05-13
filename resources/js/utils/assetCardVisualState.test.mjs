@@ -1,11 +1,27 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { syncDamFileTypesFromPage } from './damFileTypes.js'
 import {
     getAssetCardVisualState,
     assetThumbnailPollEligible,
     hasServerRasterThumbnail,
 } from './assetCardVisualState.js'
 import { computeThumbnailPipelineGridSummary } from './assetGridPipelineSummary.js'
+
+const DAM_MINIMAL = {
+    thumbnail_mime_types: ['image/jpeg', 'image/png', 'image/x-canon-cr2'],
+    thumbnail_extensions: ['jpg', 'jpeg', 'png', 'cr2'],
+    upload_mime_types: ['image/jpeg', 'image/png'],
+    upload_extensions: ['jpg', 'png', 'cr2'],
+    upload_accept: '',
+    thumbnail_accept: '',
+    types_for_help: [],
+    grid_file_type_filter_options: { grouped: [] },
+}
+
+test.beforeEach(() => {
+    syncDamFileTypesFromPage({ props: { dam_file_types: DAM_MINIMAL } })
+})
 
 test('RAW CR2 without server thumbnail shows raw_processing', () => {
     const asset = {
@@ -154,4 +170,27 @@ test('computeThumbnailPipelineGridSummary counts rawProcessing', () => {
     assert.equal(s.processing, 2)
     assert.equal(s.rawProcessing, 1)
     assert.equal(s.attention, 0)
+})
+
+test('GLB with preview_3d_poster_url counts as server raster thumbnail', () => {
+    syncDamFileTypesFromPage({
+        props: {
+            dam_file_types: {
+                ...DAM_MINIMAL,
+                types_for_help: [
+                    { key: 'model_glb', name: 'glTF Binary', extensions: ['glb'], status: 'enabled', enabled: true },
+                ],
+            },
+        },
+    })
+    const asset = {
+        id: 201,
+        file_extension: 'glb',
+        mime_type: 'model/gltf-binary',
+        thumbnail_status: 'pending',
+        preview_3d_poster_url: 'https://cdn.example.com/p.webp',
+    }
+    assert.equal(hasServerRasterThumbnail(asset), true)
+    const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
+    assert.equal(vs.kind, 'ready')
 })

@@ -55,6 +55,8 @@ import AssetEmbeddedMetadataPanel from './AssetEmbeddedMetadataPanel'
 import PendingMetadataList from './PendingMetadataList'
 import ManageAssetModal from './ManageAssetModal'
 import ThumbnailPreview from './ThumbnailPreview'
+import Model3dGridBadge from './Model3dGridBadge'
+import Model3dViewer from './Model3dViewer'
 import LightboxRasterImage from './LightboxRasterImage'
 import AudioCardVisual from './Audio/AudioCardVisual'
 import AudioLightboxPlayer from './Audio/AudioLightboxPlayer'
@@ -97,6 +99,7 @@ import {
 } from '../utils/thumbnailModes'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId, parseAssetQualityRating } from '../utils/assetUtils'
+import { shouldShowRealtimeGlbModelViewer } from '../utils/resolveAsset3dPreviewImage'
 
 const BrandDebugOverlay = lazy(() => import('./BrandDebugOverlay'))
 import { filterActiveCategories } from '../utils/categoryUtils'
@@ -1246,11 +1249,13 @@ export default function AssetDrawer({
             displayAsset?.final_thumbnail_url ||
             displayAsset?.thumbnail_url ||
             displayAsset?.preview_thumbnail_url ||
+            displayAsset?.preview_3d_poster_url ||
             null,
         [
             displayAsset?.final_thumbnail_url,
             displayAsset?.thumbnail_url,
             displayAsset?.preview_thumbnail_url,
+            displayAsset?.preview_3d_poster_url,
         ],
     )
 
@@ -2054,6 +2059,18 @@ export default function AssetDrawer({
                                 fileExtension.toUpperCase() === 'AI' ||
                                 usesPdfPagePreview ||
                                 ['DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX'].includes(fileExtension.toUpperCase())
+    const showDrawerRealtimeGlb = useMemo(
+        () =>
+            Boolean(
+                displayAsset?.id &&
+                    shouldShowRealtimeGlbModelViewer(
+                        displayAsset,
+                        pageProps.dam_file_types,
+                        pageProps.dam_3d_enabled === true,
+                    ),
+            ),
+        [displayAsset, pageProps.dam_file_types, pageProps.dam_3d_enabled],
+    )
     const isPdfAsset = Boolean(displayAsset?.is_pdf)
         || displayAsset.mime_type === 'application/pdf'
         || fileExtension.toUpperCase() === 'PDF'
@@ -4816,6 +4833,10 @@ export default function AssetDrawer({
                                     variant="drawer"
                                     disableFontLoad={externalCollectionGuest}
                                 />
+                            ) : showDrawerRealtimeGlb ? (
+                                <div className="relative h-full w-full min-h-[240px] min-w-0">
+                                    <Model3dViewer asset={displayAsset} className="h-full w-full min-h-[280px]" />
+                                </div>
                             ) : hasThumbnailSupport && displayAsset.id ? (
                                 // Assets with thumbnail support (images and PDFs): Use ThumbnailPreview with state machine
                                 // Use displayAsset (with live updates) instead of prop asset
@@ -4917,6 +4938,7 @@ export default function AssetDrawer({
                                         (displayAsset.thumbnail_url ||
                                             displayAsset.final_thumbnail_url ||
                                             displayAsset.preview_thumbnail_url ||
+                                            displayAsset.preview_3d_poster_url ||
                                             drawerEphemeralLocalPreviewUrl) && (
                                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
                                             <span className="text-white text-sm font-medium">Click to zoom</span>
@@ -4926,23 +4948,26 @@ export default function AssetDrawer({
                             ) : (
                                 // Non-image files: Use ThumbnailPreview for consistent icon display
                                 // Use displayAsset (with live updates) instead of prop asset
-                                <ThumbnailPreview
-                                    asset={displayAsset}
-                                    alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
-                                    className="w-full h-full"
-                                    retryCount={thumbnailRetryCount}
-                                    onRetry={() => {
-                                        if (thumbnailRetryCount < 2) {
-                                            setThumbnailRetryCount(prev => prev + 1)
-                                        }
-                                    }}
-                                    size="lg"
-                                    thumbnailVersion={thumbnailVersion}
-                                    liveThumbnailUpdates
-                                    shouldAnimateThumbnail={shouldAnimateThumbnail}
-                                    preferLargeForVector
-                                    ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
-                                />
+                                <div className="relative h-full w-full">
+                                    <ThumbnailPreview
+                                        asset={displayAsset}
+                                        alt={displayAsset.title || displayAsset.original_filename || 'Asset preview'}
+                                        className="w-full h-full"
+                                        retryCount={thumbnailRetryCount}
+                                        onRetry={() => {
+                                            if (thumbnailRetryCount < 2) {
+                                                setThumbnailRetryCount(prev => prev + 1)
+                                            }
+                                        }}
+                                        size="lg"
+                                        thumbnailVersion={thumbnailVersion}
+                                        liveThumbnailUpdates
+                                        shouldAnimateThumbnail={shouldAnimateThumbnail}
+                                        preferLargeForVector
+                                        ephemeralLocalPreviewUrl={drawerEphemeralLocalPreviewUrl}
+                                    />
+                                    <Model3dGridBadge asset={displayAsset} />
+                                </div>
                             )}
                         </div>
                     </div>

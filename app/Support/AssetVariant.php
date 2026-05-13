@@ -35,6 +35,17 @@ enum AssetVariant: string
     case AUDIO_WEB = 'audio_web';
 
     /**
+     * 3D preview poster image (raster). Path from `metadata.preview_3d.poster_path`.
+     */
+    case PREVIEW_3D_POSTER = 'preview_3d_poster';
+
+    /**
+     * Native GLB for in-browser viewer (`model_glb`). Path from `metadata.preview_3d.viewer_path`
+     * — storage key of the original GLB object (Phase 5C); not a converted copy.
+     */
+    case PREVIEW_3D_GLB = 'preview_3d_glb';
+
+    /**
      * Whether this variant requires options (e.g. page number for PDF_PAGE).
      */
     public function requiresOptions(): bool
