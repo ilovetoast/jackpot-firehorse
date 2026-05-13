@@ -133,17 +133,22 @@ export default function AgencyContextNavPicker({
                 ) : (
                     <BrandIconUnified brand={activeBrand} size="lg" />
                 )}
-                <div className="flex min-w-0 flex-1 flex-col items-start text-left leading-tight">
-                    <span className="w-full truncate font-semibold">{brandName}</span>
-                    {!onAgencyWorkspace && (
-                        <span
-                            className="w-full truncate text-[10px] font-normal opacity-70"
-                            title={agencyPicker.active_tenant_name}
-                        >
-                            {agencyPicker.active_tenant_name}
-                        </span>
-                    )}
-                </div>
+                {/** With a raster/SVG logo, the wordmark usually already spells the brand — avoid duplicating `brandName` beside it. */}
+                {(!(navLogoSrc && !logoError) || !onAgencyWorkspace) && (
+                    <div className="flex min-w-0 flex-1 flex-col items-start text-left leading-tight">
+                        {!(navLogoSrc && !logoError) && (
+                            <span className="w-full truncate font-semibold">{brandName}</span>
+                        )}
+                        {!onAgencyWorkspace && (
+                            <span
+                                className="w-full truncate text-[10px] font-normal opacity-70"
+                                title={agencyPicker.active_tenant_name}
+                            >
+                                {agencyPicker.active_tenant_name}
+                            </span>
+                        )}
+                    </div>
+                )}
                 <svg
                     className={`h-5 w-5 shrink-0 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
                     style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}
