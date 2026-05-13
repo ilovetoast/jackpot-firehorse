@@ -26,7 +26,7 @@ use Tests\TestCase;
  * Phase 10 — Asset Delivery Service tests.
  *
  * - Public collection generates signed URL
- * - Authenticated context returns non-signed CDN URL
+ * - Authenticated context returns non-signed CDN URL for typical rasters (GLB / some video variants use signed URLs; see docs/STORAGE.md)
  * - PDF_PAGE requires page option
  * - No S3 disk URLs returned in staging/production (when CloudFront configured)
  */

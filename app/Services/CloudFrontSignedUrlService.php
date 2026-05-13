@@ -13,7 +13,8 @@ use RuntimeException;
  * Generates CloudFront signed URLs using AWS SDK canned policy signing.
  * No dependency on cookie service; uses Aws\CloudFront\UrlSigner.
  *
- * Do NOT use for authenticated tenant access — signed cookies apply there.
+ * Used for public/gateway flows, admin grids, PDF pages, and authenticated
+ * GLB / video variants that load without cookies (see AssetDeliveryService).
  */
 class CloudFrontSignedUrlService
 {
@@ -71,6 +72,14 @@ class CloudFrontSignedUrlService
         }
 
         return base_path($path);
+    }
+
+    /**
+     * TTL for authenticated GLB / video variants loaded with CORS anonymous (no signed cookies).
+     */
+    public function getAuthenticatedCrossOriginMediaTtl(): int
+    {
+        return max(60, (int) config('cloudfront.authenticated_crossorigin_media_ttl', 3600));
     }
 
     /**

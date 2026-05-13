@@ -48,6 +48,7 @@ class AssetVariantPathResolver
             AssetVariant::THUMB_LARGE => $this->resolveRasterThumbnailPath($asset, $basePath, 'large', $options),
             AssetVariant::THUMB_PREVIEW => $this->resolvePreviewThumbnailPath($asset, $basePath),
             AssetVariant::VIDEO_PREVIEW => $this->resolveVideoPreviewPath($asset, $basePath),
+            AssetVariant::VIDEO_WEB => $this->resolveVideoWebPlaybackPath($asset),
             AssetVariant::VIDEO_POSTER => $this->resolveVideoPosterPath($asset, $basePath),
             AssetVariant::PDF_PAGE => $this->resolvePdfPagePathFromVariant($asset, $options),
             AssetVariant::AUDIO_WAVEFORM => $this->resolveAudioWaveformPath($asset, $basePath),
@@ -132,6 +133,23 @@ class AssetVariantPathResolver
         }
 
         return $path;
+    }
+
+    /**
+     * Storage key for {@see AssetVariant::VIDEO_WEB} — full-length browser MP4.
+     * Empty until {@see \App\Jobs\GenerateVideoWebPlaybackJob} persists metadata.video.web_playback_path.
+     */
+    public function resolveVideoWebPlaybackPath(Asset $asset): string
+    {
+        $p = $asset->metadata['video']['web_playback_path'] ?? null;
+        if (is_string($p)) {
+            $p = trim($p);
+            if ($p !== '' && ! str_starts_with($p, 'http') && ! str_contains($p, '://')) {
+                return $p;
+            }
+        }
+
+        return '';
     }
 
     /**

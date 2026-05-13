@@ -28,7 +28,7 @@ Upload
   → ProcessAssetJob (FileInspectionService writes mime/width/height inline)
   → GenerateThumbnailsJob   ← fast path: first job in the main chain
   → GeneratePreviewJob
-  → [GenerateVideoPreviewJob if video]
+  → [GenerateVideoPreviewJob if video and hover not deferred for VIDEO_WEB]
   → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob
   → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob
   → [AITaggingJob unless _skip_ai_tagging]
@@ -42,7 +42,9 @@ In parallel on the dedicated `ai` queue (when tenant policy allows):
 
 **Video (`.mov` / QuickTime):** Phone exports are often magic-sniffed as **`audio/mp4`** even when the file is a video container; `FileTypeService` would otherwise match **`audio`** before **`video`** (MIME order in the registry). **`FileInspectionService`** maps **`audio/mp4` / `application/mp4`** on **`.mov` / `.m4v`** keys to **`video/quicktime` / `video/x-m4v`**, and **`ThumbnailGenerationService::detectFileType`** forces **`video`** when the extension is **`.mov`/`.m4v`** but resolution would still be **`audio`**, **`image`**, or **`unknown`** — so FFmpeg poster thumbnails and **`GenerateVideoPreviewJob`** still run. Workers need **FFmpeg** (see [PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md)).
 
-**Full-length in-browser playback** today streams the **original** where possible; the short **`GenerateVideoPreviewJob`** clip is for hover only. Containers we accept (AVI, MKV, some MOV/WebM, etc.) are often **not** natively playable in every browser. The implementation plan for a **full-length H.264/AAC MP4 derivative** on the **`video-heavy`** queue (parallel to the images chain, same idea as audio web playback) lives in **[VIDEO_WEB_PLAYBACK_PLAN.md](VIDEO_WEB_PLAYBACK_PLAN.md)**.
+**Full-length in-browser playback:** When `VIDEO_WEB_PLAYBACK_ENABLED` / `config('assets.video.web_playback.enabled')` is on, **`GenerateVideoWebPlaybackJob`** runs on **`video-heavy`** (beside the main chain, like audio web playback) and writes **`metadata.video.web_playback_path`** — an H.264/AAC MP4. The drawer/lightbox JSON stream URL prefers **`AssetVariant::VIDEO_WEB`** when that metadata is **`ready`**, then falls back to the **original**, then the short **`GenerateVideoPreviewJob`** hover clip only as a last resort. **`GenerateVideoPreviewJob`** remains **hover-only** (muted, truncated).
+
+**Hover preview vs risky originals:** For extensions in **`config('assets.video.web_playback.force_extensions')`** (e.g. AVI/MKV/MPEG/WebM), **`ProcessAssetJob`** sets **`metadata.video.preview_deferred_for_web_playback`** and **omits** **`GenerateVideoPreviewJob`** from the main chain so the short hover clip is **not** decoded from the risky file first. After **`GenerateVideoWebPlaybackJob`** succeeds, it dispatches **`GenerateVideoPreviewJob`** on the **images** queue with the **VIDEO_WEB** object as the FFmpeg source; **`metadata.video.preview_source`** is set to **`video_web`** or **`original`** / **`original_after_web_failed`** when falling back. See **[VIDEO_WEB_PLAYBACK_PLAN.md](VIDEO_WEB_PLAYBACK_PLAN.md)**.
 
 ## Worker profiles and processing budgets
 

@@ -4,7 +4,7 @@
 
 The DAM accepts several **video** containers (`config/file_types.php` → `video`: e.g. MP4, MOV, AVI, MKV, WebM, M4V). Today:
 
-- **Hover / grid “quick preview”** is a **short, muted H.264 MP4** produced by `GenerateVideoPreviewJob` via `VideoPreviewGenerationService` (2–4 s clip, ~320 px box). That derivative is **not** a substitute for full-length playback (no audio, truncated duration).
+- **Hover / grid “quick preview”** is a **short, muted H.264 MP4** produced by `GenerateVideoPreviewJob` via `VideoPreviewGenerationService` (2–4 s clip, ~320 px box). That derivative is **not** a substitute for full-length playback (no audio, truncated duration). For **risky** containers (see `config('assets.video.web_playback.force_extensions')` when web playback is enabled), the hover clip is generated **from the VIDEO_WEB MP4** after full transcode—not from the original first—so `metadata.video.preview_source` is typically **`video_web`**; safe formats use **`original`** (see `metadata.video.preview_deferred_for_web_playback`).
 - **Drawer / lightbox full playback** uses `AssetController::jsonVideoStreamUrl()`, which prefers a **signed URL to the original** (`AssetVariant::ORIGINAL`). That is correct when the source is already **browser-streamable** (typical H.264/AAC in MP4/M4V).
 
 Many uploads are **valid files but poor `<video>` citizens**: AVI (legacy codecs), MKV (anything), MPEG/PS, some MOV (ProRes, DNxHD, HEVC), WebM (VP9 / limited Safari paths), odd pixel formats, etc. Users see a black player, spinner forever, or “format not supported” even though ingestion succeeded.

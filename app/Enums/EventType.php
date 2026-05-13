@@ -149,6 +149,12 @@ class EventType
     public const ASSET_VIDEO_PREVIEW_FAILED = 'asset.video_preview.failed';
     public const ASSET_VIDEO_PREVIEW_SKIPPED = 'asset.video_preview.skipped';
 
+    /** Full-length browser MP4 derivative ({@see \App\Jobs\GenerateVideoWebPlaybackJob}). */
+    public const ASSET_VIDEO_WEB_PLAYBACK_STARTED = 'asset.video_web_playback.started';
+    public const ASSET_VIDEO_WEB_PLAYBACK_COMPLETED = 'asset.video_web_playback.completed';
+    public const ASSET_VIDEO_WEB_PLAYBACK_SKIPPED = 'asset.video_web_playback.skipped';
+    public const ASSET_VIDEO_WEB_PLAYBACK_FAILED = 'asset.video_web_playback.failed';
+
     // Audio web-playback derivative events (GenerateAudioWebPlaybackJob /
     // AudioPlaybackOptimizationService). The "skipped" variant matters here
     // — small MP3 sources legitimately don't need a derivative, and we want
@@ -370,6 +376,10 @@ class EventType
             self::ASSET_VIDEO_PREVIEW_COMPLETED,
             self::ASSET_VIDEO_PREVIEW_FAILED,
             self::ASSET_VIDEO_PREVIEW_SKIPPED,
+            self::ASSET_VIDEO_WEB_PLAYBACK_STARTED,
+            self::ASSET_VIDEO_WEB_PLAYBACK_COMPLETED,
+            self::ASSET_VIDEO_WEB_PLAYBACK_SKIPPED,
+            self::ASSET_VIDEO_WEB_PLAYBACK_FAILED,
             self::ASSET_AUDIO_WEB_PLAYBACK_STARTED,
             self::ASSET_AUDIO_WEB_PLAYBACK_COMPLETED,
             self::ASSET_AUDIO_WEB_PLAYBACK_SKIPPED,

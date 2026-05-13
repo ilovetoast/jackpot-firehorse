@@ -134,6 +134,25 @@ class AssetVariantPathResolverTest extends TestCase
         $this->assertSame('tenants/abc/assets/123/v1/previews/video_preview.mp4', $path);
     }
 
+    public function test_resolve_video_web_uses_metadata_path(): void
+    {
+        $key = 'tenants/abc/assets/123/v1/previews/video_web.mp4';
+        $asset = $this->createAsset([
+            'storage_root_path' => 'tenants/abc/assets/123/v1/original.avi',
+            'metadata' => [
+                'video' => [
+                    'web_playback_status' => 'ready',
+                    'web_playback_path' => $key,
+                ],
+            ],
+        ]);
+
+        $resolver = app(AssetVariantPathResolver::class);
+        $path = $resolver->resolve($asset, AssetVariant::VIDEO_WEB->value);
+
+        $this->assertSame($key, $path);
+    }
+
     public function test_resolve_pdf_page_with_options(): void
     {
         $asset = $this->createAsset(['storage_root_path' => 'tenants/abc/assets/123/v1/original.pdf']);

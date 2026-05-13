@@ -16,6 +16,12 @@ enum AssetVariant: string
     case THUMB_LARGE = 'thumbnail_large';
     case THUMB_PREVIEW = 'thumbnail_preview'; // LQIP during processing
     case VIDEO_PREVIEW = 'video_preview';
+    /**
+     * Full-length H.264/AAC MP4 for in-browser playback when the original is a
+     * poor streaming citizen. Path in {@see metadata.video.web_playback_path}.
+     * Hover clips use {@see self::VIDEO_PREVIEW} only.
+     */
+    case VIDEO_WEB = 'video_web';
     case VIDEO_POSTER = 'video_poster';
     case PDF_PAGE = 'pdf_page';
     /**

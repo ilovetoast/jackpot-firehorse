@@ -103,6 +103,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Authenticated cross-origin media signed URL TTL (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | GLB (model-viewer), VIDEO_WEB, and VIDEO_PREVIEW are often fetched with
+    | CORS "anonymous", which does not send CloudFront signed cookies. Those
+    | variants use short-lived signed URLs in AUTHENTICATED context (staging/prod).
+    |
+    */
+    'authenticated_crossorigin_media_ttl' => (int) env('CLOUDFRONT_AUTHENTICATED_CROSSORIGIN_MEDIA_TTL', 3600),
+
+    /*
+    |--------------------------------------------------------------------------
     | Admin Signed URL TTL (seconds)
     |--------------------------------------------------------------------------
     |

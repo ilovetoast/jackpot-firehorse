@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+    cdnUrlForDisplayWithoutQuery,
+    classifyAudioPlaybackFailure,
+    getCdnPreviewFailureCopy,
+    inferAudioDeliveryVariant,
+    isProbablyCloudFrontSignedUrl,
+    logCdnMediaDiagnostics,
+    probeCdnAssetAvailability,
+} from '../utils/cdnAssetLoadDiagnostics'
 import { getAudioRegistry } from '../utils/audioPlayerRegistry'
 
 /**
@@ -32,15 +41,44 @@ import { getAudioRegistry } from '../utils/audioPlayerRegistry'
  *   setPlaybackRate(rate)  set playback rate on the live element
  *   getFrequencyData()     Uint8Array of length frequencyBinCount, sampled
  *                          on demand — only meaningful while isPlaying
+ *
+ * CDN / play diagnostics are logged to the browser console only
+ * (see {@link logCdnMediaDiagnostics} in cdnAssetLoadDiagnostics.js).
  */
-export default function useAudioPlayer({ token, src }) {
+export default function useAudioPlayer({ token, src, asset = null }) {
     const audioRef = useRef(null)
+    const srcRef = useRef(src)
+    srcRef.current = src
+    const assetRef = useRef(asset)
+    assetRef.current = asset
+
     const [isPlaying, setIsPlaying] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(0)
     const [buffered, setBuffered] = useState(null)
     const [playbackRate, setPlaybackRateState] = useState(1)
+
+    const logAudioCdn = useCallback((reason, { displayCategory, probe, mediaErrorCode } = {}) {
+        const a = assetRef.current
+        const url = srcRef.current
+        const hint =
+            displayCategory != null ? getCdnPreviewFailureCopy(displayCategory, probe?.httpStatus) : null
+        logCdnMediaDiagnostics('audio', {
+            reason: reason || null,
+            asset_id: a?.id ?? token,
+            variant: inferAudioDeliveryVariant(a || {}, url || ''),
+            displayCategory: displayCategory ?? null,
+            operator_hint_primary: hint?.primary ?? null,
+            operator_hint_secondary: hint?.secondary ?? null,
+            cdn_host: probe?.modelHost ?? null,
+            http_status: probe?.httpStatus ?? null,
+            media_error_code: mediaErrorCode ?? null,
+            page_origin: probe?.pageOrigin ?? null,
+            url_delivery_guess: url && isProbablyCloudFrontSignedUrl(url) ? 'signed_url' : 'plain_cdn_expect_cookies',
+            cdn_path: url ? cdnUrlForDisplayWithoutQuery(url, probe?.pageOrigin) : null,
+        })
+    }, [token])
 
     // Resolve the audio element this hook should observe right now —
     // either the one we render ourselves (owner role) or whatever the
@@ -111,6 +149,29 @@ export default function useAudioPlayer({ token, src }) {
             getAudioRegistry().pause(token)
         }
 
+        const onAudioError = (e) => {
+            const el = e.currentTarget
+            if (!el) return
+            const url = el.currentSrc || el.src || srcRef.current
+            const code = el.error?.code ?? null
+            ;(async () => {
+                try {
+                    const probe = await probeCdnAssetAvailability(url, {})
+                    if (probe === null) {
+                        return
+                    }
+                    const displayCategory = classifyAudioPlaybackFailure(probe, code)
+                    logAudioCdn('audio_element_error', { displayCategory, probe, mediaErrorCode: code })
+                } catch {
+                    logAudioCdn('audio_element_error_probe_failed', {
+                        displayCategory: 'cors_or_unknown',
+                        probe: null,
+                        mediaErrorCode: code,
+                    })
+                }
+            })()
+        }
+
         const bind = (el) => {
             if (bound === el) return
             if (bound) {
@@ -124,6 +185,7 @@ export default function useAudioPlayer({ token, src }) {
                 bound.removeEventListener('canplay', onCanPlay)
                 bound.removeEventListener('ratechange', onRateChange)
                 bound.removeEventListener('ended', onEnded)
+                bound.removeEventListener('error', onAudioError)
             }
             bound = el
             if (!el) return
@@ -137,6 +199,7 @@ export default function useAudioPlayer({ token, src }) {
             el.addEventListener('canplay', onCanPlay)
             el.addEventListener('ratechange', onRateChange)
             el.addEventListener('ended', onEnded)
+            el.addEventListener('error', onAudioError)
             // Pull initial state — the element may already have metadata
             // loaded by the time we're binding (e.g. when the lightbox
             // mounts after the grid card has had time to preload).
@@ -164,7 +227,7 @@ export default function useAudioPlayer({ token, src }) {
             clearInterval(tickId)
             bind(null)
         }
-    }, [token, resolveEl])
+    }, [token, resolveEl, logAudioCdn])
 
     // If the asset src changes (rare in practice, e.g. reupload), reset state.
     useEffect(() => {
@@ -198,9 +261,32 @@ export default function useAudioPlayer({ token, src }) {
             return
         }
         setIsLoading(true)
-        const ok = await reg.play(token, el)
-        if (!ok) setIsLoading(false)
-    }, [token, resolveEl])
+        const res = await reg.play(token, el)
+        if (res && res.ok === true) {
+            return
+        }
+        setIsLoading(false)
+        if (res?.failureKind === 'autoplay') {
+            logAudioCdn('play_autoplay_blocked', { displayCategory: 'autoplay', probe: null, mediaErrorCode: null })
+            return
+        }
+        if (res?.failureKind === 'playback' && srcRef.current) {
+            try {
+                const probe = await probeCdnAssetAvailability(srcRef.current, {})
+                if (probe === null) {
+                    return
+                }
+                const displayCategory = classifyAudioPlaybackFailure(probe, null)
+                logAudioCdn('play_rejected', { displayCategory, probe, mediaErrorCode: null })
+            } catch {
+                logAudioCdn('play_rejected_probe_failed', {
+                    displayCategory: 'cors_or_unknown',
+                    probe: null,
+                    mediaErrorCode: null,
+                })
+            }
+        }
+    }, [token, resolveEl, logAudioCdn])
 
     const stop = useCallback(() => {
         const reg = getAudioRegistry()

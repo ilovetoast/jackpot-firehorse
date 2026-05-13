@@ -5,15 +5,19 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\Download;
 use App\Support\AssetVariant;
+use App\Support\AuthenticatedCrossOriginDeliveryPolicy;
 use App\Support\CdnUrl;
 use App\Support\DeliveryContext;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
  * Unified asset delivery service.
  *
  * All asset URLs must flow through this service.
- * - AUTHENTICATED: Plain CDN URL (signed cookies apply)
+ * - AUTHENTICATED: Plain CDN URL + CloudFront signed cookies for most rasters; GLB / VIDEO_WEB /
+ *   VIDEO_PREVIEW / native GLB originals use short-lived signed URLs (WebGL & video use CORS
+ *   anonymous and do not send cookies — see AuthenticatedCrossOriginDeliveryPolicy).
  * - PUBLIC_COLLECTION: CloudFront signed URL with public_collection_ttl
  * - PUBLIC_DOWNLOAD: CloudFront signed URL with DownloadExpirationPolicy
  * - GATEWAY: Same signing as public collection (guests have no tenant CDN cookies)
@@ -70,12 +74,16 @@ class AssetDeliveryService
 
         $contextEnum = DeliveryContext::tryFrom($context) ?? DeliveryContext::AUTHENTICATED;
 
-        return match ($contextEnum) {
-            DeliveryContext::AUTHENTICATED => $this->urlForAuthenticatedContext($cdnUrl, $variant, $options),
+        $finalUrl = match ($contextEnum) {
+            DeliveryContext::AUTHENTICATED => $this->urlForAuthenticatedContext($cdnUrl, $variant, $options, $asset),
             DeliveryContext::PUBLIC_COLLECTION => $this->signForPublicCollection($cdnUrl, $asset, $variant),
             DeliveryContext::PUBLIC_DOWNLOAD => $this->signForPublicDownload($cdnUrl, $asset, array_merge($options, ['variant' => $variant])),
             DeliveryContext::GATEWAY => $this->signForGateway($cdnUrl, $asset, $variant),
         };
+
+        $this->logDeliveryDiagnosticsIfEnabled($asset, $variant, $contextEnum->value, $path, $finalUrl);
+
+        return $finalUrl;
     }
 
     /**
@@ -108,21 +116,65 @@ class AssetDeliveryService
      * For PDF pages we optionally issue short-lived signed URLs to reduce
      * frequent regeneration while keeping stale exposure low.
      */
-    protected function urlForAuthenticatedContext(string $cdnUrl, string $variant, array $options): string
+    protected function urlForAuthenticatedContext(string $cdnUrl, string $variant, array $options, Asset $asset): string
     {
         $variantEnum = AssetVariant::tryFrom($variant);
         $requiresSignedPdfUrl = $variantEnum === AssetVariant::PDF_PAGE
             && (($options['signed'] ?? false) === true);
 
-        if (! $requiresSignedPdfUrl) {
-            return $cdnUrl;
+        if ($requiresSignedPdfUrl) {
+            $isPublic = (($options['pdf_page_access'] ?? 'admin') === 'public');
+            $ttl = $this->signedUrlService->getPdfPageTtl($isPublic);
+            $expiresAt = time() + $ttl;
+
+            return $this->signedUrlService->sign($cdnUrl, $expiresAt);
         }
 
-        $isPublic = (($options['pdf_page_access'] ?? 'admin') === 'public');
-        $ttl = $this->signedUrlService->getPdfPageTtl($isPublic);
-        $expiresAt = time() + $ttl;
+        if ($variantEnum !== null
+            && AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl($variantEnum, $asset)) {
+            $ttl = $this->signedUrlService->getAuthenticatedCrossOriginMediaTtl();
+            $expiresAt = time() + $ttl;
 
-        return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+            return $this->signedUrlService->sign($cdnUrl, $expiresAt);
+        }
+
+        return $cdnUrl;
+    }
+
+    /**
+     * Structured ops log when ASSET_DELIVERY_LOG_URLS=true (non-local/non-testing only).
+     */
+    private function logDeliveryDiagnosticsIfEnabled(
+        Asset $asset,
+        string $variant,
+        string $context,
+        string $objectKey,
+        string $finalUrl
+    ): void {
+        if (! config('assets.delivery.log_authenticated_urls', false)) {
+            return;
+        }
+
+        if (app()->environment(['local', 'testing'])) {
+            return;
+        }
+
+        $domain = (string) config('cloudfront.domain', '');
+        $disk = config('filesystems.default', 's3');
+        $signedUrl = str_contains($finalUrl, 'Signature=')
+            || str_contains($finalUrl, 'Policy=')
+            || str_contains($finalUrl, 'Key-Pair-Id=');
+
+        Log::channel('single')->info('[CDN][delivery]', [
+            'asset_id' => $asset->id,
+            'tenant_id' => $asset->tenant_id,
+            'variant' => $variant,
+            'context' => $context,
+            'disk' => $disk,
+            'object_key' => $objectKey,
+            'cloudfront_domain' => $domain,
+            'delivery_mode' => $signedUrl ? 'signed_url' : 'plain_cdn_expect_signed_cookies',
+        ]);
     }
 
     /**

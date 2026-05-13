@@ -142,8 +142,8 @@ function sampleAnalyser(buffer, count) {
 
 /**
  * Synthetic "bouncing" levels used when the live AnalyserNode is unavailable
- * (e.g. cross-origin audio without CORS headers, the common production path).
- * Several sine waves at different frequencies + per-bar phase offsets give
+ * (no Web Audio route: default config, or cross-origin audio without CORS when
+ * live analyser is enabled). Several sine waves at different frequencies + per-bar phase offsets give
  * each bar an independent, organic-looking bounce instead of every bar
  * pulsing in lock-step. Modulated by a slow envelope so the whole waveform
  * occasionally swells and dips, mimicking a real song's dynamics.
@@ -259,7 +259,7 @@ export default function AudioCardVisual({
 
     const token = asset?.id ?? src
     const { audioRef, isPlaying, isLoading, currentTime, duration: liveDuration, toggle, getFrequencyData } =
-        useAudioPlayer({ token, src })
+        useAudioPlayer({ token, src, asset })
 
     const seed = useMemo(() => hashSeed(asset?.id || asset?.original_filename || 'audio'), [asset?.id, asset?.original_filename])
     const barCount = size === 'lightbox' ? 80 : size === 'drawer' ? 60 : 56
@@ -291,13 +291,11 @@ export default function AudioCardVisual({
         const tick = () => {
             const now = performance.now()
             // Prefer real frequency data when the analyser is wired in
-            // (config: audio.live_analyser_enabled). When it isn't — the
-            // common production path because cross-origin audio without
-            // CORS headers can't be routed through Web Audio without
-            // silencing the output — fall back to a synthetic bouncing
-            // envelope so the bars still come alive on play. Without this
-            // fallback the card was visually frozen during playback even
-            // though the audio was clearly playing.
+            // (config: audio.live_analyser_enabled). When it isn't, Web Audio
+            // is not routing the element — we still animate bars with a synthetic
+            // envelope so the card feels alive during playback. When the
+            // analyser is on, crossOrigin + CDN issues are logged from useAudioPlayer
+            // (DevTools only; not shown in the product UI).
             const data = getFrequencyData()
             const sampled = sampleAnalyser(data, barCount) || syntheticBounceLevels(now, baseBars)
             if (sampled) {
@@ -514,9 +512,9 @@ export default function AudioCardVisual({
                      * carry CORS headers — without that the browser rejects
                      * the source with `NotSupportedError: the element has no
                      * supported sources` and `play()` fails. Default off is
-                     * the reliable choice; flip on per-environment once a
-                     * `curl -H 'Origin: ...'` against a signed audio URL
-                     * confirms `Access-Control-Allow-Origin` is forwarded.
+                     * the reliable choice; flip on per-environment once CDN
+                     * responses include Access-Control-Allow-Origin (403 vs CORS
+                     * vs decode errors are logged via useAudioPlayer (console only).
                      */
                     {...(isLiveAudioAnalyserEnabled() ? { crossOrigin: 'anonymous' } : {})}
                     className="hidden"

@@ -50,6 +50,8 @@ return [
         'local_presign_ttl' => (int) env('ASSET_DELIVERY_LOCAL_PRESIGN_TTL', 900),
         // Placeholder URL when VIDEO_PREVIEW or PDF_PAGE variant has no file (1x1 transparent PNG data URL)
         'placeholder_url' => env('ASSET_PLACEHOLDER_URL', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='),
+        /** When true, log structured [CDN][delivery] lines for non-local delivery URL builds (ops / staging). */
+        'log_authenticated_urls' => (bool) env('ASSET_DELIVERY_LOG_URLS', false),
     ],
 
     /*
@@ -803,6 +805,33 @@ return [
     'video' => [
         /** When true, persist sampled frames under tenant system prefix (excluded from user storage billing). */
         'store_frames' => (bool) env('ASSET_VIDEO_STORE_FRAMES', false),
+
+        /*
+        |--------------------------------------------------------------------------
+        | Full-length browser playback (VIDEO_WEB)
+        |--------------------------------------------------------------------------
+        |
+        | Heavy FFmpeg transcode to H.264/AAC MP4 for containers that often fail
+        | in <video> despite valid uploads. Dispatched beside the main pipeline on
+        | {@see config('queue.video_heavy_queue')} — never inside Bus::chain.
+        | Hover/grid clips remain {@see AssetVariant::VIDEO_PREVIEW} only.
+        |
+        */
+        'web_playback' => [
+            'enabled' => (bool) env('VIDEO_WEB_PLAYBACK_ENABLED', false),
+            'force_extensions' => array_values(array_unique(array_filter(array_map(
+                static fn ($x) => strtolower(trim((string) $x)),
+                explode(',', (string) env('VIDEO_WEB_PLAYBACK_FORCE_EXTENSIONS', 'avi,mkv,mpeg,mpg,webm'))
+            )))),
+            'max_dimension' => (int) env('VIDEO_WEB_PLAYBACK_MAX_DIMENSION', 1920),
+            'video_bitrate' => (string) env('VIDEO_WEB_PLAYBACK_VIDEO_BITRATE', '4000k'),
+            'audio_bitrate' => (string) env('VIDEO_WEB_PLAYBACK_AUDIO_BITRATE', '128k'),
+            'job_timeout_seconds' => (int) env('VIDEO_WEB_PLAYBACK_JOB_TIMEOUT', 14_400),
+            'ffmpeg_timeout_seconds' => (int) env('VIDEO_WEB_PLAYBACK_FFMPEG_TIMEOUT', 14_400),
+            /** Dot path prefix for observability only; keys live under metadata['video']. */
+            'status_metadata_key' => 'video.web_playback_status',
+            'x264_preset' => (string) env('VIDEO_WEB_PLAYBACK_X264_PRESET', 'veryfast'),
+        ],
     ],
 
 ];

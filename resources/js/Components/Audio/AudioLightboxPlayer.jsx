@@ -88,7 +88,7 @@ export default function AudioLightboxPlayer({ asset, primaryColor = '#f97316' })
         skip,
         toggle,
         setPlaybackRate,
-    } = useAudioPlayer({ token, src })
+    } = useAudioPlayer({ token, src, asset })
 
     // Drag-aware scrubber: while the user is dragging, the visual
     // position is driven by the drag itself (currentTime would lag the

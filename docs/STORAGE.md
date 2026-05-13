@@ -182,6 +182,11 @@ CloudFront signed cookies are **tenant-scoped** for defense-in-depth isolation.
 - Session stores `cdn_tenant_uuid`; mismatch triggers regeneration.
 - No wildcard CDN access — even if the app leaks a path, CloudFront blocks cross-tenant requests.
 
+### GLB / WebGL / video (authenticated app)
+`<model-viewer crossOrigin="anonymous">` and MSE video loads use **CORS anonymous** subresource requests, which **omit CloudFront signed cookies** even when the app and CDN share `*.example.com`. For **native GLB originals**, **`preview_3d_glb`**, **`video_web`**, and **`video_preview`** variants, `AssetDeliveryService` therefore issues **short-lived CloudFront signed URLs** in `AUTHENTICATED` context (TTL `CLOUDFRONT_AUTHENTICATED_CROSSORIGIN_MEDIA_TTL`, default 3600s). Raster thumbnails and most originals still use plain CDN URLs plus tenant cookies. Ops: `php artisan assets:diagnose-delivery {asset_id} --variant=preview_3d_glb`.
+
+**CloudFront response headers policy (infra):** For WebGL / `model-viewer`, the distribution should attach CORS headers allowing at least `https://staging-jackpot.velvetysoft.com`, `https://jackpot.velvetysoft.com`, `http://localhost:3000`, and `http://localhost:5173` (exact origins if credentials are ever used). A 403 from CloudFront is not fixed by S3 CORS alone.
+
 ### Defense-in-depth
 - CDN-level enforcement: CloudFront validates the signed policy before serving content.
 - Tenant isolation at the edge, independent of application logic.

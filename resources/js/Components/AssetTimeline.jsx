@@ -128,6 +128,16 @@ export default function AssetTimeline({
             'asset.audio_web_playback.failed': metadata?.reason
                 ? `Web playback MP3 generation failed (${metadata.reason})`
                 : 'Web playback MP3 generation failed',
+            'asset.video_web_playback.started': 'Full-length browser MP4 transcode started (video-heavy)',
+            'asset.video_web_playback.completed': metadata?.output_size_bytes
+                ? `Full-length browser MP4 ready (${formatBytesHuman(metadata.output_size_bytes)})`
+                : 'Full-length browser MP4 ready',
+            'asset.video_web_playback.skipped': metadata?.reason
+                ? `Browser MP4 transcode skipped (${metadata.reason})`
+                : 'Browser MP4 transcode skipped',
+            'asset.video_web_playback.failed': metadata?.error
+                ? `Browser MP4 transcode failed (${metadata.error})`
+                : 'Browser MP4 transcode failed',
             // Audio AI insights (Whisper transcript + mood + summary).
             'asset.audio_ai.started': 'Audio AI analysis started',
             'asset.audio_ai.completed': 'Audio AI analysis completed',
@@ -204,6 +214,13 @@ export default function AssetTimeline({
                 e.event_type === 'asset.audio_web_playback.completed' ||
                 e.event_type === 'asset.audio_web_playback.failed' ||
                 e.event_type === 'asset.audio_web_playback.skipped'
+            )
+        }
+        if (eventType === 'asset.video_web_playback.started') {
+            return allEvents.some(e =>
+                e.event_type === 'asset.video_web_playback.completed' ||
+                e.event_type === 'asset.video_web_playback.failed' ||
+                e.event_type === 'asset.video_web_playback.skipped'
             )
         }
         if (eventType === 'asset.audio_ai.started') {

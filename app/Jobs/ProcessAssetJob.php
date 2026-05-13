@@ -13,7 +13,7 @@ use App\Services\AssetProcessingFailureService;
 use App\Services\Assets\AssetProcessingBudgetService;
 use App\Services\Assets\ProcessingBudgetDecision;
 use App\Services\FileInspectionService;
-use App\Services\SystemIncidentService;
+use App\Services\VideoWebPlaybackOptimizationService;
 use App\Support\Logging\AssetPipelineTimingLogger;
 use App\Support\Logging\PipelineLogger;
 use App\Support\Logging\PipelineStepTimer;
@@ -606,7 +606,8 @@ class ProcessAssetJob implements ShouldQueue
             // Main chain (images / images-heavy / images-psd queue):
             //   1.  GenerateThumbnailsJob          - standard/original thumbnails (fast path)
             //   2.  GeneratePreviewJob             - lightweight preview marker (after thumbs)
-            //   3.  GenerateVideoPreviewJob        - video hover previews (video only)
+            //   3.  GenerateVideoPreviewJob        - video hover previews (video only; omitted when hover is
+            //                                      deferred until VIDEO_WEB — see VideoWebPlaybackOptimizationService)
             //   4.  ExtractMetadataJob             - canonical / video basics
             //   5.  ExtractEmbeddedMetadataJob     - EXIF/IPTC/PDF tags
             //   6.  EmbeddedUsageRightsSuggestionJob - optional usage_rights from embedded copyright
@@ -647,9 +648,28 @@ class ProcessAssetJob implements ShouldQueue
                 new GeneratePreviewJob($asset->id),
             ];
 
-            // Add video preview generation for video assets (after thumbnails)
+            // Add video preview generation for video assets (after thumbnails).
+            // Risky containers (VIDEO_WEB transcode): defer hover preview until GenerateVideoWebPlaybackJob
+            // finishes and dispatches GenerateVideoPreviewJob from the H.264 MP4 — do not decode the original first.
             if ($isVideo) {
-                $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
+                $deferHoverPreview = (bool) config('assets.video.web_playback.enabled', false)
+                    && app(VideoWebPlaybackOptimizationService::class)->shouldDeferHoverPreviewUntilVideoWeb($asset);
+
+                if (! $deferHoverPreview) {
+                    $chainJobs[] = new GenerateVideoPreviewJob($asset->id);
+                } else {
+                    $meta = $asset->metadata ?? [];
+                    $video = is_array($meta['video'] ?? null) ? $meta['video'] : [];
+                    $video['preview_deferred_for_web_playback'] = true;
+                    $meta['video'] = $video;
+                    $asset->update(['metadata' => $meta]);
+                    Log::info('[ProcessAssetJob] Video hover preview deferred until VIDEO_WEB completes', [
+                        'asset_id' => $asset->id,
+                        'original_filename' => $asset->original_filename,
+                        'mime_type' => $asset->mime_type,
+                        'preview_deferred_for_web_playback' => true,
+                    ]);
+                }
             }
 
             // Audio assets: render waveform PNG and extract FFprobe metadata in
@@ -787,6 +807,11 @@ class ProcessAssetJob implements ShouldQueue
             // source short-circuits to "skipped".
             if ($isAudio && config('assets.audio.optimize_for_browser', true)) {
                 GenerateAudioWebPlaybackJob::dispatch((string) $asset->id);
+            }
+
+            // Full-length browser-safe MP4 (AVI/MKV/…); runs on video-heavy beside the chain.
+            if ($isVideo && (bool) config('assets.video.web_playback.enabled', false)) {
+                GenerateVideoWebPlaybackJob::dispatch((string) $asset->id);
             }
 
             // Audio AI analysis dispatches separately so it does not gate the

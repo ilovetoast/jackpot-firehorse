@@ -42,6 +42,7 @@ use App\Services\Prostaff\GetProstaffDamFilterOptions;
 use App\Services\SystemCategoryService;
 use App\Services\UploadInitiationService;
 use App\Support\AssetVariant;
+use App\Support\AssetVideoStreamUrlPreference;
 use App\Support\DeliveryContext;
 use App\Support\DerivativeFailureUserMessaging;
 use App\Support\EditorAssetOriginalBytesLoader;
@@ -2383,9 +2384,12 @@ class AssetController extends Controller
     }
 
     /**
-     * Get signed preview URL for an asset.
+     * Signed URL for grid/drawer/lightbox playback.
      *
      * GET /assets/{asset}/preview-url
+     *
+     * Video: {@see AssetVideoStreamUrlPreference} — prefers **VIDEO_WEB** (full-length MP4 when
+     * `metadata.video.web_playback_status` is `ready`), then **ORIGINAL**, then **VIDEO_PREVIEW** (hover-only).
      */
     public function previewUrl(Request $request, Asset $asset): JsonResponse
     {
@@ -2435,15 +2439,16 @@ class AssetController extends Controller
     /**
      * Signed URL for in-browser video in the drawer/lightbox.
      *
-     * VIDEO_PREVIEW is the short muted hover clip only (grid + drawer thumbnail). Fullscreen/lightbox uses this
-     * endpoint too and must stream the original so duration, quality, and audio match the source file.
+     * Preference: **VIDEO_WEB** (full-length browser MP4 when ready) → **ORIGINAL** → **VIDEO_PREVIEW**
+     * (hover-only muted clip). See {@see AssetVideoStreamUrlPreference}.
      */
     private function jsonVideoStreamUrl(Asset $asset): JsonResponse
     {
-        $url = $asset->deliveryUrl(AssetVariant::ORIGINAL, DeliveryContext::AUTHENTICATED);
-        if ($url === '' || $url === null) {
-            $url = $asset->deliveryUrl(AssetVariant::VIDEO_PREVIEW, DeliveryContext::AUTHENTICATED);
-        }
+        // VIDEO_PREVIEW is hover-only/truncated. VIDEO_WEB is full-length browser playback.
+        $url = AssetVideoStreamUrlPreference::resolvePlaybackUrl(
+            $asset,
+            DeliveryContext::AUTHENTICATED->value
+        );
 
         if (! $url) {
             return response()->json([

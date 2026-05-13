@@ -693,6 +693,7 @@ class AssetUrlService
             AssetVariant::THUMB_LARGE => $asset->thumbnailPathForStyle('large') !== null,
             AssetVariant::PREVIEW_3D_POSTER => ! empty($asset->metadata['preview_3d']['poster_path'] ?? null),
             AssetVariant::PREVIEW_3D_GLB => ! empty($asset->metadata['preview_3d']['viewer_path'] ?? null),
+            AssetVariant::VIDEO_WEB => ! empty($asset->metadata['video']['web_playback_path'] ?? null),
             default => true,
         };
     }

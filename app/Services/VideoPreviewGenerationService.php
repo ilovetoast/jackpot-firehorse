@@ -58,15 +58,29 @@ class VideoPreviewGenerationService
             throw new \RuntimeException('Asset missing storage path');
         }
 
+        return $this->downloadSourceKeyToTemp($asset, $asset->storage_root_path);
+    }
+
+    /**
+     * Download a tenant object key (original root or a derivative such as VIDEO_WEB) to a temp file.
+     *
+     * @throws \RuntimeException
+     */
+    public function downloadSourceKeyToTemp(Asset $asset, string $objectKey): string
+    {
+        if ($objectKey === '') {
+            throw new \RuntimeException('Asset missing storage path');
+        }
+
         $asset->loadMissing('storageBucket');
 
         if ($asset->storageBucket !== null) {
-            return $this->downloadFromS3($asset->storageBucket, $asset->storage_root_path);
+            return $this->downloadFromS3($asset->storageBucket, $objectKey);
         }
 
         // Studio outputs and some pipeline rows omit storage_bucket_id while the object still exists on
         // a configured disk — same resolution as {@see EditorAssetOriginalBytesLoader}.
-        $bytes = EditorAssetOriginalBytesLoader::loadFromStorage($asset, null);
+        $bytes = EditorAssetOriginalBytesLoader::loadFromStorage($asset, $objectKey);
         $tempPath = tempnam(sys_get_temp_dir(), 'video_src_');
         if ($tempPath === false || @file_put_contents($tempPath, $bytes) === false) {
             throw new \RuntimeException('Failed to write downloaded video to temp file.');
@@ -82,18 +96,24 @@ class VideoPreviewGenerationService
      * an optimized preview, and uploads it back to S3.
      *
      * @param  Asset  $asset  The asset to generate preview for
+     * @param  string|null  $sourceStorageKey  When set (e.g. {@see metadata.video.web_playback_path}), decode this
+     *                                          object instead of the original — used for hover preview after VIDEO_WEB.
      * @return string S3 key path for the preview video
      *
      * @throws \RuntimeException If preview generation fails
      */
-    public function generatePreview(Asset $asset): string
+    public function generatePreview(Asset $asset, ?string $sourceStorageKey = null): string
     {
         if (! $asset->storage_root_path) {
             throw new \RuntimeException('Asset missing storage path');
         }
 
+        $sourceS3Path = $sourceStorageKey ?? $asset->storage_root_path;
+        if ($sourceS3Path === '') {
+            throw new \RuntimeException('Asset missing source object key for preview decode');
+        }
+
         $asset->loadMissing('storageBucket');
-        $sourceS3Path = $asset->storage_root_path;
         $bucket = $asset->storageBucket;
         $fallbackDisk = $bucket === null
             ? EditorAssetOriginalBytesLoader::resolveFallbackDiskForObjectKey($asset, $sourceS3Path)
@@ -109,12 +129,13 @@ class VideoPreviewGenerationService
         Log::info('[VideoPreviewGenerationService] Generating preview video', [
             'asset_id' => $asset->id,
             'source_s3_path' => $sourceS3Path,
+            'source_is_derivative' => $sourceStorageKey !== null,
             'bucket' => $bucket?->name,
             'fallback_disk' => $fallbackDisk,
         ]);
 
-        // Download original video to temporary location
-        $tempPath = $this->downloadSourceToTemp($asset);
+        // Download source video to temporary location (original or VIDEO_WEB derivative)
+        $tempPath = $this->downloadSourceKeyToTemp($asset, $sourceS3Path);
 
         if (! file_exists($tempPath) || filesize($tempPath) === 0) {
             throw new \RuntimeException('Downloaded source video file is invalid or empty');

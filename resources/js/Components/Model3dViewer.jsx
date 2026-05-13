@@ -9,10 +9,34 @@ import { usePage } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
 import {
+    cdnUrlForDisplayWithoutQuery,
+    getCdnPreviewFailureCopy,
+    inferGlbDeliveryVariant,
+    isProbablyCloudFrontSignedUrl,
+    logCdnMediaDiagnostics,
+    probeCdnAssetAvailability,
+} from '../utils/cdnAssetLoadDiagnostics'
+import {
     getRegistryModelGlbModelSourceUrl,
     getRegistryModel3dPosterDisplayUrl,
     shouldShowRealtimeGlbModelViewer,
 } from '../utils/resolveAsset3dPreviewImage'
+
+/**
+ * Map CDN probe outcome to copy keys for operator-facing hints (console only).
+ *
+ * @param {{ category: string, httpStatus?: number|null, modelHost?: string, pageOrigin?: string }|null} probe
+ */
+function classifyModelViewerLoadFailure(probe) {
+    if (probe === null) return 'cors_or_unknown'
+    if (!probe) return 'cors_or_unknown'
+    if (probe.category === 'unauthorized') return 'unauthorized'
+    if (probe.category === 'not_found') return 'not_found'
+    if (probe.category === 'cors_or_unknown') return 'cors_or_unknown'
+    if (probe.category === 'network') return 'network'
+    if (probe.category === 'ok') return 'viewer_failed_ok_head'
+    return 'generic'
+}
 
 /**
  * Server-side correlation for model-viewer failures. Browsers do not expose CORS text to JS,
@@ -105,14 +129,47 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
     useEffect(() => {
         const el = elRef.current
         if (!el || !eligible || !modelSrc || viewerFailed) {
-            return
+            return undefined
         }
+        const ac = new AbortController()
         const onErr = () => {
             setViewerFailed(true)
             setViewerLoading(false)
             const origins = resolveModelViewerOrigins(modelSrc)
             postPreview3dTelemetry(asset?.id, 'model_viewer_error', origins)
             postPreview3dTelemetry(asset?.id, 'model_viewer_fallback_active', origins)
+            ;(async () => {
+                try {
+                    const probe = await probeCdnAssetAvailability(modelSrc, { signal: ac.signal })
+                    if (probe === null) {
+                        return
+                    }
+                    const displayCategory = classifyModelViewerLoadFailure(probe)
+                    const hint = getCdnPreviewFailureCopy(displayCategory, probe.httpStatus)
+                    logCdnMediaDiagnostics('model-viewer', {
+                        asset_id: asset?.id ?? null,
+                        variant: inferGlbDeliveryVariant(asset || {}, modelSrc),
+                        displayCategory,
+                        operator_hint_primary: hint.primary,
+                        operator_hint_secondary: hint.secondary ?? null,
+                        cdn_host: probe.modelHost || null,
+                        http_status: probe.httpStatus,
+                        page_origin: probe.pageOrigin || null,
+                        cross_origin_model: crossOriginModel,
+                        url_delivery_guess: isProbablyCloudFrontSignedUrl(modelSrc) ? 'signed_url' : 'plain_cdn_expect_cookies',
+                        cdn_path: cdnUrlForDisplayWithoutQuery(modelSrc, probe.pageOrigin),
+                    })
+                } catch (e) {
+                    if (e && e.name === 'AbortError') {
+                        return
+                    }
+                    logCdnMediaDiagnostics('model-viewer', {
+                        asset_id: asset?.id ?? null,
+                        variant: inferGlbDeliveryVariant(asset || {}, modelSrc),
+                        error: String(e?.message || e),
+                    })
+                }
+            })()
         }
         const onLoad = () => {
             setViewerLoading(false)
@@ -120,10 +177,11 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
         el.addEventListener('error', onErr)
         el.addEventListener('load', onLoad)
         return () => {
+            ac.abort()
             el.removeEventListener('error', onErr)
             el.removeEventListener('load', onLoad)
         }
-    }, [eligible, modelSrc, viewerFailed, asset?.id])
+    }, [eligible, modelSrc, viewerFailed, asset?.id, crossOriginModel])
 
     if (!eligible || !modelSrc) {
         return null
@@ -145,12 +203,6 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                 <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2 text-center">
                     <p className="text-sm font-medium text-gray-800">Preview unavailable</p>
                     <p className="mt-0.5 text-xs text-gray-500">Showing poster or placeholder.</p>
-                    {crossOriginModel ? (
-                        <p className="mt-1 max-w-md text-[11px] leading-snug text-amber-800">
-                            This file is served from a different host than the app. Missing CDN CORS headers often
-                            causes this — check CloudFront / S3 CORS for your app origin (see GLB preview ops doc).
-                        </p>
-                    ) : null}
                     {stubWhy ? (
                         <p className="mt-1 max-w-md text-[11px] leading-snug text-gray-600">{stubWhy}</p>
                     ) : null}

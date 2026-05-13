@@ -13,7 +13,7 @@
  * Public API:
  *   const reg = getAudioRegistry()
  *   const handle = reg.attach(audioElement)   // wires Web Audio graph
- *   reg.play(token, audioElement)             // claims ownership; pauses prior
+ *   reg.play(token, audioElement)             // claims ownership; pauses prior — resolves to { ok: true } or { ok: false, failureKind }
  *   reg.pause(token)                          // releases ownership if held
  *   reg.subscribe(callback)                   // notified on owner change
  *   reg.getCurrentToken()                     // null when nothing plays
@@ -79,6 +79,9 @@ function createRegistry() {
         // audio element's default output path is used instead so playback is
         // always audible — at the cost of frequency-data driven bars (which
         // gracefully fall back to the synthetic envelope animation).
+        // When the analyser is on, `crossOrigin="anonymous"` on &lt;audio&gt; requires
+        // CDN CORS; a 403 or missing signature can surface as play() / media errors
+        // — see useAudioPlayer (console-only CDN diagnostics via logCdnMediaDiagnostics).
         if (!isLiveAudioAnalyserEnabled()) return null
         const ctx = ensureContext()
         if (!ctx || !analyser) return null
@@ -105,7 +108,7 @@ function createRegistry() {
     }
 
     async function play(token, audioEl) {
-        if (!audioEl) return false
+        if (!audioEl) return { ok: false, failureKind: 'playback', error: null }
         // Pause any prior owner — including itself if rapidly re-pressed.
         if (currentEl && currentEl !== audioEl) {
             try {
@@ -129,10 +132,14 @@ function createRegistry() {
             currentEl = null
             notify()
             console.warn('[audioPlayerRegistry] play rejected', e)
-            return false
+            const name = e?.name || ''
+            if (name === 'NotAllowedError') {
+                return { ok: false, failureKind: 'autoplay', error: e }
+            }
+            return { ok: false, failureKind: 'playback', error: e }
         }
         notify()
-        return true
+        return { ok: true }
     }
 
     function pause(token) {

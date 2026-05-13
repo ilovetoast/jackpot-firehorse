@@ -44,13 +44,28 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
     /**
      * Create a new job instance.
+     *
+     * @param  string|null  $previewSourceMode  {@see self::HOVER_PREVIEW_FROM_VIDEO_WEB} after VIDEO_WEB transcode;
+     *                                          {@see self::HOVER_PREVIEW_FROM_ORIGINAL} when VIDEO_WEB was skipped by budget;
+     *                                          {@see self::HOVER_PREVIEW_FROM_ORIGINAL_AFTER_WEB_FAILED} after failed transcode;
+     *                                          null = resolve automatically (prefers VIDEO_WEB when ready).
      */
     public function __construct(
-        public readonly string $assetId
+        public readonly string $assetId,
+        public readonly ?string $previewSourceMode = null,
     ) {
         $this->timeout = (int) config('assets.thumbnail.job_timeout_seconds', 600);
         $this->configureImagesQueue();
     }
+
+    /** Hover clip decoded from the browser-safe MP4 (metadata.video.web_playback_path). */
+    public const HOVER_PREVIEW_FROM_VIDEO_WEB = 'video_web';
+
+    /** Hover clip decoded from the uploaded original (legacy / safe videos / budget fallback). */
+    public const HOVER_PREVIEW_FROM_ORIGINAL = 'original';
+
+    /** Hover clip from original only after VIDEO_WEB transcode failed (risky uploads). */
+    public const HOVER_PREVIEW_FROM_ORIGINAL_AFTER_WEB_FAILED = 'original_after_web_failed';
 
     /**
      * Execute the job.
@@ -59,25 +74,12 @@ class GenerateVideoPreviewJob implements ShouldQueue
     {
         Log::info('[GenerateVideoPreviewJob] Job started', [
             'asset_id' => $this->assetId,
+            'preview_source_mode' => $this->previewSourceMode,
         ]);
         \App\Services\UploadDiagnosticLogger::jobStart('GenerateVideoPreviewJob', $this->assetId);
 
         try {
             $asset = Asset::findOrFail($this->assetId);
-
-            // Log activity: Video preview generation started
-            try {
-                \App\Services\ActivityRecorder::logAsset(
-                    $asset,
-                    \App\Enums\EventType::ASSET_VIDEO_PREVIEW_STARTED,
-                    []
-                );
-            } catch (\Exception $e) {
-                Log::error('Failed to log video preview started event', [
-                    'asset_id' => $asset->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
 
             // Check if asset is a video
             $fileTypeService = app(\App\Services\FileTypeService::class);
@@ -155,8 +157,39 @@ class GenerateVideoPreviewJob implements ShouldQueue
                 return;
             }
 
+            $plan = $this->resolveHoverPreviewPlan($asset);
+            if ($plan === null) {
+                return;
+            }
+
+            $sourceStorageKey = $plan['source_key'];
+            $previewSourceLabel = $plan['preview_source'];
+
+            Log::info('[GenerateVideoPreviewJob] Hover preview source resolved', [
+                'asset_id' => $asset->id,
+                'preview_source' => $previewSourceLabel,
+                'decode_storage_key' => $sourceStorageKey ?? $asset->storage_root_path,
+                'preview_deferred_for_web_playback' => (bool) (($asset->metadata['video'] ?? [])['preview_deferred_for_web_playback'] ?? false),
+            ]);
+
+            try {
+                \App\Services\ActivityRecorder::logAsset(
+                    $asset,
+                    \App\Enums\EventType::ASSET_VIDEO_PREVIEW_STARTED,
+                    [
+                        'preview_source' => $previewSourceLabel,
+                        'decode_storage_key' => $sourceStorageKey ?? $asset->storage_root_path,
+                    ]
+                );
+            } catch (\Exception $e) {
+                Log::error('Failed to log video preview started event', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             // Generate preview
-            $previewPath = $previewService->generatePreview($asset);
+            $previewPath = $previewService->generatePreview($asset, $sourceStorageKey);
 
             $asset->refresh();
             $bucket = $asset->storageBucket;
@@ -204,8 +237,15 @@ class GenerateVideoPreviewJob implements ShouldQueue
             // Update asset with preview path (stored as S3 key, not signed URL)
             // Path format: tenants/{uuid}/assets/{uuid}/v{n}/previews/video_preview.mp4
             // AssetVariantPathResolver uses this for VIDEO_PREVIEW; AssetDeliveryService generates URLs on-demand
+            $meta = $asset->metadata ?? [];
+            $video = is_array($meta['video'] ?? null) ? $meta['video'] : [];
+            $video['preview_source'] = $previewSourceLabel;
+            $video['preview_deferred_for_web_playback'] = false;
+            $meta['video'] = $video;
+
             $asset->update([
                 'video_preview_url' => $previewPath,
+                'metadata' => $meta,
             ]);
 
             Log::info('[GenerateVideoPreviewJob] Preview generated and verified successfully', [
@@ -225,6 +265,7 @@ class GenerateVideoPreviewJob implements ShouldQueue
                     \App\Enums\EventType::ASSET_VIDEO_PREVIEW_COMPLETED,
                     [
                         'preview_path' => $previewPath,
+                        'preview_source' => $previewSourceLabel,
                     ]
                 );
 
@@ -339,6 +380,92 @@ class GenerateVideoPreviewJob implements ShouldQueue
 
             // Don't re-throw - allow job to complete silently
             // Preview generation is a nice-to-have feature
+        }
+    }
+
+    /**
+     * Hover preview source: {@see metadata.video.web_playback_path} when ready, else original — unless this job
+     * was constructed with an explicit {@see $previewSourceMode} from {@see GenerateVideoWebPlaybackJob}.
+     *
+     * @return array{source_key: string|null, preview_source: string}|null  null = skip (log + optional activity)
+     */
+    private function resolveHoverPreviewPlan(Asset $asset): ?array
+    {
+        $mode = $this->previewSourceMode;
+        $meta = is_array($asset->metadata ?? null) ? $asset->metadata : [];
+        $video = is_array($meta['video'] ?? null) ? $meta['video'] : [];
+        $deferred = ! empty($video['preview_deferred_for_web_playback']);
+        $webPath = trim((string) ($video['web_playback_path'] ?? ''));
+        $webReady = ($video['web_playback_status'] ?? null) === 'ready' && $webPath !== '';
+
+        if ($mode === self::HOVER_PREVIEW_FROM_VIDEO_WEB) {
+            if (! $webReady) {
+                Log::warning('[GenerateVideoPreviewJob] video_web mode but VIDEO_WEB derivative not ready — skipping', [
+                    'asset_id' => $asset->id,
+                    'web_playback_status' => $video['web_playback_status'] ?? null,
+                    'preview_deferred_for_web_playback' => $deferred,
+                ]);
+                $this->logPreviewSkipped($asset, 'derivative_not_ready', [
+                    'web_playback_status' => $video['web_playback_status'] ?? null,
+                ]);
+
+                return null;
+            }
+
+            return ['source_key' => $webPath, 'preview_source' => 'video_web'];
+        }
+
+        if ($mode === self::HOVER_PREVIEW_FROM_ORIGINAL_AFTER_WEB_FAILED) {
+            return ['source_key' => null, 'preview_source' => 'original_after_web_failed'];
+        }
+
+        if ($mode === self::HOVER_PREVIEW_FROM_ORIGINAL) {
+            return ['source_key' => null, 'preview_source' => 'original'];
+        }
+
+        // Auto-resolve (main pipeline chain, admin retries without explicit mode).
+        if ($deferred && ! $webReady) {
+            Log::info('[GenerateVideoPreviewJob] Skipping — hover preview deferred until VIDEO_WEB is ready', [
+                'asset_id' => $asset->id,
+                'preview_deferred_for_web_playback' => true,
+                'web_playback_status' => $video['web_playback_status'] ?? null,
+            ]);
+            $this->logPreviewSkipped($asset, 'awaiting_video_web', [
+                'preview_deferred_for_web_playback' => true,
+                'web_playback_status' => $video['web_playback_status'] ?? null,
+            ]);
+
+            return null;
+        }
+
+        if ($webReady) {
+            Log::info('[GenerateVideoPreviewJob] Using VIDEO_WEB derivative as hover preview decode source (auto)', [
+                'asset_id' => $asset->id,
+                'web_playback_path' => $webPath,
+            ]);
+
+            return ['source_key' => $webPath, 'preview_source' => 'video_web'];
+        }
+
+        return ['source_key' => null, 'preview_source' => 'original'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     */
+    private function logPreviewSkipped(Asset $asset, string $reason, array $extra = []): void
+    {
+        try {
+            \App\Services\ActivityRecorder::logAsset(
+                $asset,
+                \App\Enums\EventType::ASSET_VIDEO_PREVIEW_SKIPPED,
+                array_merge(['reason' => $reason], $extra)
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to log video preview skipped event', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

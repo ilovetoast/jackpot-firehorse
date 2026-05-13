@@ -71,7 +71,7 @@ class Dam3dDiagnoseCommand extends Command
 
         $this->newLine();
         $this->line('Why GLB can work in the browser but grid posters are stubs:');
-        $this->line('  • The interactive viewer loads the GLB via a signed URL (WebGL / three.js) on your machine.');
+        $this->line('  • The interactive viewer loads the GLB from the CDN via a short-lived signed URL (or cookies for same-origin).');
         $this->line('  • Grid thumbnails are rendered by Blender on the **queue worker** host (headless).');
         $this->line('  • If Blender is missing, misconfigured, or fails import/render, the pipeline uploads a branded stub PNG instead — the GLB is unchanged.');
         $this->line('  • Fix: install Blender where `php artisan queue:work` runs, set DAM_3D_BLENDER_BINARY, run `dam:3d:diagnose` there, then regenerate thumbnails.');
