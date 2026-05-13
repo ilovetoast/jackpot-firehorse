@@ -294,13 +294,14 @@ class AssetStateReconciliationService
         $ext = strtolower(pathinfo((string) $asset->original_filename, PATHINFO_EXTENSION));
         $mime = strtolower((string) ($asset->mime_type ?? ''));
 
-        if (in_array($ext, ['ai', 'eps'], true)) {
+        if (in_array($ext, ['ai', 'eps', 'indd', 'idml'], true)) {
             return true;
         }
 
         return str_contains($mime, 'illustrator')
             || str_contains($mime, 'postscript')
-            || str_contains($mime, 'illustrator-artwork');
+            || str_contains($mime, 'illustrator-artwork')
+            || str_contains($mime, 'indesign');
     }
 
     /**

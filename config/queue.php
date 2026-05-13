@@ -138,7 +138,11 @@ return [
     | - video-light: poster extraction, short previews, fast post-process on returned clips
     | - video-heavy: long / high-RAM work — final composited Studio export, long ffmpeg graphs
     |
-    | No jobs are routed here until feature code calls ->onQueue(config('queue.video_light_queue')).
+    | Planned: full-length DAM web-playback transcode jobs should default to
+    | `video_heavy_queue` (see docs/VIDEO_WEB_PLAYBACK_PLAN.md). Studio composition
+    | video export already routes here ({@see \App\Support\StudioVideoQueue}).
+    | `video_light_queue` is reserved for lighter work unless feature code calls
+    | ->onQueue(config('queue.video_light_queue')).
     | Horizon supervisors listen to these names so staging/production workers stay ready.
     |
     */

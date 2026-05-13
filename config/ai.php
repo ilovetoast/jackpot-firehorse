@@ -63,6 +63,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Tenant AI tag policy defaults (tenant_ai_tag_settings)
+    |--------------------------------------------------------------------------
+    |
+    | Used by AiTagPolicyService::getDefaultSettings() for new rows (seeders,
+    | first upsert) and when no tenant_ai_tag_settings row exists yet.
+    |
+    | When enable_ai_tag_auto_apply is true, eligible AI tags are applied to
+    | assets without requiring review in the AI Review workspace (within caps).
+    |
+    */
+    'tenant_ai_tag_defaults' => [
+        'enable_ai_tag_auto_apply' => (bool) env('AI_TAGS_DEFAULT_AUTO_APPLY', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Asset metadata & AI tag inference (Vision)
     |--------------------------------------------------------------------------
     |
@@ -898,7 +914,7 @@ PROMPT
         ],
         'in_app_help_assistant' => [
             'name' => 'In-app Help Assistant',
-            'description' => 'Answers user questions using only retrieved help_actions payloads (no open-ended product knowledge).',
+            'description' => 'Answers user questions using retrieved help_actions payloads plus tenant-scoped WORKSPACE_FACTS (plan limits, storage, tighter per-type upload caps).',
             'scope' => 'tenant',
             'default_model' => 'gpt-4o-mini',
             'allowed_actions' => ['read'],

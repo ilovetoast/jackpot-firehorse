@@ -30,6 +30,7 @@ import {
 } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import Model3dViewer from './Model3dViewer'
+import PlainTextSnippet from './PlainTextSnippet'
 import FileTypeIcon from './FileTypeIcon'
 import DominantColorsSwatches from './DominantColorsSwatches'
 import AssetTagManager from './AssetTagManager'
@@ -871,6 +872,7 @@ export default function AssetDetailPanel({
                                 )}
                             </button>
                         </div>
+                        <PlainTextSnippet asset={asset} />
                         {(asset?.preview_unavailable_user_message || asset?.metadata?.preview_unavailable_user_message) && (
                             <p
                                 className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50 px-3 py-2 text-sm text-amber-950"

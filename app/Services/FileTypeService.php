@@ -43,12 +43,20 @@ class FileTypeService
             }
         }
 
-        // MIME and extension from FileInspectionService / version; 3D extensions handled above.
+        // Prefer a registry match by extension when present so mis-sniffed MIME (e.g. `text/plain`
+        // for `.svg`) does not classify the asset under a different type that lists the same MIME.
+        if ($extension !== null && $extension !== '') {
+            foreach ($types as $typeKey => $typeConfig) {
+                $typeExts = array_map('strtolower', $typeConfig['extensions'] ?? []);
+                if (in_array($extension, $typeExts, true)) {
+                    return $typeKey;
+                }
+            }
+        }
+
+        // MIME from FileInspectionService / version; extensions handled above (and 3D before that).
         foreach ($types as $typeKey => $typeConfig) {
             if ($mimeType && in_array($mimeType, $typeConfig['mime_types'] ?? [])) {
-                return $typeKey;
-            }
-            if ($extension && in_array($extension, $typeConfig['extensions'] ?? [])) {
                 return $typeKey;
             }
         }

@@ -153,6 +153,61 @@ class FileTypeServiceUploadTest extends TestCase
         $this->assertFalse($this->svc->isOfficeDocument('image/png', 'png'));
     }
 
+    public function test_allows_txt_plaintext(): void
+    {
+        $decision = $this->svc->isUploadAllowed('text/plain', 'txt');
+
+        $this->assertTrue($decision['allowed']);
+        $this->assertSame('ok', $decision['code']);
+        $this->assertSame('plaintext', $decision['file_type']);
+    }
+
+    public function test_allows_csv_plaintext(): void
+    {
+        $decision = $this->svc->isUploadAllowed('text/csv', 'csv');
+
+        $this->assertTrue($decision['allowed']);
+        $this->assertSame('ok', $decision['code']);
+        $this->assertSame('plaintext', $decision['file_type']);
+    }
+
+    public function test_detect_file_type_plaintext_by_mime_and_extension(): void
+    {
+        $this->assertSame('plaintext', $this->svc->detectFileType('text/plain', 'txt'));
+        $this->assertSame('plaintext', $this->svc->detectFileType('application/csv', 'csv'));
+        $this->assertSame('plaintext', $this->svc->detectFileType('text/plain', null));
+        $this->assertSame('svg', $this->svc->detectFileType('text/plain', 'svg'));
+    }
+
+    public function test_allows_indesign_indd_and_idml(): void
+    {
+        $indd = $this->svc->isUploadAllowed('application/x-adobe-indesign', 'indd');
+        $this->assertTrue($indd['allowed']);
+        $this->assertSame('ok', $indd['code']);
+        $this->assertSame('indesign', $indd['file_type']);
+
+        $idml = $this->svc->isUploadAllowed('application/vnd.adobe.indesign-idml', 'idml');
+        $this->assertTrue($idml['allowed']);
+        $this->assertSame('ok', $idml['code']);
+        $this->assertSame('indesign', $idml['file_type']);
+    }
+
+    public function test_detect_file_type_indesign_by_extension_when_mime_is_generic(): void
+    {
+        $this->assertSame('indesign', $this->svc->detectFileType('application/octet-stream', 'indd'));
+        $this->assertSame('indesign', $this->svc->detectFileType('application/x-adobe-indesign', 'indd'));
+    }
+
+    public function test_indesign_registry_thumbnail_pipeline_when_imagick_and_gd_available(): void
+    {
+        if (! extension_loaded('imagick') || ! extension_loaded('gd')) {
+            $this->markTestSkipped('Requires imagick and gd for InDesign thumbnails');
+        }
+
+        $this->assertTrue($this->svc->registryTypeSupportsThumbnailPipeline('indesign'));
+        $this->assertSame('generateIndesignThumbnail', $this->svc->getHandler('indesign', 'thumbnail'));
+    }
+
     public function test_matches_registry_type_for_pdf(): void
     {
         $this->assertTrue($this->svc->matchesRegistryType('application/pdf', 'pdf', 'pdf'));

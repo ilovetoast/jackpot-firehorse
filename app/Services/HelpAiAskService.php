@@ -10,7 +10,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Phase 2: grounded AI answers for in-app help (retrieved help_actions only).
+ * Phase 2: grounded AI answers for in-app help (retrieved help_actions + tenant WORKSPACE_FACTS).
  *
  * Uses {@see AIService} with agent {@see config('ai.help_ask.agent_id')} and gpt-4o-mini.
  * Persists each ask to {@see HelpAiQuestion} for admin diagnostics.
@@ -20,6 +20,7 @@ class HelpAiAskService
     public function __construct(
         protected HelpActionService $helpActionService,
         protected AIService $aiService,
+        protected PlanService $planService,
     ) {}
 
     /**
@@ -132,7 +133,9 @@ class HelpAiAskService
 
         try {
             $contextJson = json_encode(array_values($matches), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            $prompt = $this->buildPrompt(trim($question), $contextJson);
+            $workspaceFacts = $this->buildWorkspaceFacts($tenant);
+            $workspaceFactsJson = json_encode($workspaceFacts, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $prompt = $this->buildPrompt(trim($question), $contextJson, $workspaceFactsJson);
             $agentId = (string) config('ai.help_ask.agent_id', 'in_app_help_assistant');
 
             $ai = $this->aiService->executeAgent(
@@ -356,15 +359,97 @@ class HelpAiAskService
         }
     }
 
-    private function buildPrompt(string $userQuestion, string $helpActionsJson): string
+    /**
+     * Authoritative tenant-scoped limits for help answers (plan, usage, registry caps).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildWorkspaceFacts(Tenant $tenant): array
+    {
+        $planKey = $this->planService->getCurrentPlan($tenant);
+        $planCfg = config("plans.{$planKey}", []);
+        $limits = $this->planService->getPlanLimits($tenant);
+        $maxUploadMb = (int) ($limits['max_upload_size_mb'] ?? 0);
+        $maxUploadHuman = $maxUploadMb >= 999999
+            ? 'Very high per-file cap on this plan (effectively unlimited for normal use).'
+            : ($maxUploadMb > 0 ? "{$maxUploadMb} MB per file (subscription cap)" : 'Unknown');
+
+        return [
+            'plan' => [
+                'key' => $planKey,
+                'canonical_key' => $this->planService->getCanonicalPlan($tenant),
+                'display_name' => is_string($planCfg['name'] ?? null) ? $planCfg['name'] : $planKey,
+            ],
+            'limits' => $limits,
+            'derived' => [
+                'max_upload_size_mb' => $maxUploadMb,
+                'max_upload_bytes' => ($maxUploadMb > 0 && $maxUploadMb < 999999) ? $maxUploadMb * 1024 * 1024 : null,
+                'max_upload_summary' => $maxUploadHuman,
+                'effective_max_ai_credits_per_month' => $this->planService->getEffectiveAiCredits($tenant),
+            ],
+            'storage' => $this->planService->getStorageInfo($tenant),
+            'registry_stricter_per_file_caps' => $this->registryUploadCapsTighterThanPlanMb($maxUploadMb),
+            'guidance' => [
+                'The effective single-file upload limit is the lower of: subscription max_upload_size_mb (limits) and any stricter per-type cap in registry_stricter_per_file_caps for that file format.',
+                'Use limits.* for seats, brands, downloads, tags per asset, custom metadata fields, ZIP sizes, etc.',
+                'storage.* is current usage vs plan (plus add-ons when present).',
+            ],
+        ];
+    }
+
+    /**
+     * Per-file-type registry caps that are tighter than the plan upload ceiling (when the plan is finite).
+     *
+     * @return list<array{file_type: string, name: string, max_upload_mb: int}>
+     */
+    private function registryUploadCapsTighterThanPlanMb(int $planMaxMb): array
+    {
+        if ($planMaxMb <= 0 || $planMaxMb >= 999999) {
+            return [];
+        }
+
+        $out = [];
+        foreach (config('file_types.types', []) as $key => $cfg) {
+            if (! is_string($key) || $key === '') {
+                continue;
+            }
+            $bytes = $cfg['upload']['max_size_bytes'] ?? null;
+            if (! is_int($bytes) && ! (is_numeric($bytes))) {
+                continue;
+            }
+            $b = (int) $bytes;
+            if ($b <= 0) {
+                continue;
+            }
+            $mb = (int) floor($b / 1024 / 1024);
+            if ($mb > 0 && $mb < $planMaxMb) {
+                $out[] = [
+                    'file_type' => $key,
+                    'name' => (string) ($cfg['name'] ?? $key),
+                    'max_upload_mb' => $mb,
+                ];
+            }
+        }
+
+        usort($out, static fn (array $a, array $b): int => ($a['max_upload_mb'] <=> $b['max_upload_mb']));
+
+        return $out;
+    }
+
+    private function buildPrompt(string $userQuestion, string $helpActionsJson, string $workspaceFactsJson): string
     {
         return <<<PROMPT
-You are Jackpot in-app help. You MUST answer ONLY using the JSON array HELP_ACTIONS below. Treat it as the only source of truth.
+You are Jackpot in-app help. Ground answers in (1) the JSON array HELP_ACTIONS and (2) the JSON object WORKSPACE_FACTS for this tenant.
+
+HELP_ACTIONS: navigation, steps, short answers, routes — only use keys/titles/urls/steps/short_answer that appear there.
+WORKSPACE_FACTS: authoritative numbers for this workspace's subscription (plan name, caps, current storage). Use it for any question about limits, sizes, quotas, credits, seats, brands, downloads, storage used vs allowed, etc.
 
 Hard rules:
 - Do NOT invent routes, URLs, permissions, screenshots, features, or workflows that are not clearly supported by HELP_ACTIONS.
 - Do NOT reference pages or actions that are not present in HELP_ACTIONS (use only "key", "title", "url", "route_name", "related", "steps", "short_answer" from the payload).
-- If the user question is not answerable from HELP_ACTIONS, set confidence_tier to "low", set direct_answer to explain that no exact documented match was found in the provided topics, and still only refer to keys/titles that exist in HELP_ACTIONS.
+- For numeric limits (upload MB, storage, users, downloads, AI credits, tags per asset, …): you MUST use WORKSPACE_FACTS.limits, WORKSPACE_FACTS.derived, WORKSPACE_FACTS.storage, and WORKSPACE_FACTS.registry_stricter_per_file_caps. Never invent MB, GB, counts, or percentages not present there.
+- When both a plan cap and a stricter per-type registry cap apply to a file format, explain that the user is limited by whichever is lower; use registry_stricter_per_file_caps for examples.
+- If the user question is not answerable from HELP_ACTIONS or WORKSPACE_FACTS, set confidence_tier to "low" and explain briefly what is missing — do not claim "no documentation" when WORKSPACE_FACTS already answers a limits question.
 - recommended_page must be either null or an object copied from one entry in HELP_ACTIONS with keys: key, title, url (use the exact "url" string from that entry, or null if that entry has url null).
 - related_actions must be an array of { "key", "title" } taken only from HELP_ACTIONS entries or their "related" arrays (same key/title as in payload).
 
@@ -380,6 +465,9 @@ Output format: reply with a single JSON object and nothing else (no markdown fen
 
 USER_QUESTION:
 {$userQuestion}
+
+WORKSPACE_FACTS:
+{$workspaceFactsJson}
 
 HELP_ACTIONS:
 {$helpActionsJson}

@@ -292,6 +292,8 @@ For production:
 5. **ProcessAssetJob** dispatches **two parallel chains** (no env conditionals):
    - **Main chain** on the images / images-heavy / images-psd queue (resolved by `PipelineQueueResolver` from byte size + MIME):
      `GenerateThumbnailsJob → GeneratePreviewJob → [GenerateVideoPreviewJob if video] → ExtractMetadataJob → ExtractEmbeddedMetadataJob → EmbeddedUsageRightsSuggestionJob → ComputedMetadataJob → PopulateAutomaticMetadataJob → ResolveMetadataCandidatesJob → FinalizeAssetJob → PromoteAssetJob`
+
+     Planned (not yet wired): **full-length browser playback transcode** for non–browser-native video containers — FFmpeg to H.264/AAC MP4 on the **`video-heavy`** queue, dispatched **beside** this chain (same pattern as `GenerateAudioWebPlaybackJob`). See [VIDEO_WEB_PLAYBACK_PLAN.md](VIDEO_WEB_PLAYBACK_PLAN.md).
    - **AI follow-up chain** on `config('queue.ai_queue', 'ai')` (Horizon `supervisor-ai` in staging/production; **Sail `queue` service must include `ai` locally**), only when tenant policy + upload-time skip flags allow:
      `AiMetadataGenerationJob → [AiTagAutoApplyJob if not _skip_ai_tagging] → [AiMetadataSuggestionJob if not _skip_ai_metadata]`
 

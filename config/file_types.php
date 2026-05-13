@@ -444,6 +444,61 @@ return [
             ],
         ],
 
+        /*
+        | InDesign: .indd / .idml layout packages. LibreOffice does not render these.
+        | Thumbnails: {@see ThumbnailGenerationService::generateIndesignThumbnail} —
+        | when the package is ZIP-readable, extract an embedded JPEG/PNG from
+        | `Thumbnails/` (Adobe convention); otherwise a branded raster stub (GD).
+        */
+        'indesign' => [
+            'name' => 'InDesign',
+            'description' => 'Adobe InDesign documents (.indd, .idml)',
+
+            'mime_types' => [
+                'application/x-adobe-indesign',
+                'application/x-indesign',
+                'application/vnd.adobe.indesign-idml',
+            ],
+            'extensions' => ['indd', 'idml'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => null,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => false,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generateIndesignThumbnail',
+            ],
+
+            'requirements' => [
+                'php_extensions' => ['imagick', 'gd'],
+            ],
+
+            'errors' => [
+                'processing_failed' => 'Unable to generate a thumbnail for this InDesign file.',
+                'corrupted' => 'The file may be corrupted.',
+                'extraction_failed' => 'Could not read an embedded preview from the package.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'image',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
         'office' => [
             'name' => 'Office Documents',
             'description' => 'Microsoft Office files (Word, Excel, PowerPoint)',
@@ -493,6 +548,58 @@ return [
             'frontend_hints' => [
                 'can_preview_inline' => true,
                 'preview_component' => 'image',
+                'show_placeholder' => false,
+                'disable_upload_reason' => null,
+            ],
+        ],
+
+        /*
+        | Plain UTF-8 text and comma-separated values (no Excel binary).
+        | Thumbnails: raster “poster” of the first bytes via {@see ThumbnailGenerationService::generatePlainTextThumbnail}.
+        | In-app snippet: {@see \App\Http\Controllers\AssetController::textSnippet}.
+        */
+        'plaintext' => [
+            'name' => 'Plain text & CSV',
+            'description' => 'UTF-8 .txt and delimiter-based .csv (not Excel .xlsx)',
+
+            'mime_types' => [
+                'text/plain',
+                'text/csv',
+                'application/csv',
+                'text/comma-separated-values',
+            ],
+            'extensions' => ['txt', 'csv'],
+
+            'upload' => [
+                'enabled' => true,
+                'status' => 'enabled',
+                'disabled_message' => null,
+                'max_size_bytes' => 25 * 1024 * 1024,
+                'sniff_mime_aliases' => [],
+            ],
+
+            'capabilities' => [
+                'thumbnail' => true,
+                'metadata' => true,
+                'preview' => true,
+                'ai_analysis' => false,
+                'download_only' => false,
+            ],
+
+            'handlers' => [
+                'thumbnail' => 'generatePlainTextThumbnail',
+            ],
+
+            'requirements' => [],
+
+            'errors' => [
+                'processing_failed' => 'Unable to generate a preview image for this text file.',
+                'corrupted' => 'Unable to read the file. It may be corrupted or not valid UTF-8.',
+            ],
+
+            'frontend_hints' => [
+                'can_preview_inline' => true,
+                'preview_component' => 'plaintext',
                 'show_placeholder' => false,
                 'disable_upload_reason' => null,
             ],
@@ -1033,8 +1140,10 @@ return [
             'svg' => 'images',
             'pdf' => 'documents',
             'office' => 'documents',
+            'plaintext' => 'documents',
             'psd' => 'design',
             'ai' => 'design',
+            'indesign' => 'design',
             'video' => 'video_audio',
             'audio' => 'video_audio',
             'model_glb' => '3d',
@@ -1053,8 +1162,10 @@ return [
             'cr2' => 50,
             'pdf' => 10,
             'office' => 20,
+            'plaintext' => 30,
             'psd' => 10,
             'ai' => 20,
+            'indesign' => 30,
             'video' => 10,
             'audio' => 20,
             'model_glb' => 10,
@@ -1247,6 +1358,8 @@ return [
         'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'cr2', 'avif', 'heic', 'heif',
         'pdf', 'psd', 'psb', 'ai', 'eps', 'svg',
         'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        'indd', 'idml',
+        'txt', 'csv',
         'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v',
         'mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'weba',
     ],

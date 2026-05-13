@@ -185,6 +185,11 @@ class ExtractMetadataJob implements ShouldQueue
             $metadata = array_merge($metadata, $videoMetadata);
         }
 
+        if ($fileType === 'plaintext') {
+            $plain = $this->extractPlaintextMetadata($asset, $version);
+            $metadata = array_merge($metadata, $plain);
+        }
+
         return $metadata;
     }
 
@@ -269,6 +274,64 @@ class ExtractMetadataJob implements ShouldQueue
             // Don't throw - metadata extraction failure should not block processing
             return [];
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function extractPlaintextMetadata(Asset $asset, ?AssetVersion $version = null): array
+    {
+        $sourceS3Path = $version ? $version->file_path : $asset->storage_root_path;
+        if (! $sourceS3Path || ! $asset->storageBucket) {
+            Log::warning('[ExtractMetadataJob] Cannot extract plain-text metadata - missing storage path or bucket', [
+                'asset_id' => $asset->id,
+            ]);
+
+            return [];
+        }
+
+        $bucket = $asset->storageBucket;
+        $maxBytes = 262_144;
+
+        try {
+            $config = [
+                'version' => 'latest',
+                'region' => config('storage.default_region', config('filesystems.disks.s3.region', 'us-east-1')),
+            ];
+            if (config('filesystems.disks.s3.endpoint')) {
+                $config['endpoint'] = (string) config('filesystems.disks.s3.endpoint');
+                $config['use_path_style_endpoint'] = (bool) config('filesystems.disks.s3.use_path_style_endpoint', false);
+            }
+            $s3 = new \Aws\S3\S3Client($config);
+
+            $result = $s3->getObject([
+                'Bucket' => $bucket->name,
+                'Key' => $sourceS3Path,
+                'Range' => 'bytes=0-'.($maxBytes - 1),
+            ]);
+            $body = (string) $result['Body'];
+        } catch (\Throwable $e) {
+            Log::error('[ExtractMetadataJob] Failed to read plain-text sample for metadata', [
+                'asset_id' => $asset->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [];
+        }
+
+        $utf8 = @iconv('UTF-8', 'UTF-8//IGNORE', $body);
+        if (! is_string($utf8) || $utf8 === '') {
+            $utf8 = preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $body) ?? '';
+        }
+        $utf8 = str_replace("\0", '', $utf8);
+        $lineCount = $utf8 === '' ? 0 : (substr_count($utf8, "\n") + 1);
+        $charSample = strlen($utf8);
+
+        return [
+            'plaintext_line_count_sample' => $lineCount,
+            'plaintext_chars_sampled' => $charSample,
+            'plaintext_truncated_sample' => strlen($body) >= $maxBytes,
+        ];
     }
 
     /**

@@ -37,6 +37,7 @@ class HelpAskCoversAudioAndFileTypesTest extends TestCase
             'audio ai literal feature key' => ['audio_insights', 'ai.audio_insights'],
             'audio ai cost question' => ['how many credits does audio ai cost', 'ai.audio_insights'],
             'whisper provider question' => ['does jackpot use whisper', 'ai.audio_insights'],
+            'max upload size question' => ['what is the maximum file size i can upload', 'workspace.plan_limits'],
         ];
     }
 

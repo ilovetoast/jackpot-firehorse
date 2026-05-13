@@ -4203,6 +4203,282 @@ class ThumbnailGenerationService
     }
 
     /**
+     * InDesign .indd / .idml thumbnails: many packages are ZIP archives that embed a
+     * JPEG/PNG under Thumbnails/ (Adobe convention). When present, rasterize that
+     * preview; otherwise render a small branded stub (same resample path as 3D stubs).
+     *
+     * @param  string  $sourcePath  Local path to the uploaded original
+     * @param  array<string, mixed>  $styleConfig  width/height/quality/blur + _original_filename + _file_type
+     * @return string Path to generated WebP or JPEG in temp dir
+     */
+    protected function generateIndesignThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (! extension_loaded('imagick')) {
+            throw new \RuntimeException('InDesign thumbnail generation requires the Imagick PHP extension');
+        }
+        if (! extension_loaded('gd')) {
+            throw new \RuntimeException('InDesign thumbnail generation requires the GD PHP extension (stub fallback)');
+        }
+
+        Log::info('[ThumbnailGenerationService] Generating InDesign thumbnail', [
+            'source_path' => $sourcePath,
+            'bytes' => @filesize($sourcePath),
+        ]);
+
+        $embedded = $this->tryExtractIndesignPackagePreview($sourcePath);
+        if ($embedded !== null && is_file($embedded)) {
+            try {
+                return $this->imagickRasterFileToStyledThumbnail($embedded, $embedded, $styleConfig, 'indesign_embedded');
+            } finally {
+                @unlink($embedded);
+            }
+        }
+
+        $stubPng = $this->writeIndesignStubPngMaster($styleConfig);
+        try {
+            return $this->resampleModel3dMasterPngToStyleOutput($stubPng, $styleConfig);
+        } finally {
+            @unlink($stubPng);
+        }
+    }
+
+    /**
+     * @return string|null Path to a temp JPEG/PNG extracted from the package, or null
+     */
+    protected function tryExtractIndesignPackagePreview(string $sourcePath): ?string
+    {
+        if (! class_exists(\ZipArchive::class) || ! is_readable($sourcePath)) {
+            return null;
+        }
+
+        $zip = new \ZipArchive;
+        if ($zip->open($sourcePath) !== true) {
+            return null;
+        }
+
+        if ($zip->numFiles > 8000) {
+            $zip->close();
+
+            return null;
+        }
+
+        $maxMemberBytes = 30 * 1024 * 1024;
+        $candidates = [];
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            if ($stat === false) {
+                continue;
+            }
+            $size = (int) ($stat['size'] ?? 0);
+            if ($size <= 0 || $size > $maxMemberBytes) {
+                continue;
+            }
+            $name = (string) ($stat['name'] ?? '');
+            if ($name === '' || str_contains($name, '..')) {
+                continue;
+            }
+
+            $norm = strtolower(str_replace('\\', '/', $name));
+            $score = null;
+            if (preg_match('#^thumbnails/(document|thumbnail)\.jpe?g$#', $norm)) {
+                $score = 100;
+            } elseif (preg_match('#^thumbnails/.+\.(jpe?g|png)$#', $norm)) {
+                $score = 60;
+            } elseif (preg_match('#(^|/)preview\.(jpe?g|png)$#', $norm)) {
+                $score = 45;
+            }
+            if ($score === null) {
+                continue;
+            }
+
+            $candidates[] = ['name' => $name, 'score' => $score];
+        }
+
+        usort($candidates, static fn (array $a, array $b): int => ($b['score'] ?? 0) <=> ($a['score'] ?? 0));
+
+        foreach ($candidates as ['name' => $entryName]) {
+            $data = $zip->getFromName($entryName);
+            if ($data === false || $data === '') {
+                continue;
+            }
+
+            $tmp = tempnam(sys_get_temp_dir(), 'indesign_pkg_');
+            if ($tmp === false) {
+                continue;
+            }
+
+            $suffix = str_ends_with(strtolower($entryName), '.png') ? '.png' : '.jpg';
+            @unlink($tmp);
+            $outPath = $tmp.$suffix;
+            if (@file_put_contents($outPath, $data) === false) {
+                continue;
+            }
+
+            if ($this->isPlausibleRasterImageFile($outPath)) {
+                $zip->close();
+
+                return $outPath;
+            }
+            @unlink($outPath);
+        }
+
+        $zip->close();
+
+        return null;
+    }
+
+    /**
+     * True when getimagesize recognizes a small JPEG/PNG on disk.
+     */
+    protected function isPlausibleRasterImageFile(string $path): bool
+    {
+        if (! is_file($path)) {
+            return false;
+        }
+        if (filesize($path) < 32) {
+            return false;
+        }
+        $info = @getimagesize($path);
+
+        return is_array($info) && in_array((int) ($info[2] ?? 0), [IMAGETYPE_JPEG, IMAGETYPE_PNG], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $styleConfig
+     */
+    protected function writeIndesignStubPngMaster(array $styleConfig): string
+    {
+        $targetSize = 1024;
+        $bgRgb = $this->parseStubHexRgb('#1e1b4b', [30, 27, 75]);
+        $accentRgb = $this->parseStubHexRgb('#c4b5fd', [196, 181, 253]);
+
+        $img = imagecreatetruecolor($targetSize, $targetSize);
+        if ($img === false) {
+            throw new \RuntimeException('Failed to allocate GD image for InDesign stub');
+        }
+
+        imagealphablending($img, true);
+        $bg = imagecolorallocate($img, $bgRgb[0], $bgRgb[1], $bgRgb[2]);
+        imagefill($img, 0, 0, $bg);
+
+        $accent = imagecolorallocate($img, $accentRgb[0], $accentRgb[1], $accentRgb[2]);
+        $lineY = (int) round($targetSize * 0.42);
+        $barH = max(2, (int) ($targetSize * 0.008));
+        imagefilledrectangle($img, (int) ($targetSize * 0.15), $lineY, (int) ($targetSize * 0.85), $lineY + $barH, $accent);
+
+        $fg = imagecolorallocate($img, 248, 250, 252);
+        $ext = strtoupper(pathinfo((string) ($styleConfig['_original_filename'] ?? ''), PATHINFO_EXTENSION));
+        if ($ext === '') {
+            $ext = 'INDD';
+        }
+
+        $this->drawStubCenteredString($img, 'InDesign', $targetSize, (int) ($targetSize * 0.30), $fg, 5);
+        $muted = imagecolorallocate($img, 203, 213, 225);
+        $this->drawStubCenteredString($img, $ext.' — layout preview', $targetSize, (int) ($targetSize * 0.52), $muted, 3);
+
+        $base = tempnam(sys_get_temp_dir(), 'indesign_stub_m_');
+        if ($base === false) {
+            imagedestroy($img);
+            throw new \RuntimeException('Failed to allocate temp path for InDesign stub master');
+        }
+        @unlink($base);
+        $out = $base.'.png';
+        if (! imagepng($img, $out, 6)) {
+            imagedestroy($img);
+            throw new \RuntimeException('Failed to encode InDesign stub master as PNG');
+        }
+        imagedestroy($img);
+
+        return $out;
+    }
+
+    /**
+     * Resize a flat raster (extracted preview or photo) into the configured thumbnail style.
+     *
+     * @param  array<string, mixed>  $styleConfig
+     */
+    protected function imagickRasterFileToStyledThumbnail(
+        string $rasterPath,
+        string $exifSourcePath,
+        array $styleConfig,
+        string $logTag,
+    ): string {
+        $imagick = new \Imagick;
+        $imagick->setResolution(72, 72);
+
+        try {
+            $imagick->readImage($rasterPath);
+        } catch (\ImagickException $e) {
+            $imagick->clear();
+            $imagick->destroy();
+            Log::warning('[ThumbnailGenerationService] InDesign embedded preview unreadable', [
+                'path' => $rasterPath,
+                'error' => $e->getMessage(),
+                'tag' => $logTag,
+            ]);
+            throw new \RuntimeException("Failed to read InDesign preview image: {$e->getMessage()}", 0, $e);
+        }
+
+        $imagick->setIteratorIndex(0);
+        $imagick = $imagick->getImage();
+
+        $this->imagickNormalizeThumbnailOrientation($imagick, $logTag, [
+            'exif_orientation_tag' => ImageOrientationNormalizer::readExifOrientationTag($exifSourcePath),
+        ]);
+
+        $sourceWidth = $imagick->getImageWidth();
+        $sourceHeight = $imagick->getImageHeight();
+        if ($sourceWidth === 0 || $sourceHeight === 0) {
+            $imagick->clear();
+            $imagick->destroy();
+            throw new \RuntimeException('InDesign preview image has invalid dimensions');
+        }
+
+        $targetWidth = $styleConfig['width'];
+        $targetHeight = $styleConfig['height'];
+        $fit = $styleConfig['fit'] ?? 'contain';
+
+        [$thumbWidth, $thumbHeight] = $this->calculateDimensions(
+            $sourceWidth,
+            $sourceHeight,
+            $targetWidth,
+            $targetHeight,
+            $fit
+        );
+
+        $filter = $this->isSmallSource($sourceWidth, $sourceHeight) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+        $imagick->resizeImage($thumbWidth, $thumbHeight, $filter, 1, true);
+
+        if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+            $imagick->blurImage(0, 2);
+        }
+
+        $outputFormat = config('assets.thumbnail.output_format', 'webp');
+        $quality = $styleConfig['quality'] ?? 85;
+        $imagick->setImageFormat($outputFormat);
+        $imagick->setImageCompressionQuality($quality);
+
+        $extension = $outputFormat === 'webp' ? 'webp' : 'jpg';
+        $outputPath = tempnam(sys_get_temp_dir(), 'indesign_thumb_').'.'.$extension;
+
+        $imagick->writeImage($outputPath);
+        $imagick->clear();
+        $imagick->destroy();
+
+        if (! file_exists($outputPath) || filesize($outputPath) === 0) {
+            throw new \RuntimeException('InDesign thumbnail generation failed — output file is missing or empty');
+        }
+
+        Log::info('[ThumbnailGenerationService] InDesign thumbnail from embedded preview', [
+            'output_path' => $outputPath,
+            'tag' => $logTag,
+        ]);
+
+        return $outputPath;
+    }
+
+    /**
      * Generate thumbnail using ImageMagick (admin override for testing unsupported file types).
      *
      * This method attempts to use ImageMagick to convert any file type to an image.
@@ -5345,6 +5621,164 @@ class ThumbnailGenerationService
             'thumbnail_dimensions' => [$mode => $thumbnailDimensions],
             'styles_generated' => array_keys($thumbnails),
         ];
+    }
+
+    /**
+     * Raster thumbnail for .txt / .csv: render the first bytes of the file as an image (ImageMagick caption when
+     * available; GD monospace fallback). Source is always treated as UTF-8 with invalid sequences stripped.
+     *
+     * @param  string  $sourcePath  Local path to the original text file
+     * @param  array<string, mixed>  $styleConfig  Thumbnail style (width, height, quality, blur, …)
+     */
+    protected function generatePlainTextThumbnail(string $sourcePath, array $styleConfig): string
+    {
+        if (! is_readable($sourcePath)) {
+            throw new \RuntimeException("Plain-text source file is not readable: {$sourcePath}");
+        }
+
+        $raw = @file_get_contents($sourcePath, false, null, 0, 524_288);
+        if ($raw === false) {
+            throw new \RuntimeException('Failed to read plain-text source for thumbnail');
+        }
+
+        $text = $this->normalizePlainTextSampleForThumbnail($raw, (string) ($styleConfig['_original_filename'] ?? ''));
+
+        $targetWidth = (int) ($styleConfig['width'] ?? 640);
+        $targetHeight = (int) ($styleConfig['height'] ?? 480);
+        $targetWidth = max(120, min($targetWidth, 4096));
+        $targetHeight = max(120, min($targetHeight, 4096));
+
+        if (extension_loaded('imagick') && class_exists(\Imagick::class)) {
+            $labelPath = tempnam(sys_get_temp_dir(), 'jp_txt_lbl_');
+            if ($labelPath === false) {
+                throw new \RuntimeException('Failed to allocate temp path for plain-text label');
+            }
+            $labelPathTxt = $labelPath.'.txt';
+            if (! @rename($labelPath, $labelPathTxt)) {
+                @unlink($labelPath);
+                $labelPathTxt = $labelPath;
+            }
+
+            try {
+                file_put_contents($labelPathTxt, $text);
+
+                $imagick = new \Imagick;
+                $imagick->setBackgroundColor(new \ImagickPixel('#ffffff'));
+                $imagick->setGravity(\Imagick::GRAVITY_NORTHWEST);
+                $imagick->setOption('caption:max_lines', '80');
+                $imagick->setOption('caption:line-spacing', '2');
+                $imagick->setOption('density', '120');
+                $imagick->readImage('caption:@'.str_replace('\\', '/', $labelPathTxt));
+
+                $srcW = max(1, $imagick->getImageWidth());
+                $srcH = max(1, $imagick->getImageHeight());
+                $fit = $styleConfig['fit'] ?? 'contain';
+                [$tw, $th] = $this->calculateDimensions($srcW, $srcH, $targetWidth, $targetHeight, $fit);
+                $filter = $this->isSmallSource($srcW, $srcH) ? \Imagick::FILTER_POINT : \Imagick::FILTER_LANCZOS;
+                $imagick->resizeImage($tw, $th, $filter, 1, true);
+
+                if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
+                    $imagick->blurImage(0, 2);
+                }
+
+                $outputFormat = config('assets.thumbnail.output_format', 'webp');
+                $imagick->setImageFormat($outputFormat);
+                $quality = (int) ($styleConfig['quality'] ?? 85);
+                $imagick->setImageCompressionQuality($quality);
+
+                $extOut = $outputFormat === 'webp' ? 'webp' : 'jpg';
+                $out = tempnam(sys_get_temp_dir(), 'thumb_plain_').'.'.$extOut;
+                $imagick->writeImage($out);
+                $imagick->clear();
+                $imagick->destroy();
+
+                if (! is_file($out) || filesize($out) === 0) {
+                    @unlink($out);
+                    throw new \RuntimeException('Imagick produced an empty plain-text thumbnail');
+                }
+
+                return $out;
+            } catch (\Throwable $e) {
+                Log::warning('[ThumbnailGenerationService] Imagick plain-text thumbnail failed; using GD fallback', [
+                    'message' => $e->getMessage(),
+                ]);
+            } finally {
+                if (isset($labelPathTxt) && is_file($labelPathTxt)) {
+                    @unlink($labelPathTxt);
+                }
+            }
+        }
+
+        return $this->generatePlainTextThumbnailGdFallback($text, $styleConfig, $targetWidth, $targetHeight);
+    }
+
+    /**
+     * @return string Sanitized UTF-8 sample for caption rendering
+     */
+    protected function normalizePlainTextSampleForThumbnail(string $raw, string $originalFilename): string
+    {
+        $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $raw);
+        if (! is_string($converted) || $converted === '') {
+            $converted = preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $raw) ?? '';
+        }
+
+        $converted = str_replace("\0", '', $converted);
+        $converted = str_replace(["\r\n", "\r"], "\n", $converted);
+        $lines = explode("\n", $converted);
+        $lines = array_slice($lines, 0, 120);
+        $sample = implode("\n", $lines);
+        if (mb_strlen($sample) > 12_000) {
+            $sample = mb_substr($sample, 0, 12_000)."\n…";
+        }
+
+        $header = trim($originalFilename) !== '' ? ($originalFilename."\n\n") : '';
+
+        return $header.$sample;
+    }
+
+    /**
+     * @param  array<string, mixed>  $styleConfig
+     */
+    protected function generatePlainTextThumbnailGdFallback(string $text, array $styleConfig, int $targetWidth, int $targetHeight): string
+    {
+        $lines = explode("\n", $text);
+        $lines = array_slice($lines, 0, 40);
+        $img = imagecreatetruecolor($targetWidth, $targetHeight);
+        if ($img === false) {
+            throw new \RuntimeException('GD could not allocate image for plain-text thumbnail');
+        }
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $black = imagecolorallocate($img, 20, 20, 20);
+        imagefilledrectangle($img, 0, 0, $targetWidth, $targetHeight, $white);
+        $y = 8;
+        foreach ($lines as $line) {
+            $chunk = mb_strlen($line) > 110 ? mb_substr($line, 0, 107).'…' : $line;
+            $ascii = preg_replace('/[^\x20-\x7E\t]/', '?', $chunk) ?? '';
+            imagestring($img, 3, 8, $y, $ascii, $black);
+            $y += 16;
+            if ($y > $targetHeight - 20) {
+                break;
+            }
+        }
+
+        $outputFormat = config('assets.thumbnail.output_format', 'webp');
+        $quality = (int) ($styleConfig['quality'] ?? 85);
+        $extOut = $outputFormat === 'webp' ? 'webp' : 'jpg';
+        $out = tempnam(sys_get_temp_dir(), 'thumb_pltxt_gd_').'.'.$extOut;
+
+        if ($outputFormat === 'webp' && function_exists('imagewebp')) {
+            imagewebp($img, $out, $quality);
+        } else {
+            imagejpeg($img, $out, min(95, max(40, $quality)));
+        }
+        imagedestroy($img);
+
+        if (! is_file($out) || filesize($out) === 0) {
+            @unlink($out);
+            throw new \RuntimeException('GD plain-text thumbnail write failed');
+        }
+
+        return $out;
     }
 
     /**

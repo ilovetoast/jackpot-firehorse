@@ -62,7 +62,7 @@ class AiTagPolicyService
     {
         $settings = $this->getTenantSettings($tenant);
 
-        return $settings['enable_ai_tag_auto_apply'] ?? true;
+        return $settings['enable_ai_tag_auto_apply'] ?? (bool) config('ai.tenant_ai_tag_defaults.enable_ai_tag_auto_apply', true);
     }
 
     /**
@@ -287,14 +287,7 @@ class AiTagPolicyService
                 ->first();
 
             if (! $settings) {
-                return [
-                    'disable_ai_tagging' => false,
-                    'enable_ai_tag_suggestions' => true,
-                    'enable_ai_tag_auto_apply' => true,
-                    'ai_auto_tag_limit_mode' => 'best_practices',
-                    'ai_auto_tag_limit_value' => null,
-                    'ai_best_practices_limit' => self::BEST_PRACTICES_AUTO_TAG_LIMIT,
-                ];
+                return $this->getDefaultSettings();
             }
 
             return [
@@ -333,7 +326,7 @@ class AiTagPolicyService
         return [
             'disable_ai_tagging' => false,
             'enable_ai_tag_suggestions' => true,
-            'enable_ai_tag_auto_apply' => true,
+            'enable_ai_tag_auto_apply' => (bool) config('ai.tenant_ai_tag_defaults.enable_ai_tag_auto_apply', true),
             'ai_auto_tag_limit_mode' => 'best_practices',
             'ai_auto_tag_limit_value' => null,
             'ai_best_practices_limit' => self::BEST_PRACTICES_AUTO_TAG_LIMIT,

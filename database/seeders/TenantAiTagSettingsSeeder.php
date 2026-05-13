@@ -10,8 +10,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Tenant AI Tag Settings Seeder
  *
- * Initializes AI tagging settings for tenants missing a row (auto-apply up to best-practices cap by default).
- * Uses AiTagPolicyService to ensure consistency with the service's default settings.
+ * Initializes AI tagging settings for tenants missing a row. Defaults match
+ * AiTagPolicyService::getDefaultSettings() (including config `ai.tenant_ai_tag_defaults`,
+ * e.g. AI_TAGS_DEFAULT_AUTO_APPLY for accept-without-review / auto-apply).
  */
 class TenantAiTagSettingsSeeder extends Seeder
 {

@@ -4,7 +4,7 @@
  * (registry `model_glb`, DAM_3D enabled, and a GLB source URL from `preview_3d_viewer_url` or `original`).
  */
 import '@google/model-viewer'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePage } from '@inertiajs/react'
 import ThumbnailPreview from './ThumbnailPreview'
 import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
@@ -14,7 +14,15 @@ import {
     shouldShowRealtimeGlbModelViewer,
 } from '../utils/resolveAsset3dPreviewImage'
 
-function postPreview3dTelemetry(assetId, kind) {
+/**
+ * Server-side correlation for model-viewer failures. Browsers do not expose CORS text to JS,
+ * but when `page_origin` ≠ `model_origin` ops can treat failures as CDN CORS until proven otherwise.
+ *
+ * @param {string|number} assetId
+ * @param {'model_viewer_error'|'model_viewer_retry'|'model_viewer_open_full'|'model_viewer_fallback_active'} kind
+ * @param {{ page_origin?: string|null, model_origin?: string|null }} [origins]
+ */
+function postPreview3dTelemetry(assetId, kind, origins = {}) {
     if (!assetId || typeof window === 'undefined' || typeof window.fetch !== 'function') {
         return
     }
@@ -23,6 +31,7 @@ function postPreview3dTelemetry(assetId, kind) {
         typeof route === 'function'
             ? route('assets.preview-3d.telemetry', { asset: assetId })
             : `/app/assets/${assetId}/preview-3d/telemetry`
+    const body = { kind, ...origins }
     window
         .fetch(url, {
             method: 'POST',
@@ -32,10 +41,24 @@ function postPreview3dTelemetry(assetId, kind) {
                 'X-CSRF-TOKEN': csrf,
                 'X-Requested-With': 'XMLHttpRequest',
             },
-            body: JSON.stringify({ kind }),
+            body: JSON.stringify(body),
             credentials: 'same-origin',
         })
         .catch(() => {})
+}
+
+function resolveModelViewerOrigins(modelSrc) {
+    if (typeof window === 'undefined' || !modelSrc) {
+        return { page_origin: null, model_origin: null }
+    }
+    try {
+        return {
+            page_origin: window.location.origin,
+            model_origin: new URL(modelSrc, window.location.href).origin,
+        }
+    } catch {
+        return { page_origin: window.location.origin, model_origin: null }
+    }
 }
 
 /**
@@ -52,6 +75,16 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
 
     const eligible = shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true)
     const modelSrc = getRegistryModelGlbModelSourceUrl(asset, damFileTypes)
+    const crossOriginModel = useMemo(() => {
+        if (!modelSrc || typeof window === 'undefined') {
+            return false
+        }
+        try {
+            return new URL(modelSrc, window.location.href).origin !== window.location.origin
+        } catch {
+            return false
+        }
+    }, [modelSrc])
     const posterUrl = getRegistryModel3dPosterDisplayUrl(asset, failedRasterThumbnailUrls, damFileTypes)
     // Stub raster must not be model-viewer's `poster` — it stays visible and hides the GLB.
     const posterIsStub = asset?.preview_3d_poster_is_stub === true
@@ -77,8 +110,9 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
         const onErr = () => {
             setViewerFailed(true)
             setViewerLoading(false)
-            postPreview3dTelemetry(asset?.id, 'model_viewer_error')
-            postPreview3dTelemetry(asset?.id, 'model_viewer_fallback_active')
+            const origins = resolveModelViewerOrigins(modelSrc)
+            postPreview3dTelemetry(asset?.id, 'model_viewer_error', origins)
+            postPreview3dTelemetry(asset?.id, 'model_viewer_fallback_active', origins)
         }
         const onLoad = () => {
             setViewerLoading(false)
@@ -111,6 +145,12 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                 <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2 text-center">
                     <p className="text-sm font-medium text-gray-800">Preview unavailable</p>
                     <p className="mt-0.5 text-xs text-gray-500">Showing poster or placeholder.</p>
+                    {crossOriginModel ? (
+                        <p className="mt-1 max-w-md text-[11px] leading-snug text-amber-800">
+                            This file is served from a different host than the app. Missing CDN CORS headers often
+                            causes this — check CloudFront / S3 CORS for your app origin (see GLB preview ops doc).
+                        </p>
+                    ) : null}
                     {stubWhy ? (
                         <p className="mt-1 max-w-md text-[11px] leading-snug text-gray-600">{stubWhy}</p>
                     ) : null}
@@ -119,7 +159,7 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                             type="button"
                             className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 shadow-sm hover:bg-gray-50"
                             onClick={() => {
-                                postPreview3dTelemetry(asset?.id, 'model_viewer_retry')
+                                postPreview3dTelemetry(asset?.id, 'model_viewer_retry', resolveModelViewerOrigins(modelSrc))
                                 resetViewer()
                             }}
                         >
@@ -130,7 +170,9 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                             target="_blank"
                             rel="noopener noreferrer"
                             className="rounded-md border border-transparent px-3 py-1.5 text-xs font-medium text-sky-700 hover:underline"
-                            onClick={() => postPreview3dTelemetry(asset?.id, 'model_viewer_open_full')}
+                            onClick={() =>
+                                postPreview3dTelemetry(asset?.id, 'model_viewer_open_full', resolveModelViewerOrigins(modelSrc))
+                            }
                         >
                             Open full preview
                         </a>
@@ -180,7 +222,9 @@ export default function Model3dViewer({ asset, className = '', lightboxStage = f
                     target="_blank"
                     rel="noopener noreferrer"
                     className="rounded bg-white/90 px-2 py-1 text-xs font-medium text-sky-800 shadow hover:bg-white"
-                    onClick={() => postPreview3dTelemetry(asset?.id, 'model_viewer_open_full')}
+                    onClick={() =>
+                        postPreview3dTelemetry(asset?.id, 'model_viewer_open_full', resolveModelViewerOrigins(modelSrc))
+                    }
                 >
                     Open full preview
                 </a>

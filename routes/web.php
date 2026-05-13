@@ -727,6 +727,7 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
                 ->where('virtualGoogleFontGridId', '(campaign-google-font|google-font)-.+');
             Route::get('/assets/{asset}/processing-status', [\App\Http\Controllers\AssetController::class, 'processingStatus'])->name('assets.processing-status');
             Route::get('/assets/{asset}/preview-url', [\App\Http\Controllers\AssetController::class, 'previewUrl'])->name('assets.preview-url');
+            Route::get('/assets/{asset}/text-snippet', [\App\Http\Controllers\AssetController::class, 'textSnippet'])->name('assets.text-snippet');
             Route::get('/assets/{asset}/pdf-page/{page}', [\App\Http\Controllers\AssetPdfPageController::class, 'show'])
                 ->whereNumber('page')
                 ->name('assets.pdf-page.show');

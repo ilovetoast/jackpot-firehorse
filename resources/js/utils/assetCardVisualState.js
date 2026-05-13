@@ -24,7 +24,7 @@ const RAW_EXTENSIONS = new Set([
     'raw',
 ])
 
-const DESIGN_EXTENSIONS = new Set(['psd', 'psb', 'ai', 'eps'])
+const DESIGN_EXTENSIONS = new Set(['psd', 'psb', 'ai', 'eps', 'indd', 'idml'])
 
 function normalizeThumbStatus(asset) {
     return String(asset?.thumbnail_status?.value ?? asset?.thumbnail_status ?? '').toLowerCase()
@@ -86,7 +86,7 @@ function isDesignAsset(asset) {
     const ext = extensionOf(asset)
     const m = (asset?.mime_type || '').toLowerCase()
     if (DESIGN_EXTENSIONS.has(ext)) return true
-    return m.includes('photoshop') || m.includes('illustrator') || m.includes('postscript')
+    return m.includes('photoshop') || m.includes('illustrator') || m.includes('postscript') || m.includes('indesign')
 }
 
 function isVideoAsset(asset) {
