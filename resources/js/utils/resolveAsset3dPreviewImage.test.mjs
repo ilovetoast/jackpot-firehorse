@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { syncDamFileTypesFromPage } from './damFileTypes.js'
 import {
     getRegistryModel3dPosterDisplayUrl,
+    getRegistryModelGlbModelSourceUrl,
     isRegistryModel3dAsset,
     isRegistryModelGlbAsset,
     getRegistryModelGlbViewerDisplayUrl,
@@ -66,6 +67,24 @@ test('non-3D asset never returns poster from helper', () => {
     assert.equal(getRegistryModel3dPosterDisplayUrl(asset, new Set(), DAM_STUB), null)
 })
 
+test('GLB model source prefers preview_3d_viewer_url over original', () => {
+    const asset = {
+        file_extension: 'glb',
+        preview_3d_viewer_url: 'https://cdn.example.com/from-meta.glb',
+        original: 'https://cdn.example.com/original.glb',
+    }
+    assert.equal(getRegistryModelGlbModelSourceUrl(asset, DAM_STUB), 'https://cdn.example.com/from-meta.glb')
+})
+
+test('GLB model source falls back to signed original when viewer URL missing', () => {
+    const asset = {
+        file_extension: 'glb',
+        original: 'https://cdn.example.com/original.glb?sig=1',
+    }
+    assert.equal(getRegistryModelGlbModelSourceUrl(asset, DAM_STUB), 'https://cdn.example.com/original.glb?sig=1')
+    assert.equal(shouldShowRealtimeGlbModelViewer(asset, DAM_STUB, true), true)
+})
+
 test('shouldShowRealtimeGlbModelViewer when GLB, viewer URL, and DAM_3D', () => {
     const asset = {
         file_extension: 'glb',
@@ -74,6 +93,14 @@ test('shouldShowRealtimeGlbModelViewer when GLB, viewer URL, and DAM_3D', () => 
     assert.equal(shouldShowRealtimeGlbModelViewer(asset, DAM_STUB, true), true)
     assert.equal(shouldShowRealtimeGlbModelViewer(asset, DAM_STUB, false), false)
     assert.equal(shouldShowRealtimeGlbModelViewer({ ...asset, preview_3d_viewer_url: '  ' }, DAM_STUB, true), false)
+    assert.equal(
+        shouldShowRealtimeGlbModelViewer(
+            { file_extension: 'glb', preview_3d_viewer_url: '  ', original: 'https://cdn.example.com/o.glb' },
+            DAM_STUB,
+            true,
+        ),
+        true,
+    )
     assert.equal(getRegistryModelGlbViewerDisplayUrl(asset), 'https://cdn.example.com/model.glb?sig=1')
     assert.equal(isRegistryModelGlbAsset(asset, DAM_STUB), true)
 })

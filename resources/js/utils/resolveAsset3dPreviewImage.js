@@ -100,6 +100,26 @@ export function getRegistryModelGlbViewerDisplayUrl(asset) {
 }
 
 /**
+ * Signed URL for model-viewer `src`: prefers `preview_3d_viewer_url`, else the asset's
+ * native GLB `original` delivery URL when `preview_3d` metadata is not populated yet.
+ *
+ * @param {object|null|undefined} asset
+ * @param {import('./damFileTypes.js').DamFileTypesPayload|null|undefined} [damOverride]
+ * @returns {string|null}
+ */
+export function getRegistryModelGlbModelSourceUrl(asset, damOverride) {
+    if (!isRegistryModelGlbAsset(asset, damOverride)) {
+        return null
+    }
+    const fromPreview = getRegistryModelGlbViewerDisplayUrl(asset)
+    if (fromPreview) {
+        return fromPreview
+    }
+    const orig = typeof asset?.original === 'string' ? asset.original.trim() : ''
+    return orig !== '' ? orig : null
+}
+
+/**
  * Whether to mount the realtime GLB viewer (Phase 5B).
  *
  * @param {object|null|undefined} asset
@@ -109,6 +129,5 @@ export function getRegistryModelGlbViewerDisplayUrl(asset) {
  */
 export function shouldShowRealtimeGlbModelViewer(asset, damOverride, dam3dEnabled) {
     if (!dam3dEnabled) return false
-    if (!isRegistryModelGlbAsset(asset, damOverride)) return false
-    return getRegistryModelGlbViewerDisplayUrl(asset) != null
+    return getRegistryModelGlbModelSourceUrl(asset, damOverride) != null
 }

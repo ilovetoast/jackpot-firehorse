@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\Asset;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Signed/proxied CDN URLs for 3D preview assets (poster + future GLB viewer).
@@ -13,13 +14,25 @@ use Illuminate\Support\Facades\Log;
 final class Preview3dDeliveryUrls
 {
     /**
-     * @return array{preview_3d_poster_url: string|null, preview_3d_viewer_url: string|null, preview_3d_revision: string}
+     * @return array{
+     *     preview_3d_poster_url: string|null,
+     *     preview_3d_viewer_url: string|null,
+     *     preview_3d_revision: string,
+     *     preview_3d_poster_is_stub: bool,
+     *     preview_3d_poster_stub_reason: string|null,
+     * }
      */
     public static function forAuthenticatedAsset(Asset $asset): array
     {
         $revision = Preview3dMetadata::cacheRevisionToken($asset->metadata ?? []);
         $meta = $asset->metadata ?? [];
         $p3 = is_array($meta['preview_3d'] ?? null) ? $meta['preview_3d'] : [];
+        $dbg = is_array($p3['debug'] ?? null) ? $p3['debug'] : [];
+        $posterIsStub = (bool) ($dbg['poster_stub'] ?? false);
+        $failure = $p3['failure_message'] ?? null;
+        $stubReason = $posterIsStub && is_string($failure) && trim($failure) !== ''
+            ? Str::limit(trim($failure), 280)
+            : null;
         $expectsPoster = isset($p3['poster_path']) && is_string($p3['poster_path']) && trim($p3['poster_path']) !== '';
         $expectsViewer = isset($p3['viewer_path']) && is_string($p3['viewer_path']) && trim($p3['viewer_path']) !== '';
 
@@ -30,6 +43,8 @@ final class Preview3dDeliveryUrls
             'preview_3d_poster_url' => $poster,
             'preview_3d_viewer_url' => $viewer,
             'preview_3d_revision' => $revision,
+            'preview_3d_poster_is_stub' => $posterIsStub,
+            'preview_3d_poster_stub_reason' => $stubReason,
         ];
     }
 

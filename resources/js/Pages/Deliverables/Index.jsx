@@ -22,10 +22,7 @@ import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { useBucketOptional } from '../../contexts/BucketContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
-import {
-    computeThumbnailPipelineGridSummary,
-    scrollToFirstPipelineAttentionAssetInGrid,
-} from '../../utils/assetGridPipelineSummary'
+import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
     revokeUploadPreviewIfServerRasterPresent,
@@ -187,9 +184,6 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
         () => computeThumbnailPipelineGridSummary(safeAssetsList),
         [safeAssetsList],
     )
-    const scrollToPipelineAttentionAsset = useCallback(() => {
-        scrollToFirstPipelineAttentionAssetInGrid((assetsList || []).filter(Boolean))
-    }, [assetsList])
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
@@ -864,7 +858,6 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                                 layoutMode={layoutMode}
                                 onLayoutModeChange={setLayoutMode}
                                 thumbnailPipelineSummary={thumbnailPipelineSummary}
-                                onPipelineAttentionClick={scrollToPipelineAttentionAsset}
                                 primaryColor={workspaceAccentColor}
                                 primaryMetadataFiltersAssetType="deliverable"
                                 filterable_schema={filterable_schema}

@@ -8,8 +8,9 @@
  * behaviour — not whether a .glb/.fbx/etc. may be stored.
  *
  * Environment (minimal):
- *   DAM_3D                 When true, 3D raster thumbnail/poster pipeline may run.
- *   DAM_3D_BLENDER_BINARY  Optional path to the Blender executable. **Workers:** use the official **Blender 4.5.3 LTS** linux-x64 tarball, install to **`/usr/local/bin/blender`**, and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** (see `docs/environments/BLENDER_DAM_3D_INSTALL.md`). Never required on web-only PHP nodes.
+ *   DAM_3D                        When true, 3D raster thumbnail/poster pipeline may run.
+ *   DAM_3D_BLENDER_BINARY         Optional path to the Blender executable. **Workers:** use the official **Blender 4.5.3 LTS** linux-x64 tarball, install to **`/usr/local/bin/blender`**, and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** (see `docs/environments/BLENDER_DAM_3D_INSTALL.md`). Never required on web-only PHP nodes.
+ *   DAM_3D_REAL_RENDER_ENABLED    Default true. Set false to always use stub posters (workers without Blender).
  */
 return [
     'enabled' => (bool) env('DAM_3D', false),
@@ -18,9 +19,9 @@ return [
 
     /**
      * When true and DAM_3D is enabled, workers attempt a real Blender render when the binary is present.
-     * (Blender presence is evaluated at runtime; no extra env var.)
+     * Set DAM_3D_REAL_RENDER_ENABLED=false to force stub posters only (debug / workers without Blender).
      */
-    'real_render_enabled' => true,
+    'real_render_enabled' => (bool) env('DAM_3D_REAL_RENDER_ENABLED', true),
 
     /** When true, STL/OBJ/FBX/BLEND may export a canonical GLB sidecar (viewer_path). */
     'conversion_enabled' => false,

@@ -1154,6 +1154,8 @@ class AssetController extends Controller
                         'preview_3d_poster_url' => null,
                         'preview_3d_viewer_url' => null,
                         'preview_3d_revision' => null,
+                        'preview_3d_poster_is_stub' => false,
+                        'preview_3d_poster_stub_reason' => null,
                         'analysis_status' => 'uploading',
                         'health_status' => 'healthy',
                         'brand_intelligence' => null,
@@ -2170,6 +2172,8 @@ class AssetController extends Controller
             'preview_3d_poster_url' => null,
             'preview_3d_viewer_url' => null,
             'preview_3d_revision' => null,
+            'preview_3d_poster_is_stub' => false,
+            'preview_3d_poster_stub_reason' => null,
             'degraded' => true,
         ], 200);
     }
@@ -2405,6 +2409,8 @@ class AssetController extends Controller
             'preview_3d_poster_url' => null,
             'preview_3d_viewer_url' => null,
             'preview_3d_revision' => null,
+            'preview_3d_poster_is_stub' => false,
+            'preview_3d_poster_stub_reason' => null,
             'analysis_status' => null,
             'actions' => [],
         ], 200);

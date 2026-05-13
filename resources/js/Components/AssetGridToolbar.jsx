@@ -88,8 +88,6 @@ export default function AssetGridToolbar({
     onGridImageFitChange = null,
     /** Optional: subtle copy when many grid tiles are still on server preview pipeline */
     thumbnailPipelineSummary = null,
-    /** When set with attention > 0, "N assets need attention" scrolls the first matching grid cell into view (scoped to the asset grid). */
-    onPipelineAttentionClick = null,
 }) {
     const inertiaPage = usePage()
     const pageProps = inertiaPage.props
@@ -541,41 +539,18 @@ export default function AssetGridToolbar({
 
     const pipelineHasNote =
         thumbnailPipelineSummary &&
-        (thumbnailPipelineSummary.processing > 0 ||
-            thumbnailPipelineSummary.attention > 0 ||
-            (thumbnailPipelineSummary.rawProcessing ?? 0) > 0)
+        (thumbnailPipelineSummary.processing > 0 || (thumbnailPipelineSummary.rawProcessing ?? 0) > 0)
 
     const pipelineNote = pipelineHasNote ? (
         <div className="text-[11px] leading-snug text-gray-500" role="status">
-            <p>
-                {thumbnailPipelineSummary.processing > 0 ? (
+            {thumbnailPipelineSummary.processing > 0 ? (
+                <p>
                     <span>
                         {thumbnailPipelineSummary.processing}{' '}
                         {thumbnailPipelineSummary.processing === 1 ? 'preview is' : 'previews are'} still processing
                     </span>
-                ) : null}
-                {thumbnailPipelineSummary.processing > 0 && thumbnailPipelineSummary.attention > 0 ? (
-                    <span aria-hidden> · </span>
-                ) : null}
-                {thumbnailPipelineSummary.attention > 0 ? (
-                    onPipelineAttentionClick ? (
-                        <button
-                            type="button"
-                            onClick={onPipelineAttentionClick}
-                            className="inline max-w-full text-left font-inherit text-inherit underline decoration-gray-400/80 underline-offset-2 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/80 focus-visible:ring-offset-1 rounded-sm"
-                            aria-label="Scroll to the first asset in this grid that needs attention"
-                        >
-                            {thumbnailPipelineSummary.attention}{' '}
-                            {thumbnailPipelineSummary.attention === 1 ? 'asset needs' : 'assets need'} attention
-                        </button>
-                    ) : (
-                        <span>
-                            {thumbnailPipelineSummary.attention}{' '}
-                            {thumbnailPipelineSummary.attention === 1 ? 'asset needs' : 'assets need'} attention
-                        </span>
-                    )
-                ) : null}
-            </p>
+                </p>
+            ) : null}
             {(thumbnailPipelineSummary.rawProcessing ?? 0) > 0 ? (
                 <p className="mt-0.5 text-[10px] text-gray-500">
                     {thumbnailPipelineSummary.rawProcessing}{' '}

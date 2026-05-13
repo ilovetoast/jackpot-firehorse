@@ -16,5 +16,6 @@ final class Dam3dBlenderBinaryConfigTest extends TestCase
             "env('DAM_3D_BLENDER_BINARY', '/usr/local/bin/blender')",
             $php
         );
+        $this->assertStringContainsString("env('DAM_3D_REAL_RENDER_ENABLED', true)", $php);
     }
 }

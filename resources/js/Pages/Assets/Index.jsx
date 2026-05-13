@@ -15,10 +15,7 @@ import BulkMetadataEditModal from '../../Components/BulkMetadataEditModal'
 import SelectionActionBar from '../../Components/SelectionActionBar'
 import { useSelection } from '../../contexts/SelectionContext'
 import { mergeAsset, warnIfOverwritingCompletedThumbnail, dedupeAssetsById } from '../../utils/assetUtils'
-import {
-    computeThumbnailPipelineGridSummary,
-    scrollToFirstPipelineAttentionAssetInGrid,
-} from '../../utils/assetGridPipelineSummary'
+import { computeThumbnailPipelineGridSummary } from '../../utils/assetGridPipelineSummary'
 import {
     clearUploadPreviewsOlderThan,
     revokeUploadPreviewIfServerRasterPresent,
@@ -256,9 +253,6 @@ export default function AssetsIndex({
         () => computeThumbnailPipelineGridSummary(safeAssetsList),
         [safeAssetsList],
     )
-    const scrollToPipelineAttentionAsset = useCallback(() => {
-        scrollToFirstPipelineAttentionAssetInGrid((assetsList || []).filter(Boolean))
-    }, [assetsList])
     const activeAsset = activeAssetId ? safeAssetsList.find(asset => asset?.id === activeAssetId) : null
     
     // Close drawer ONLY if active asset ID truly doesn't exist in current assets array
@@ -1433,7 +1427,6 @@ export default function AssetsIndex({
                                 gridImageFit={gridImageFit}
                                 onGridImageFitChange={setGridImageFit}
                                 thumbnailPipelineSummary={thumbnailPipelineSummary}
-                                onPipelineAttentionClick={scrollToPipelineAttentionAsset}
                                 primaryColor={workspaceAccentColor}
                                 selectedCount={selectedCount}
                                 filterable_schema={filterable_schema}

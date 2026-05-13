@@ -76,6 +76,7 @@ export function getThumbnailVersion(asset) {
     const preview3dPosterUrl = asset.preview_3d_poster_url || ''
     const preview3dViewerUrl = asset.preview_3d_viewer_url || ''
     const preview3dRevision = asset.preview_3d_revision || ''
+    const preview3dPosterStub = asset.preview_3d_poster_is_stub === true ? 'stub1' : 'stub0'
 
     // Secondary: thumbnail_status (changes when processing completes)
     const thumbnailStatus = asset.thumbnail_status?.value || asset.thumbnail_status || ''
@@ -97,7 +98,7 @@ export function getThumbnailVersion(asset) {
     
     // Combine into stable version string
     // This will change when any thumbnail-related field changes
-    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${preview3dPosterUrl}|${preview3dViewerUrl}|${preview3dRevision}|${thumbnailStatus}|${updatedAt}|${modeUrlsKey}|${modesStatusKey}|${modeMetaCacheKey}`
+    return `${thumbnailUrl}|${finalThumbnailUrl}|${previewThumbnailUrl}|${preview3dPosterUrl}|${preview3dViewerUrl}|${preview3dRevision}|${preview3dPosterStub}|${thumbnailStatus}|${updatedAt}|${modeUrlsKey}|${modesStatusKey}|${modeMetaCacheKey}`
 }
 
 /**

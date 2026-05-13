@@ -119,6 +119,12 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                     preview_3d_poster_url: asset.preview_3d_poster_url || prevDrawerAsset?.preview_3d_poster_url,
                     preview_3d_viewer_url: asset.preview_3d_viewer_url || prevDrawerAsset?.preview_3d_viewer_url,
                     preview_3d_revision: asset.preview_3d_revision || prevDrawerAsset?.preview_3d_revision,
+                    preview_3d_poster_is_stub:
+                        typeof asset.preview_3d_poster_is_stub === 'boolean'
+                            ? asset.preview_3d_poster_is_stub
+                            : (prevDrawerAsset?.preview_3d_poster_is_stub ?? false),
+                    preview_3d_poster_stub_reason:
+                        asset.preview_3d_poster_stub_reason ?? prevDrawerAsset?.preview_3d_poster_stub_reason ?? null,
                     thumbnail_version: asset.thumbnail_version || prevDrawerAsset?.thumbnail_version,
                     thumbnail_mode_urls: mergeThumbnailModeUrlsDrawerSync(
                         asset.thumbnail_mode_urls,
@@ -238,6 +244,12 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                 const previewNowAvailable = !!updatedAssetData.preview_thumbnail_url && !currentAsset.preview_thumbnail_url
                 const posterNowAvailable =
                     !!updatedAssetData.preview_3d_poster_url && !currentAsset.preview_3d_poster_url
+                const posterStubChanged =
+                    Boolean(updatedAssetData.preview_3d_poster_is_stub) !==
+                    Boolean(currentAsset.preview_3d_poster_is_stub)
+                const stubReasonChanged =
+                    String(updatedAssetData.preview_3d_poster_stub_reason ?? '') !==
+                    String(currentAsset.preview_3d_poster_stub_reason ?? '')
                 const statusChanged = updatedAssetData.thumbnail_status !== thumbnailStatus
                 const analysisStatusChanged =
                     String(updatedAssetData.analysis_status ?? '') !==
@@ -266,6 +278,8 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                     finalNowAvailable ||
                     previewNowAvailable ||
                     posterNowAvailable ||
+                    posterStubChanged ||
+                    stubReasonChanged ||
                     statusChanged ||
                     analysisStatusChanged ||
                     errorChanged ||
@@ -287,6 +301,14 @@ export function useDrawerThumbnailPoll({ asset, onAssetUpdate, pollEnabled = tru
                         preview_3d_viewer_url:
                             updatedAssetData.preview_3d_viewer_url ?? currentAsset.preview_3d_viewer_url,
                         preview_3d_revision: updatedAssetData.preview_3d_revision ?? currentAsset.preview_3d_revision,
+                        preview_3d_poster_is_stub:
+                            typeof updatedAssetData.preview_3d_poster_is_stub === 'boolean'
+                                ? updatedAssetData.preview_3d_poster_is_stub
+                                : (currentAsset.preview_3d_poster_is_stub ?? false),
+                        preview_3d_poster_stub_reason:
+                            updatedAssetData.preview_3d_poster_stub_reason ??
+                            currentAsset.preview_3d_poster_stub_reason ??
+                            null,
                         thumbnail_status: updatedAssetData.thumbnail_status ?? currentAsset.thumbnail_status,
                         thumbnail_version: updatedAssetData.thumbnail_version ?? currentAsset.thumbnail_version,
                         thumbnail_error: updatedAssetData.thumbnail_error ?? currentAsset.thumbnail_error,

@@ -1328,19 +1328,23 @@ class GenerateThumbnailsJob implements ShouldQueue
 
             if ($version) {
                 // Version path: persist metadata onto version
+                $mergedVersionMeta = array_merge($version->metadata ?? [], $thumbnailMetadata);
+                $mergedVersionMeta = $this->stripStaleThumbnailFailureMetadataAfterSuccess($mergedVersionMeta);
                 $version->update([
-                    'metadata' => array_merge($version->metadata ?? [], $thumbnailMetadata),
+                    'metadata' => $mergedVersionMeta,
                     'pipeline_status' => 'complete',
                 ]);
                 // CRITICAL: Also sync thumbnail metadata to asset so thumbnailPathForStyle, batch endpoint, and UI work.
                 // Asset is the display entity; version stores source. Thumbnails must be readable from asset.
                 $currentMetadata = $asset->metadata ?? [];
                 $currentMetadata = array_merge($currentMetadata, $thumbnailMetadata);
+                $currentMetadata = $this->stripStaleThumbnailFailureMetadataAfterSuccess($currentMetadata);
                 $asset->update(['metadata' => $currentMetadata]);
             } else {
                 // Legacy path: persist to asset metadata
                 $currentMetadata = $asset->metadata ?? [];
                 $currentMetadata = array_merge($currentMetadata, $thumbnailMetadata);
+                $currentMetadata = $this->stripStaleThumbnailFailureMetadataAfterSuccess($currentMetadata);
             }
 
             // Asset pipeline state (thumbnail_status, analysis_status) - always updated for pipeline progression
@@ -2205,6 +2209,26 @@ class GenerateThumbnailsJob implements ShouldQueue
                 'pipeline_status' => 'complete',
             ]);
         }
+    }
+
+    /**
+     * ProcessAssetJob::failed() (and similar paths) merge skip/preview messages onto metadata.
+     * When thumbnails later complete, array_merge does not remove those keys — clear them here
+     * so the UI and fullscreen preview match actual derivative state.
+     */
+    private function stripStaleThumbnailFailureMetadataAfterSuccess(array $meta): array
+    {
+        foreach ([
+            'thumbnail_skip_reason',
+            'thumbnail_skip_message',
+            'preview_unavailable_user_message',
+            'pipeline_process_asset_exhausted_at',
+            'pipeline_aborted_after_process_failure',
+        ] as $key) {
+            unset($meta[$key]);
+        }
+
+        return $meta;
     }
 
     protected function isLikelyTimeoutOrExhaustion(\Throwable $exception): bool

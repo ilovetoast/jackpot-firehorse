@@ -125,10 +125,13 @@ import {
 import { ensureAccentContrastOnWhite } from '../utils/colorUtils'
 import { resolveTrackedSingleAssetFileUrl, saveUrlAsDownload } from '../utils/singleAssetDownload'
 
-/** Assets that can appear in the drawer fullscreen carousel / lightbox (includes fonts). */
-function assetSupportsLightboxCarousel(a) {
+/** Assets that can appear in the drawer fullscreen carousel / lightbox (includes fonts, interactive GLB). */
+function assetSupportsLightboxCarousel(a, damFileTypes = null, dam3dEnabled = false) {
     if (!a) {
         return false
+    }
+    if (dam3dEnabled && shouldShowRealtimeGlbModelViewer(a, damFileTypes ?? undefined, true)) {
+        return true
     }
     if (a.uses_pdf_page_preview === true) {
         return true
@@ -585,8 +588,10 @@ export default function AssetDrawer({
     const imageAssets = useMemo(() => {
         const safe = (assets || []).filter(Boolean)
         if (safe.length === 0) return []
-        return safe.filter((a) => assetSupportsLightboxCarousel(a))
-    }, [assets])
+        return safe.filter((a) =>
+            assetSupportsLightboxCarousel(a, pageProps.dam_file_types, pageProps.dam_3d_enabled === true),
+        )
+    }, [assets, pageProps.dam_file_types, pageProps.dam_3d_enabled])
 
     // Phase 3.1: Carousel state for zoom modal
     // Track current asset index in carousel (for navigation)
@@ -1500,7 +1505,14 @@ export default function AssetDrawer({
 
     const seekVideoFromInsightsMoment = useCallback(
         (m) => {
-            if (!displayAsset?.id || !assetSupportsLightboxCarousel(displayAsset)) {
+            if (
+                !displayAsset?.id ||
+                !assetSupportsLightboxCarousel(
+                    displayAsset,
+                    pageProps.dam_file_types,
+                    pageProps.dam_3d_enabled === true,
+                )
+            ) {
                 return
             }
             const mime = (displayAsset.mime_type || '').toLowerCase()
@@ -1536,7 +1548,7 @@ export default function AssetDrawer({
             setPendingLightboxSeekSeconds(sec)
             setShowZoomModal(true)
         },
-        [displayAsset, imageAssets],
+        [displayAsset, imageAssets, pageProps.dam_file_types, pageProps.dam_3d_enabled],
     )
 
     // Carousel: when the drawer asset is not lightbox-eligible (e.g. OBJ), `imageAssets[carouselIndex]` can be a
@@ -2624,7 +2636,10 @@ export default function AssetDrawer({
         if (!displayAsset?.id) {
             return false
         }
-        if (!assetSupportsLightboxCarousel(displayAsset)) {
+        if (showDrawerRealtimeGlb) {
+            return true
+        }
+        if (!assetSupportsLightboxCarousel(displayAsset, pageProps.dam_file_types, pageProps.dam_3d_enabled === true)) {
             return false
         }
         if (displayAsset.is_virtual_google_font) {
@@ -2659,6 +2674,9 @@ export default function AssetDrawer({
         return state === 'AVAILABLE'
     }, [
         displayAsset,
+        showDrawerRealtimeGlb,
+        pageProps.dam_file_types,
+        pageProps.dam_3d_enabled,
         drawerEphemeralLocalPreviewUrl,
         isAudio,
         usesPdfPagePreview,
@@ -2699,10 +2717,10 @@ export default function AssetDrawer({
         if (!showZoomModal) {
             return
         }
-        if (!assetSupportsLightboxCarousel(currentCarouselAsset)) {
+        if (!assetSupportsLightboxCarousel(currentCarouselAsset, pageProps.dam_file_types, pageProps.dam_3d_enabled === true)) {
             setShowZoomModal(false)
         }
-    }, [showZoomModal, currentCarouselAsset])
+    }, [showZoomModal, currentCarouselAsset, pageProps.dam_file_types, pageProps.dam_3d_enabled])
 
     /**
      * Same raster the grid uses (baked orientation). The signed ORIGINAL URL is often decoded
@@ -2903,7 +2921,7 @@ export default function AssetDrawer({
     useEffect(() => {
         if (!initialZoomOpen || !displayAsset?.id) return
         if (initialZoomAppliedRef.current) return
-        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile || isAudio || usesPdfPagePreview)) {
+        if (!(hasThumbnailSupport || isVideo || isVirtualGoogleFont || isFontFile || isAudio || usesPdfPagePreview || showDrawerRealtimeGlb)) {
             initialZoomAppliedRef.current = true
             onInitialZoomConsumed?.()
             return
@@ -2940,6 +2958,7 @@ export default function AssetDrawer({
         onInitialZoomConsumed,
         initialVideoSeekSeconds,
         canOpenDrawerLightbox,
+        showDrawerRealtimeGlb,
     ])
 
     // Phase 3.1: Derive stable thumbnail version signal
@@ -4834,7 +4853,18 @@ export default function AssetDrawer({
                                     disableFontLoad={externalCollectionGuest}
                                 />
                             ) : showDrawerRealtimeGlb ? (
-                                <div className="relative h-full w-full min-h-[240px] min-w-0">
+                                <div
+                                    className={`relative h-full w-full min-h-[240px] min-w-0 ${canOpenDrawerLightbox ? 'cursor-pointer' : ''}`}
+                                    onDoubleClick={(e) => {
+                                        e.stopPropagation()
+                                        if (canOpenDrawerLightbox) openDrawerLightbox()
+                                    }}
+                                    title={
+                                        canOpenDrawerLightbox
+                                            ? 'Double-click for fullscreen interactive preview'
+                                            : undefined
+                                    }
+                                >
                                     <Model3dViewer asset={displayAsset} className="h-full w-full min-h-[280px]" />
                                 </div>
                             ) : hasThumbnailSupport && displayAsset.id ? (
@@ -7681,7 +7711,11 @@ export default function AssetDrawer({
 
             {/* Lightbox: media + optional right column (AssetDetailPanel) */}
             {showZoomModal &&
-                assetSupportsLightboxCarousel(currentCarouselAsset || displayAsset) &&
+                assetSupportsLightboxCarousel(
+                    currentCarouselAsset || displayAsset,
+                    pageProps.dam_file_types,
+                    pageProps.dam_3d_enabled === true,
+                ) &&
                 (currentCarouselAsset?.id || displayAsset?.id) &&
                 typeof document !== 'undefined' &&
                 createPortal(
@@ -7787,6 +7821,21 @@ export default function AssetDrawer({
                                         variant="lightbox"
                                         disableFontLoad={externalCollectionGuest}
                                     />
+                                )
+                            }
+                            if (
+                                currentCarouselAsset?.id &&
+                                pageProps.dam_3d_enabled === true &&
+                                shouldShowRealtimeGlbModelViewer(currentCarouselAsset, pageProps.dam_file_types, true)
+                            ) {
+                                return (
+                                    <div className="relative flex h-full min-h-[min(80dvh,720px)] w-full max-w-[min(100vw-2rem,1200px)] flex-1 flex-col items-stretch justify-center">
+                                        <Model3dViewer
+                                            asset={currentCarouselAsset}
+                                            lightboxStage
+                                            className="min-h-0 flex-1 border border-white/10 bg-neutral-900/50 shadow-2xl !rounded-xl"
+                                        />
+                                    </div>
                                 )
                             }
                             const currentMimeType = currentCarouselAsset.mime_type || ''
