@@ -113,7 +113,7 @@ export default function BrandsIndex({ brands, limits, can_remove_user_from_compa
                                                         {brand.name}
                                                     </p>
                                                     {brand.is_default && (
-                                                        <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)]">
+                                                        <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-on-soft-bg)]">
                                                             Default
                                                         </span>
                                                     )}
@@ -633,7 +633,7 @@ function PendingInvitationCard({ invitation, brandId }) {
                     <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
                         {invitation.is_creator_invite ? (
-                            <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)] ring-1 ring-inset ring-[var(--jp-bs-soft-border)]">
+                            <span className="inline-flex items-center rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs font-medium text-[var(--jp-bs-on-soft-bg)] ring-1 ring-inset ring-[var(--jp-bs-soft-border)]">
                                 Creator
                             </span>
                         ) : null}

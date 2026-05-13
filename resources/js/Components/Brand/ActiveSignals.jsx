@@ -10,7 +10,7 @@ import {
     ArrowRightIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
-import { hexToRgba, pickProminentAccentColor, resolveOverviewIconColor } from '../../utils/colorUtils'
+import { hexToRgba, normalizeHexColor, resolveOverviewIconColor } from '../../utils/colorUtils'
 
 const ICON_MAP = {
     sparkles: SparklesIcon,
@@ -53,9 +53,6 @@ export default function ActiveSignals({
     signals = [],
     insights = [],
     brandColor = '#6366f1',
-    /** Brand accent (e.g. workspace accent); used with primary/secondary to pick a vivid “action required” frame. */
-    accentBrandColor = null,
-    secondaryBrandColor = null,
     /** Resolved readable icon color on dark cards; when omitted, derived from brandColor only. */
     iconAccentColor = null,
     permissions = {},
@@ -65,11 +62,7 @@ export default function ActiveSignals({
     canManageCreatorsDashboard = false,
 }) {
     const iconFill = iconAccentColor ?? resolveOverviewIconColor(brandColor)
-    const actionHighlightHex = pickProminentAccentColor(brandColor, accentBrandColor, secondaryBrandColor)
-    const actionIconTint = resolveOverviewIconColor(actionHighlightHex, {
-        secondary: secondaryBrandColor,
-        accent: accentBrandColor,
-    })
+    const actionHighlightHex = normalizeHexColor(brandColor)
 
     const visible = signals.filter((s) => {
         if (!s.permission) return true
@@ -141,7 +134,7 @@ export default function ActiveSignals({
                                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                                 style={{
                                     backgroundColor: hexToRgba(actionHighlightHex, 0.22),
-                                    color: actionIconTint,
+                                    color: iconFill,
                                 }}
                             >
                                 <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
@@ -194,7 +187,7 @@ export default function ActiveSignals({
                                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                                 style={{
                                     backgroundColor: hexToRgba(actionHighlightHex, 0.22),
-                                    color: actionIconTint,
+                                    color: iconFill,
                                 }}
                             >
                                 <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
@@ -242,7 +235,7 @@ export default function ActiveSignals({
                                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                                 style={{
                                     backgroundColor: hexToRgba(actionHighlightHex, 0.22),
-                                    color: actionIconTint,
+                                    color: iconFill,
                                 }}
                             >
                                 <ExclamationTriangleIcon className="h-5 w-5" aria-hidden />
@@ -310,12 +303,17 @@ export default function ActiveSignals({
                                     <div
                                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
                                         style={{
-                                            backgroundColor: isHigh ? 'rgba(251, 191, 36, 0.12)' : `${brandColor}18`,
+                                            backgroundColor: isHigh
+                                                ? hexToRgba(actionHighlightHex, 0.2)
+                                                : `${brandColor}18`,
                                         }}
                                     >
                                         <Icon
-                                            className={`h-3.5 w-3.5 shrink-0 ${isHigh ? 'text-amber-400/85' : ''}`}
-                                            style={!isHigh ? { color: iconFill } : undefined}
+                                            className="h-3.5 w-3.5 shrink-0"
+                                            style={{
+                                                color: iconFill,
+                                                opacity: isHigh ? 1 : 0.88,
+                                            }}
                                         />
                                     </div>
                                     <span className={isHigh ? 'text-white/95 font-medium' : 'text-white/85'}>
@@ -351,7 +349,10 @@ export default function ActiveSignals({
                                         </div>
                                         {matchedInsight?.text && (
                                             <div className="flex items-start gap-2 pl-11 -mt-0.5">
-                                                <LightBulbIcon className="w-3.5 h-3.5 text-amber-400/40 shrink-0 mt-0.5" />
+                                                <LightBulbIcon
+                                                    className="w-3.5 h-3.5 shrink-0 mt-0.5"
+                                                    style={{ color: iconFill, opacity: 0.45 }}
+                                                />
                                                 <span className="text-sm italic text-white/45">
                                                     {matchedInsight.href ? (
                                                         <Link

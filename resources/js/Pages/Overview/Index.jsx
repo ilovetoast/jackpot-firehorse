@@ -164,6 +164,16 @@ export default function Overview() {
         [activeBrand, brandColor]
     )
 
+    /** Icons + wells on task-column cards — keyed off cinematic accent so chrome matches Getting Started. */
+    const overviewTaskChromeIconColor = useMemo(
+        () =>
+            resolveOverviewIconColor(cinematicAccent, {
+                secondary: secondaryForBackdrop,
+                accent: accentForBackdrop,
+            }),
+        [cinematicAccent, secondaryForBackdrop, accentForBackdrop]
+    )
+
     const managedAgencyClients = authFromPage?.managed_agency_clients ?? []
     const showManagedCompanies =
         Boolean(authFromPage?.activeCompany?.is_agency) && managedAgencyClients.length > 0
@@ -555,7 +565,7 @@ export default function Overview() {
                                             <CreatorProgressCard
                                                 loading={prostaffMeLoading}
                                                 data={prostaffMe}
-                                                brandColor={brandColor}
+                                                brandColor={cinematicAccent}
                                             />
                                         </div>
                                     )}
@@ -597,15 +607,15 @@ export default function Overview() {
                                         <div
                                             className="overflow-hidden rounded-xl border border-white/15 bg-zinc-950/35 px-4 py-3.5 backdrop-blur-md"
                                             style={{
-                                                borderColor: hexToRgba(brandColor, 0.4),
-                                                background: `linear-gradient(to bottom right, ${hexToRgba(brandColor, 0.14)}, rgba(12, 12, 14, 0.5))`,
-                                                boxShadow: `0 0 28px ${hexToRgba(brandColor, 0.1)}, inset 0 1px 0 ${hexToRgba(brandColor, 0.18)}`,
+                                                borderColor: hexToRgba(cinematicAccent, 0.4),
+                                                background: `linear-gradient(to bottom right, ${hexToRgba(cinematicAccent, 0.14)}, rgba(12, 12, 14, 0.5))`,
+                                                boxShadow: `0 0 28px ${hexToRgba(cinematicAccent, 0.1)}, inset 0 1px 0 ${hexToRgba(cinematicAccent, 0.18)}`,
                                             }}
                                         >
                                             <div className="flex items-start gap-3">
                                                 <div
                                                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-                                                    style={{ backgroundColor: hexToRgba(brandColor, 0.22) }}
+                                                    style={{ backgroundColor: hexToRgba(cinematicAccent, 0.22) }}
                                                 >
                                                     <EnvelopeIcon className="h-5 w-5 text-white/90" aria-hidden />
                                                 </div>
@@ -646,7 +656,7 @@ export default function Overview() {
                                         <OnboardingCard
                                             progress={onboardingStatus}
                                             checklist={onboardingChecklist}
-                                            brandColor={brandColor}
+                                            brandColor={cinematicAccent}
                                             brand={activeBrand}
                                         />
                                     </div>
@@ -656,8 +666,8 @@ export default function Overview() {
                                     <div className="mt-3 sm:mt-4">
                                         <OverviewCreatorInsights
                                             brandId={brandId}
-                                            brandColor={brandColor}
-                                            iconAccentColor={overviewIconColor}
+                                            brandColor={cinematicAccent}
+                                            iconAccentColor={overviewTaskChromeIconColor}
                                             prostaffPendingUploads={prostaffPendingApprovals}
                                             teamPendingUploads={teamPendingApprovals}
                                             creatorModuleEnabled={creatorModuleOn}
@@ -674,13 +684,16 @@ export default function Overview() {
                                 {insights !== null && !hasDeferredInsightContent && (
                                     <div
                                         className="flex gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 backdrop-blur-sm"
-                                        style={{ boxShadow: `0 0 24px ${brandColor}12` }}
+                                        style={{ boxShadow: `0 0 24px ${hexToRgba(cinematicAccent, 0.07)}` }}
                                     >
                                         <div
                                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-                                            style={{ backgroundColor: `${brandColor}22` }}
+                                            style={{ backgroundColor: `${cinematicAccent}22` }}
                                         >
-                                            <SparklesIcon className="h-4 w-4" style={{ color: overviewIconColor }} />
+                                            <SparklesIcon
+                                                className="h-4 w-4"
+                                                style={{ color: overviewTaskChromeIconColor }}
+                                            />
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <p className="text-xs font-semibold uppercase tracking-wide text-white/45">
@@ -699,10 +712,8 @@ export default function Overview() {
                                     <ActiveSignals
                                         signals={brandSignalsState}
                                         insights={aiInsightsState}
-                                        brandColor={brandColor}
-                                        accentBrandColor={theme.colors?.accent || activeBrand?.accent_color || null}
-                                        secondaryBrandColor={theme.colors?.secondary || activeBrand?.secondary_color || null}
-                                        iconAccentColor={overviewIconColor}
+                                        brandColor={cinematicAccent}
+                                        iconAccentColor={overviewTaskChromeIconColor}
                                         permissions={permissions}
                                         insightsUpdatedAt={insightsUpdatedAt}
                                         creatorModuleEnabled={creatorModuleOn}
@@ -729,8 +740,8 @@ export default function Overview() {
                                     return orphans.length > 0 ? (
                                         <AIInsights
                                             insights={orphans}
-                                            brandColor={brandColor}
-                                            iconAccentColor={overviewIconColor}
+                                            brandColor={cinematicAccent}
+                                            iconAccentColor={overviewTaskChromeIconColor}
                                         />
                                     ) : null
                                 })()}
@@ -739,23 +750,23 @@ export default function Overview() {
                                     (!brandSignalsState || brandSignalsState.length === 0) && (
                                         <AIInsights
                                             insights={aiInsightsState}
-                                            brandColor={brandColor}
-                                            iconAccentColor={overviewIconColor}
+                                            brandColor={cinematicAccent}
+                                            iconAccentColor={overviewTaskChromeIconColor}
                                         />
                                     )}
 
                                 {insights !== null && (
                                     <RecentMomentum
                                         data={momentumDataState}
-                                        brandColor={brandColor}
-                                        iconAccentColor={overviewIconColor}
+                                        brandColor={cinematicAccent}
+                                        iconAccentColor={overviewTaskChromeIconColor}
                                     />
                                 )}
 
                                 {showManagedCompanies && (
                                     <ManagedCompaniesTeaser
                                         count={managedAgencyClients.length}
-                                        brandColor={brandColor}
+                                        brandColor={cinematicAccent}
                                     />
                                 )}
 
@@ -765,8 +776,8 @@ export default function Overview() {
                                     <PrimaryActions
                                         permissions={permissions}
                                         brand={activeBrand}
-                                        brandColor={brandColor}
-                                        iconAccentColor={overviewIconColor}
+                                        brandColor={cinematicAccent}
+                                        iconAccentColor={overviewTaskChromeIconColor}
                                         authUserId={authFromPage?.user?.id ?? null}
                                     />
                                 </div>

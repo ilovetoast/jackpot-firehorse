@@ -8,21 +8,39 @@
  * behaviour — not whether a .glb/.fbx/etc. may be stored.
  *
  * Environment (minimal):
- *   DAM_3D                 When true, 3D raster thumbnail/poster pipeline may run (Phase 4+).
- *   DAM_3D_BLENDER_BINARY  Optional path to blender; used when conversion is implemented.
+ *   DAM_3D                 When true, 3D raster thumbnail/poster pipeline may run.
+ *   DAM_3D_BLENDER_BINARY  Optional path to the Blender executable. **Workers:** use the official **Blender 4.5.3 LTS** linux-x64 tarball, install to **`/usr/local/bin/blender`**, and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** (see `docs/environments/BLENDER_DAM_3D_INSTALL.md`). Never required on web-only PHP nodes.
  */
 return [
     'enabled' => (bool) env('DAM_3D', false),
 
-    'blender_binary' => env('DAM_3D_BLENDER_BINARY', '/usr/bin/blender'),
+    'blender_binary' => env('DAM_3D_BLENDER_BINARY', '/usr/local/bin/blender'),
 
-    /** When false, FBX/BLEND → GLB conversion jobs must not run (Phase 6). */
+    /**
+     * When true and DAM_3D is enabled, workers attempt a real Blender render when the binary is present.
+     * (Blender presence is evaluated at runtime; no extra env var.)
+     */
+    'real_render_enabled' => true,
+
+    /** When true, STL/OBJ/FBX/BLEND may export a canonical GLB sidecar (viewer_path). */
     'conversion_enabled' => false,
+
+    /**
+     * Square poster master size for Blender (then downscaled to thumb/medium/large).
+     * Capped internally to 4096.
+     */
+    'poster_blender_max_px' => 1024,
+
+    /**
+     * Optional dedicated queue name for future async 3D jobs; null = use images-heavy
+     * via {@see \App\Support\PipelineQueueResolver} (thumbnail job already routes there).
+     */
+    'preview_queue' => env('DAM_3D_QUEUE', null),
 
     /** Maximum source bytes considered for 3D preview work (upload may still succeed above this). */
     'max_upload_bytes' => 52_428_800, // 50 MiB
 
-    /** Hard ceiling for server-side decode/render inputs (Phase 4+). */
+    /** Hard ceiling for server-side decode/render inputs. */
     'max_server_render_bytes' => 104_857_600, // 100 MiB
 
     'max_conversion_seconds' => 180,

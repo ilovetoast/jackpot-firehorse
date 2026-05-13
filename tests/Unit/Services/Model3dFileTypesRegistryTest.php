@@ -58,7 +58,7 @@ class Model3dFileTypesRegistryTest extends TestCase
         $fbx = config('file_types.types.model_fbx.capabilities');
         $this->assertTrue($fbx['conversion_required']);
         $this->assertFalse($fbx['realtime_3d_preview']);
-        $this->assertFalse($fbx['thumbnail']);
+        $this->assertTrue($fbx['thumbnail']);
     }
 
     public function test_is_model_3d_registry_type(): void
@@ -106,5 +106,25 @@ class Model3dFileTypesRegistryTest extends TestCase
 
         $this->assertFalse($decision->isAllowed());
         $this->assertSame('file_exceeds_worker_limits', $decision->failureCode());
+    }
+
+    public function test_model_gltf_not_in_thumbnail_pipeline_lists_without_handler(): void
+    {
+        $svc = app(FileTypeService::class);
+
+        $this->assertFalse($svc->registryTypeSupportsThumbnailPipeline('model_gltf'));
+        $exts = $svc->getThumbnailCapabilityExtensions();
+        $this->assertNotContains('gltf', $exts);
+    }
+
+    public function test_model_obj_in_thumbnail_pipeline_when_dam_3d_and_handler(): void
+    {
+        config(['dam_3d.enabled' => true]);
+        $svc = app(FileTypeService::class);
+
+        $this->assertTrue($svc->registryTypeSupportsThumbnailPipeline('model_obj'));
+        $this->assertTrue($svc->supportsThumbnailPipelineForMimeAndExtension('text/plain', 'obj'));
+        $exts = $svc->getThumbnailCapabilityExtensions();
+        $this->assertContains('obj', $exts);
     }
 }

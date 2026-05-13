@@ -669,7 +669,7 @@ function BrandGuidelinesIndexInner({
             )}
             {showProcessingBanner && (
                 <div className="bg-[var(--jp-bs-soft-bg)] border-b border-[var(--jp-bs-soft-border)] px-4 py-3 flex items-center justify-between gap-4">
-                    <p className="text-sm text-[var(--jp-bs-primary)]">
+                    <p className="text-sm text-[var(--jp-bs-on-soft-bg)]">
                         {builderProcessing ? (
                             <>Brand research for <strong>{brand.name}</strong> is still processing in the background. We&apos;ll notify you when it&apos;s ready.</>
                         ) : (
@@ -681,12 +681,12 @@ function BrandGuidelinesIndexInner({
                             <button
                                 type="button"
                                 onClick={() => router.get(resumeUrl || route('brands.brand-guidelines.builder', { brand: brand.id, step: 'research-summary' }))}
-                                className="inline-flex rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-active)]"
+                                className="inline-flex rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-active)] hover:text-[var(--jp-bs-primary-active-contrast)]"
                             >
                                 Review Research
                             </button>
                         )}
-                        <button type="button" onClick={dismissBanner} className="p-1.5 rounded text-[var(--jp-bs-primary)] hover:bg-[var(--jp-bs-soft-bg-strong)]" aria-label="Dismiss">
+                        <button type="button" onClick={dismissBanner} className="p-1.5 rounded text-[var(--jp-bs-on-soft-bg)] opacity-70 hover:opacity-100 hover:bg-[var(--jp-bs-soft-bg-strong)]" aria-label="Dismiss">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" /></svg>
                         </button>
                     </div>

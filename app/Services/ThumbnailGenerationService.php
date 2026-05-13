@@ -6,6 +6,8 @@ use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
 use App\Models\Tenant;
+use App\Services\FileTypeService;
+use App\Services\Models\BlenderModelPreviewService;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\ThumbnailMode;
@@ -117,6 +119,35 @@ class ThumbnailGenerationService
     protected ?string $gdOrientWorkPath = null;
 
     protected bool $gdOrientWorkCleanup = false;
+
+    /** @var null|string PNG master for one Blender/stub pass per {@see generateThumbnails} run */
+    protected ?string $model3dMasterPngPath = null;
+
+    /** @var null|string Local converted GLB awaiting upload after raster styles */
+    protected ?string $model3dConvertedGlbLocalForUpload = null;
+
+    /**
+     * Preview pipeline summary merged into {@see generateThumbnails} payload as {@code model_3d_preview}.
+     *
+     * @var array{
+     *   poster_stub: bool,
+     *   blender_used: bool,
+     *   blender_version: ?string,
+     *   render_seconds: ?float,
+     *   conversion_seconds: ?float,
+     *   failure_message: ?string,
+     *   viewer_storage_key: ?string
+     * }
+     */
+    protected array $model3dPreviewReport = [
+        'poster_stub' => true,
+        'blender_used' => false,
+        'blender_version' => null,
+        'render_seconds' => null,
+        'conversion_seconds' => null,
+        'failure_message' => null,
+        'viewer_storage_key' => null,
+    ];
 
     /**
      * When set, {@see generateImageThumbnail} records per-phase timings for diagnostics (assets:profile-thumbnail).
@@ -736,6 +767,7 @@ class ThumbnailGenerationService
         $this->officePipelineTerminalFailureMessage = null;
         $this->officePdfConversionExplicitFailed = false;
         $this->thumbnailGenerationContextVersionId = $version?->id;
+        $this->resetModel3dRasterState();
 
         $sourceS3Path = $sourceS3Path ?? $asset->storage_root_path;
         $outputBasePath = $outputBasePath ?? ($sourceS3Path ? dirname($sourceS3Path) : null);
@@ -785,6 +817,11 @@ class ThumbnailGenerationService
 
         // Detect file type: use version->mime_type when version-aware (from FileInspectionService)
         $fileType = $this->detectFileType($asset, $version);
+
+        $fileTypeService = app(FileTypeService::class);
+        if ($fileTypeService->isModel3dRegistryType((string) $fileType) && (bool) config('dam_3d.enabled')) {
+            $this->ensureModel3dMasterRasterForDownloadedSource($asset, $tempPath, (string) $fileType);
+        }
 
         // Capture source image dimensions ONLY for image file types (not PDFs, videos, or other types)
         // Dimensions are read from the ORIGINAL source file, not from thumbnails
@@ -1229,6 +1266,17 @@ class ThumbnailGenerationService
 
             $this->thumbProfilingLap('final_styles_loop_ms');
 
+            if (app(FileTypeService::class)->isModel3dRegistryType((string) $fileType)) {
+                try {
+                    $this->finalizeModel3dConvertedGlbUpload($bucket, $asset, $version, $fallbackUploadDisk);
+                } catch (\Throwable $e) {
+                    Log::warning('[ThumbnailGenerationService] Converted GLB upload failed (non-fatal)', [
+                        'asset_id' => $asset->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             // Build thumbnail_dimensions from generated thumbnails
             $thumbnailDimensions = [];
             foreach (['thumb', 'medium', 'large'] as $style) {
@@ -1314,7 +1362,7 @@ class ThumbnailGenerationService
 
             $this->thumbProfilingLap('post_styles_metadata_ms');
 
-            if (in_array($fileType, ['model_glb', 'model_stl'], true)) {
+            if (in_array($fileType, ['model_glb', 'model_stl', 'model_obj', 'model_fbx', 'model_blend'], true)) {
                 $mw = (int) ($thumbnails['medium']['width'] ?? $thumbnails['thumb']['width'] ?? 0);
                 $mh = (int) ($thumbnails['medium']['height'] ?? $thumbnails['thumb']['height'] ?? 0);
                 if ($mw > 0 && $mh > 0) {
@@ -1336,6 +1384,9 @@ class ThumbnailGenerationService
                 'thumbnail_engine_diagnostics' => $thumbnailEngineDiagnostics,
                 'thumbnail_modes_meta' => $this->buildThumbnailModesMetaPayload(),
             ];
+            if (app(FileTypeService::class)->isModel3dRegistryType((string) $fileType)) {
+                $payload['model_3d_preview'] = $this->model3dPreviewReport;
+            }
             $profRow = $this->completeThumbnailProfiling(
                 is_int($sourceFileSize) ? $sourceFileSize : null,
                 $sourceImageWidth,
@@ -1350,6 +1401,7 @@ class ThumbnailGenerationService
         } finally {
             $this->abandonThumbnailProfiling();
             $this->unlinkPreferredRasterCaches();
+            $this->cleanupModel3dLocalArtifacts();
             // Clean up temporary file
             if (file_exists($tempPath)) {
                 @unlink($tempPath);
@@ -1924,6 +1976,7 @@ class ThumbnailGenerationService
         $styleConfig['_asset_version_id'] = $this->thumbnailGenerationContextVersionId;
         $styleConfig['_original_filename'] = $asset->original_filename;
         $styleConfig['_mime_type'] = $asset->mime_type;
+        $styleConfig['_file_type'] = $fileType;
 
         return $this->$handler($sourcePath, $styleConfig);
     }
@@ -2249,10 +2302,10 @@ class ThumbnailGenerationService
     }
 
     /**
-     * Phase 4A: Branded static poster for GLB/STL when DAM_3D is enabled (not a real 3D render).
+     * Phase 4A–6: 3D poster raster — real Blender master when available, else branded stub; styles resample the master.
      *
      * @param  string  $sourcePath  Downloaded original (validated; mesh binary is not decoded)
-     * @param  array<string, mixed>  $styleConfig  width/height/quality/blur + _original_filename
+     * @param  array<string, mixed>  $styleConfig  width/height/quality/blur + _original_filename + _file_type
      * @return string Path to generated WebP or JPEG in temp dir
      */
     protected function generateModel3dRasterThumbnail(string $sourcePath, array $styleConfig): string
@@ -2267,10 +2320,158 @@ class ThumbnailGenerationService
             throw new \RuntimeException('3D poster stub thumbnails require DAM_3D=true');
         }
 
-        $targetWidth = max(32, min(4096, (int) ($styleConfig['width'] ?? 320)));
-        $targetHeight = max(32, min(4096, (int) ($styleConfig['height'] ?? 320)));
-        $quality = (int) ($styleConfig['quality'] ?? 88);
+        $registryType = isset($styleConfig['_file_type']) && is_string($styleConfig['_file_type'])
+            ? $styleConfig['_file_type']
+            : 'model_glb';
 
+        if ($this->model3dMasterPngPath === null || ! is_file($this->model3dMasterPngPath)) {
+            $tw = max(32, min(4096, (int) ($styleConfig['width'] ?? 320)));
+            $th = max(32, min(4096, (int) ($styleConfig['height'] ?? 320)));
+            $lazyPx = min(2048, max($tw, $th, 512));
+            $this->attemptBlenderOrStubMaster(
+                $sourcePath,
+                $registryType,
+                $lazyPx,
+                is_string($styleConfig['_original_filename'] ?? null) ? $styleConfig['_original_filename'] : null,
+            );
+        }
+
+        if ($this->model3dMasterPngPath === null || ! is_file($this->model3dMasterPngPath)) {
+            throw new \RuntimeException('3D poster master raster was not prepared');
+        }
+
+        return $this->resampleModel3dMasterPngToStyleOutput($this->model3dMasterPngPath, $styleConfig);
+    }
+
+    protected function resetModel3dRasterState(): void
+    {
+        $this->model3dMasterPngPath = null;
+        $this->model3dConvertedGlbLocalForUpload = null;
+        $this->model3dPreviewReport = [
+            'poster_stub' => true,
+            'blender_used' => false,
+            'blender_version' => null,
+            'render_seconds' => null,
+            'conversion_seconds' => null,
+            'failure_message' => null,
+            'viewer_storage_key' => null,
+        ];
+    }
+
+    protected function ensureModel3dMasterRasterForDownloadedSource(Asset $asset, string $sourcePath, string $fileType): void
+    {
+        if ($this->model3dMasterPngPath !== null) {
+            return;
+        }
+        $px = max(256, min(4096, (int) config('dam_3d.poster_blender_max_px', 1024)));
+        $this->attemptBlenderOrStubMaster($sourcePath, $fileType, $px, $asset->original_filename);
+    }
+
+    /**
+     * @param  positive-int  $masterSquarePx
+     */
+    protected function attemptBlenderOrStubMaster(
+        string $sourcePath,
+        string $fileType,
+        int $masterSquarePx,
+        ?string $originalFilenameForLabel = null,
+    ): void {
+        if ($this->model3dMasterPngPath !== null) {
+            return;
+        }
+
+        $masterSquarePx = max(32, min(4096, $masterSquarePx));
+
+        $bgHex = ltrim((string) config('dam_3d.poster_stub_background_hex', '#0f172a'), '#');
+        $exportGlb = false;
+        $glbOut = null;
+        if ($this->model3dShouldExportConversionGlb($fileType)) {
+            $exportGlb = true;
+            $base = tempnam(sys_get_temp_dir(), 'dam3d_glb_');
+            if ($base !== false) {
+                @unlink($base);
+                $glbOut = $base.'.glb';
+                $this->model3dConvertedGlbLocalForUpload = $glbOut;
+            } else {
+                $exportGlb = false;
+            }
+        }
+
+        $tryBlender = (bool) config('dam_3d.real_render_enabled', true)
+            && BlenderModelPreviewService::blenderBinaryUsable()
+            && $this->model3dRegistryTypeSupportsBlenderImport($fileType);
+
+        if ($tryBlender) {
+            try {
+                $svc = app(BlenderModelPreviewService::class);
+                $res = $svc->renderModelPreview(
+                    $sourcePath,
+                    $masterSquarePx,
+                    $bgHex,
+                    $exportGlb,
+                    $glbOut,
+                );
+                if (($res['success'] ?? false) && is_string($res['poster_path'] ?? null) && is_file($res['poster_path'])) {
+                    $this->model3dMasterPngPath = $res['poster_path'];
+                    $this->model3dPreviewReport['poster_stub'] = false;
+                    $this->model3dPreviewReport['blender_used'] = true;
+                    $this->model3dPreviewReport['blender_version'] = is_string($res['blender_version'] ?? null) ? $res['blender_version'] : null;
+                    $this->model3dPreviewReport['render_seconds'] = isset($res['render_seconds']) ? (float) $res['render_seconds'] : null;
+                    $this->model3dPreviewReport['conversion_seconds'] = isset($res['conversion_seconds']) ? (float) $res['conversion_seconds'] : null;
+                    $this->model3dPreviewReport['failure_message'] = null;
+                    if (! $exportGlb || empty($res['viewer_glb_local_path'])) {
+                        if (is_string($glbOut) && is_file($glbOut)) {
+                            @unlink($glbOut);
+                        }
+                        $this->model3dConvertedGlbLocalForUpload = null;
+                    }
+
+                    return;
+                }
+                $hint = is_string($res['failure_message'] ?? null) ? $res['failure_message'] : 'Blender render failed.';
+                $this->model3dPreviewReport['failure_message'] = \Illuminate\Support\Str::limit($hint, 240);
+            } catch (\Throwable $e) {
+                Log::warning('[ThumbnailGenerationService] Blender preview attempt failed (non-fatal)', [
+                    'asset_id' => null,
+                    'error' => $e->getMessage(),
+                ]);
+                $this->model3dPreviewReport['failure_message'] = 'Blender invocation error.';
+            }
+        }
+
+        if (is_string($glbOut) && is_file($glbOut)) {
+            @unlink($glbOut);
+        }
+        $this->model3dConvertedGlbLocalForUpload = null;
+
+        $this->model3dMasterPngPath = $this->writeModel3dStubPngMaster($masterSquarePx, [
+            '_original_filename' => (string) ($originalFilenameForLabel ?? basename($sourcePath)),
+        ]);
+        $this->model3dPreviewReport['poster_stub'] = true;
+        $this->model3dPreviewReport['blender_used'] = false;
+    }
+
+    protected function model3dRegistryTypeSupportsBlenderImport(string $fileType): bool
+    {
+        return in_array($fileType, ['model_glb', 'model_stl', 'model_obj', 'model_fbx', 'model_blend'], true);
+    }
+
+    protected function model3dShouldExportConversionGlb(string $fileType): bool
+    {
+        if (! (bool) config('dam_3d.conversion_enabled', false)) {
+            return false;
+        }
+
+        return in_array($fileType, ['model_stl', 'model_obj', 'model_fbx', 'model_blend'], true);
+    }
+
+    /**
+     * @param  array<string, mixed>  $styleConfig
+     */
+    protected function writeModel3dStubPngMaster(int $targetSize, array $styleConfig): string
+    {
+        $targetWidth = $targetSize;
+        $targetHeight = $targetSize;
         $bgRgb = $this->parseStubHexRgb((string) config('dam_3d.poster_stub_background_hex', '#0f172a'), [15, 23, 42]);
         $accentRgb = $this->parseStubHexRgb((string) config('dam_3d.poster_stub_accent_hex', '#38bdf8'), [56, 189, 248]);
 
@@ -2294,42 +2495,171 @@ class ThumbnailGenerationService
             $ext = '3D';
         }
         $title = '3D PREVIEW';
-        $subtitle = $ext.' · STUB';
+        $subtitle = $ext.' - STUB';
 
         $this->drawStubCenteredString($img, $title, $targetWidth, (int) ($targetHeight * 0.32), $fg, 5);
         $muted = imagecolorallocate($img, 148, 163, 184);
         $this->drawStubCenteredString($img, $subtitle, $targetWidth, (int) ($targetHeight * 0.52), $muted, 3);
 
+        $base = tempnam(sys_get_temp_dir(), 'dam3d_stub_m_');
+        if ($base === false) {
+            imagedestroy($img);
+            throw new \RuntimeException('Failed to allocate temp path for 3D stub master');
+        }
+        @unlink($base);
+        $out = $base.'.png';
+        if (! imagepng($img, $out, 6)) {
+            imagedestroy($img);
+            throw new \RuntimeException('Failed to encode 3D poster stub master as PNG');
+        }
+        imagedestroy($img);
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $styleConfig
+     */
+    protected function resampleModel3dMasterPngToStyleOutput(string $masterPng, array $styleConfig): string
+    {
+        $targetWidth = max(32, min(4096, (int) ($styleConfig['width'] ?? 320)));
+        $targetHeight = max(32, min(4096, (int) ($styleConfig['height'] ?? 320)));
+        $quality = (int) ($styleConfig['quality'] ?? 88);
+
+        $src = @imagecreatefrompng($masterPng);
+        if ($src === false) {
+            throw new \RuntimeException('Failed to read 3D poster master PNG');
+        }
+        $srcW = imagesx($src);
+        $srcH = imagesy($src);
+        $dst = imagecreatetruecolor($targetWidth, $targetHeight);
+        if ($dst === false) {
+            imagedestroy($src);
+            throw new \RuntimeException('Failed to allocate GD canvas for 3D poster style');
+        }
+        imagealphablending($dst, true);
+        $bgRgb = $this->parseStubHexRgb((string) config('dam_3d.poster_stub_background_hex', '#0f172a'), [15, 23, 42]);
+        $bg = imagecolorallocate($dst, $bgRgb[0], $bgRgb[1], $bgRgb[2]);
+        imagefill($dst, 0, 0, $bg);
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetWidth, $targetHeight, $srcW, $srcH);
+        imagedestroy($src);
+
         if (! empty($styleConfig['blur']) && $styleConfig['blur'] === true) {
             for ($i = 0; $i < 2; $i++) {
-                imagefilter($img, IMG_FILTER_GAUSSIAN_BLUR);
+                imagefilter($dst, IMG_FILTER_GAUSSIAN_BLUR);
             }
         }
 
         $outputFormat = config('assets.thumbnail.output_format', 'webp');
         if ($outputFormat === 'webp' && function_exists('imagewebp')) {
-            $out = tempnam(sys_get_temp_dir(), 'dam3d_stub_').'.webp';
-            if (! imagewebp($img, $out, $quality)) {
-                imagedestroy($img);
-                throw new \RuntimeException('Failed to encode 3D poster stub as WebP');
+            $out = tempnam(sys_get_temp_dir(), 'dam3d_style_').'.webp';
+            if (! imagewebp($dst, $out, $quality)) {
+                imagedestroy($dst);
+                throw new \RuntimeException('Failed to encode 3D poster style as WebP');
             }
         } else {
-            $out = tempnam(sys_get_temp_dir(), 'dam3d_stub_').'.jpg';
-            if (! imagejpeg($img, $out, $quality)) {
-                imagedestroy($img);
-                throw new \RuntimeException('Failed to encode 3D poster stub as JPEG');
+            $out = tempnam(sys_get_temp_dir(), 'dam3d_style_').'.jpg';
+            if (! imagejpeg($dst, $out, $quality)) {
+                imagedestroy($dst);
+                throw new \RuntimeException('Failed to encode 3D poster style as JPEG');
             }
         }
+        imagedestroy($dst);
 
-        imagedestroy($img);
-
-        Log::info('[ThumbnailGenerationService] 3D poster stub raster generated', [
+        Log::info('[ThumbnailGenerationService] 3D poster style raster generated', [
             'asset_id' => $styleConfig['_asset_id'] ?? null,
-            'style_width' => $targetWidth,
-            'style_height' => $targetHeight,
+            'poster_stub' => (bool) ($this->model3dPreviewReport['poster_stub'] ?? true),
+            'blender_used' => (bool) ($this->model3dPreviewReport['blender_used'] ?? false),
         ]);
 
         return $out;
+    }
+
+    protected function cleanupModel3dLocalArtifacts(): void
+    {
+        if (is_string($this->model3dMasterPngPath) && is_file($this->model3dMasterPngPath)) {
+            @unlink($this->model3dMasterPngPath);
+        }
+        $this->model3dMasterPngPath = null;
+        if (is_string($this->model3dConvertedGlbLocalForUpload) && is_file($this->model3dConvertedGlbLocalForUpload)) {
+            @unlink($this->model3dConvertedGlbLocalForUpload);
+        }
+        $this->model3dConvertedGlbLocalForUpload = null;
+    }
+
+    /**
+     * @throws \RuntimeException
+     */
+    protected function finalizeModel3dConvertedGlbUpload(
+        ?StorageBucket $bucket,
+        Asset $asset,
+        ?AssetVersion $version,
+        ?string $laravelDiskWhenNoBucket,
+    ): void {
+        $local = $this->model3dConvertedGlbLocalForUpload;
+        if (! is_string($local) || $local === '' || ! is_file($local)) {
+            return;
+        }
+        $versionNumber = $version?->version_number ?? $asset->currentVersion?->version_number ?? 1;
+        $s3Key = app(AssetPathGenerator::class)->generatePreview3dConvertedGlbPath($asset->tenant, $asset, (int) $versionNumber);
+        $body = file_get_contents($local);
+        if ($body === false || $body === '') {
+            @unlink($local);
+            $this->model3dConvertedGlbLocalForUpload = null;
+            $this->model3dPreviewReport['failure_message'] = 'Converted GLB read failed before upload.';
+
+            return;
+        }
+        $ext = 'glb';
+        if ($bucket !== null) {
+            try {
+                $this->s3Client->putObject([
+                    'Bucket' => $bucket->name,
+                    'Key' => $s3Key,
+                    'Body' => $body,
+                    'ContentType' => $this->getMimeTypeForExtension($ext),
+                    'Metadata' => [
+                        'original-asset-id' => (string) $asset->id,
+                        'variant' => 'preview_3d_converted_glb',
+                        'generated-at' => now()->toIso8601String(),
+                    ],
+                ]);
+            } catch (S3Exception $e) {
+                Log::error('[ThumbnailGenerationService] Failed to upload converted GLB', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                @unlink($local);
+                $this->model3dConvertedGlbLocalForUpload = null;
+                $this->model3dPreviewReport['failure_message'] = 'Converted GLB upload failed.';
+
+                return;
+            }
+        } elseif (is_string($laravelDiskWhenNoBucket) && $laravelDiskWhenNoBucket !== '' && config("filesystems.disks.{$laravelDiskWhenNoBucket}")) {
+            try {
+                Storage::disk($laravelDiskWhenNoBucket)->put($s3Key, $body, ['visibility' => 'private']);
+            } catch (\Throwable $e) {
+                Log::error('[ThumbnailGenerationService] Failed to upload converted GLB to fallback disk', [
+                    'asset_id' => $asset->id,
+                    'error' => $e->getMessage(),
+                ]);
+                @unlink($local);
+                $this->model3dConvertedGlbLocalForUpload = null;
+                $this->model3dPreviewReport['failure_message'] = 'Converted GLB upload failed.';
+
+                return;
+            }
+        } else {
+            @unlink($local);
+            $this->model3dConvertedGlbLocalForUpload = null;
+            $this->model3dPreviewReport['failure_message'] = 'Converted GLB upload skipped (no storage target).';
+
+            return;
+        }
+
+        @unlink($local);
+        $this->model3dConvertedGlbLocalForUpload = null;
+        $this->model3dPreviewReport['viewer_storage_key'] = $s3Key;
     }
 
     /**

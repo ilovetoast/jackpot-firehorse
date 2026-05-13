@@ -16,6 +16,38 @@ import { Activity, AlertCircle, Slash, RefreshCw, History } from 'lucide-react'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
 
 /**
+ * Title line for thumbnail skips — prefers worker `message` (aligned with asset metadata),
+ * then maps known `reason` codes so we never label a 3D pipeline skip as "unsupported format".
+ *
+ * @param {Record<string, unknown>} [metadata]
+ */
+function formatThumbnailSkippedTitle(metadata = {}) {
+    if (typeof metadata.message === 'string' && metadata.message.trim() !== '') {
+        return metadata.message.trim()
+    }
+    const r = metadata?.reason != null ? String(metadata.reason) : ''
+    if (r === 'server_resource_limit') {
+        return 'Thumbnail generation skipped (server resource limit)'
+    }
+    if (r === 'generation_exhausted') {
+        return 'Thumbnail generation skipped (processing exhausted)'
+    }
+    if (r === 'dam_3d_preview_disabled' || r === 'model_3d_thumbnail_pipeline_pending') {
+        return 'Thumbnail generation skipped (3D preview not available)'
+    }
+    if (r === 'office_libreoffice_missing') {
+        return 'Thumbnail generation skipped (Office preview unavailable on worker)'
+    }
+    if (r.startsWith('unsupported_format:') || r === 'unsupported_file_type') {
+        return 'Thumbnail generation skipped (unsupported format)'
+    }
+    if (r !== '') {
+        return `Thumbnail generation skipped (${r})`
+    }
+    return 'Thumbnail generation skipped'
+}
+
+/**
  * Site staff (drawer passes audioAiAudience="operator"): show reason codes + errors for Audio AI skips.
  * End users see a generic line from {@link AssetTimeline} instead.
  */
@@ -63,6 +95,9 @@ export default function AssetTimeline({
             }
             return 'Unable to complete AI analysis on this audio.'
         }
+        if (eventType === 'asset.thumbnail.skipped') {
+            return formatThumbnailSkippedTitle(metadata)
+        }
 
         const eventMap = {
             'asset.upload.finalized': 'Upload finalized',
@@ -71,7 +106,6 @@ export default function AssetTimeline({
                 : 'Thumbnail generation started',
             'asset.thumbnail.completed': 'Thumbnail generation completed',
             'asset.thumbnail.failed': 'Thumbnail generation failed',
-            'asset.thumbnail.skipped': 'Thumbnail generation skipped (unsupported format)',
             'asset.thumbnail.retry_requested': 'Thumbnail generation retry requested',
             'asset.video_preview.started': 'Video preview generation started',
             'asset.video_preview.completed': 'Video preview generation completed',
@@ -391,11 +425,9 @@ export default function AssetTimeline({
                                                                 : event.metadata.error}
                                                         </p>
                                                     )}
-                                                    {event.metadata.reason && event.event_type === 'asset.thumbnail.skipped' && (
-                                                        <p className="text-blue-600">
-                                                            {event.metadata.reason === 'unsupported_file_type' 
-                                                                ? 'Unsupported file type' 
-                                                                : event.metadata.reason}
+                                                    {event.event_type === 'asset.thumbnail.skipped' && event.metadata?.reason && (
+                                                        <p className={`font-mono text-[10px] ${isDark ? 'text-neutral-500' : 'text-blue-600'}`}>
+                                                            {String(event.metadata.reason)}
                                                         </p>
                                                     )}
                                                     {/* Show error details for video preview failures */}

@@ -49,6 +49,10 @@ final class Preview3dMetadata
                 'inspected_at' => null,
                 'render_seconds' => null,
                 'conversion_seconds' => null,
+                'poster_stub' => null,
+                'poster_generated_at' => null,
+                'blender_used' => null,
+                'blender_version' => null,
             ],
         ];
     }
@@ -246,6 +250,7 @@ final class Preview3dMetadata
             'skip_reason' => isset($preview3d['skip_reason']) && is_string($preview3d['skip_reason']) ? $preview3d['skip_reason'] : null,
             'failure_message' => isset($preview3d['failure_message']) && is_string($preview3d['failure_message']) ? $preview3d['failure_message'] : null,
             'poster_stub' => (bool) ($dbg['poster_stub'] ?? false),
+            'blender_used' => (bool) ($dbg['blender_used'] ?? false),
         ], static fn ($v) => $v !== null);
     }
 
@@ -258,6 +263,7 @@ final class Preview3dMetadata
                 'viewer_path_present' => false,
                 'poster_path_present' => false,
                 'poster_stub' => false,
+                'blender_used' => false,
                 'viewer_enabled' => false,
                 'failure_message' => null,
                 'skip_reason' => null,
@@ -272,6 +278,7 @@ final class Preview3dMetadata
             'viewer_path_present' => $viewerKey,
             'poster_path_present' => $posterKey,
             'poster_stub' => (bool) ($dbg['poster_stub'] ?? false),
+            'blender_used' => (bool) ($dbg['blender_used'] ?? false),
             'viewer_enabled' => $dam3dEnabled && $viewerKey,
             'failure_message' => isset($p3['failure_message']) && is_string($p3['failure_message'])
                 ? $p3['failure_message'] : null,

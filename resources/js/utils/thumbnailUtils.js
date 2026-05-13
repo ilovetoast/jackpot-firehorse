@@ -1,9 +1,9 @@
 /**
  * Phase 3.0C: Shared thumbnail utilities
  *
- * Thumbnail-capable MIME/extension lists come from the Laravel registry
- * (`dam_file_types` shared props → {@see ../utils/damFileTypes.js}), so the UI
- * stays aligned with config/file_types.php.
+ * Thumbnail-capable MIME/extension lists come from the Laravel registry via Inertia `dam_file_types`
+ * ({@see FileTypeService::getUploadRegistryForFrontend} → {@link ../utils/damFileTypes.js}), using the
+ * same runnable-pipeline rules as {@see GenerateThumbnailsJob}, not the raw `capabilities.thumbnail` flag alone.
  */
 
 import { getThumbnailExtensions, getThumbnailMimeTypes } from './damFileTypes.js'

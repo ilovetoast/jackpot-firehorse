@@ -217,24 +217,68 @@ export function hexToRgba(hexColor, alpha = 1) {
 }
 
 /**
+ * Linear RGB blend between two opaque hex colors (t=0 → all `a`, t=1 → all `b`).
+ *
+ * @param {string|null|undefined} hexA
+ * @param {string|null|undefined} hexB
+ * @param {number} t
+ * @returns {string} #RRGGBB
+ */
+export function blendHex(hexA, hexB, t = 0.5) {
+    const A = normalizeHexColor(hexA || '#ffffff')
+    const B = normalizeHexColor(hexB || '#ffffff')
+    const u = Math.min(1, Math.max(0, t))
+    const mix = (ca, cb) => Math.round(ca * (1 - u) + cb * u)
+    const ar = parseInt(A.slice(1, 3), 16)
+    const ag = parseInt(A.slice(3, 5), 16)
+    const ab = parseInt(A.slice(5, 7), 16)
+    const br = parseInt(B.slice(1, 3), 16)
+    const bg = parseInt(B.slice(3, 5), 16)
+    const bb = parseInt(B.slice(5, 7), 16)
+    const r = mix(ar, br)
+    const g = mix(ag, bg)
+    const b = mix(ab, bb)
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+/**
  * CSS variables for Brand Settings and related surfaces (Edit, Guidelines, DNA bootstrap, brand list).
  * Set on a wrapper `style={brandSettingsSurfaceVars(brand)}` and use Tailwind arbitrary values such as
  * `bg-[var(--jp-bs-primary)]`, `text-[var(--jp-bs-primary)]`, `focus:ring-[var(--jp-bs-ring)]`.
  *
- * @param {Object|null|undefined} brand — expects `primary_color`; falls back to indigo when missing
+ * Also sets `--jp-bs-cinematic-*` from {@link resolveCinematicAccentColor} so Look & Feel controls that
+ * configure the dark cinematic shell can use the same accent for selection rings on white paper.
+ *
+ * @param {Object|null|undefined} brand — expects `primary_color`, optional `settings`, palette fields
  * @returns {Record<string, string>}
  */
 export function brandSettingsSurfaceVars(brand) {
     const primary = normalizeHexColor(brand?.primary_color)
+    const cinematic = resolveCinematicAccentColor(brand, primary)
+    const primaryHover = darkenColor(primary, 16)
+    const primaryActive = darkenColor(primary, 28)
+    /** Brand settings “paper” column — soft tints are primary at low alpha over white. */
+    const settingsPaper = '#ffffff'
+    const softSurface = blendHex(settingsPaper, primary, 0.09)
+    const softSurfaceStrong = blendHex(settingsPaper, primary, 0.14)
     return {
         '--jp-bs-primary': primary,
-        '--jp-bs-primary-hover': darkenColor(primary, 16),
-        '--jp-bs-primary-active': darkenColor(primary, 28),
+        '--jp-bs-primary-hover': primaryHover,
+        '--jp-bs-primary-active': primaryActive,
         '--jp-bs-primary-contrast': getContrastTextColor(primary),
+        '--jp-bs-primary-hover-contrast': getContrastTextColor(primaryHover),
+        '--jp-bs-primary-active-contrast': getContrastTextColor(primaryActive),
         '--jp-bs-soft-bg': hexToRgba(primary, 0.09),
         '--jp-bs-soft-bg-strong': hexToRgba(primary, 0.14),
         '--jp-bs-soft-border': hexToRgba(primary, 0.28),
+        '--jp-bs-on-soft-bg': getContrastTextColor(softSurface),
+        '--jp-bs-on-soft-bg-strong': getContrastTextColor(softSurfaceStrong),
         '--jp-bs-ring': primary,
+        '--jp-bs-cinematic-accent': cinematic,
+        '--jp-bs-cinematic-soft-bg': hexToRgba(cinematic, 0.12),
+        '--jp-bs-cinematic-soft-border': hexToRgba(cinematic, 0.32),
+        '--jp-bs-cinematic-ring': cinematic,
+        '--jp-bs-cinematic-accent-fg': getSolidFillButtonForegroundHex(cinematic),
     }
 }
 

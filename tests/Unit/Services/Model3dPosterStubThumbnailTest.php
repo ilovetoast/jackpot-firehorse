@@ -79,6 +79,20 @@ class Model3dPosterStubThumbnailTest extends TestCase
         $this->assertTrue($ref->invoke($job, $asset, null));
     }
 
+    public function test_supports_thumbnail_generation_for_obj_with_text_plain_mime_when_dam_3d_true(): void
+    {
+        config(['dam_3d.enabled' => true]);
+        $job = new GenerateThumbnailsJob('00000000-0000-0000-0000-000000000001');
+        $ref = new ReflectionMethod(GenerateThumbnailsJob::class, 'supportsThumbnailGeneration');
+        $ref->setAccessible(true);
+        $asset = new Asset([
+            'original_filename' => 'mesh.obj',
+            'mime_type' => 'text/plain',
+            'metadata' => [],
+        ]);
+        $this->assertTrue($ref->invoke($job, $asset, null));
+    }
+
     public function test_supports_thumbnail_generation_for_glb_when_dam_3d_false(): void
     {
         config(['dam_3d.enabled' => false]);
@@ -93,7 +107,7 @@ class Model3dPosterStubThumbnailTest extends TestCase
         $this->assertFalse($ref->invoke($job, $asset, null));
     }
 
-    public function test_fbx_skips_thumbnail_support_even_when_dam_3d_true(): void
+    public function test_fbx_supports_thumbnail_pipeline_when_dam_3d_true(): void
     {
         config(['dam_3d.enabled' => true]);
         $job = new GenerateThumbnailsJob('00000000-0000-0000-0000-000000000001');
@@ -104,7 +118,7 @@ class Model3dPosterStubThumbnailTest extends TestCase
             'mime_type' => 'application/vnd.autodesk.fbx',
             'metadata' => [],
         ]);
-        $this->assertFalse($ref->invoke($job, $asset, null));
+        $this->assertTrue($ref->invoke($job, $asset, null));
     }
 
     public function test_preview_3d_merge_marks_poster_stub_ready(): void

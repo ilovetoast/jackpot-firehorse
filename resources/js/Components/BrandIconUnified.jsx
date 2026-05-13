@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { resolveBrandIconBackground } from '../utils/colorUtils'
+import { blendHex, normalizeHexColor, getContrastTextColor, resolveBrandIconBackground } from '../utils/colorUtils'
 
 const SIZES = {
     xs: { container: 'h-6 w-6', text: 'text-[10px]', radius: 'rounded-md' },
@@ -21,6 +21,11 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
     const primary = brand?.primary_color || '#6366f1'
     const secondary = brand?.secondary_color || '#8b5cf6'
     const iconStyle = brand?.icon_style || 'subtle'
+    const pHex = normalizeHexColor(primary)
+    const sHex = normalizeHexColor(secondary)
+    const monogramTextColor = getContrastTextColor(
+        iconStyle === 'solid' ? pHex : blendHex(pHex, sHex, 0.5)
+    )
     const name = brand?.name || ''
     const firstLetter = name.charAt(0).toUpperCase() || 'B'
     const logoPath = brand?.logo_path
@@ -46,7 +51,9 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
 
     return (
         <div className={base} style={{ background: bg }}>
-            <span className={`font-bold text-white ${s.text}`}>{firstLetter}</span>
+            <span className={`font-bold ${s.text}`} style={{ color: monogramTextColor }}>
+                {firstLetter}
+            </span>
         </div>
     )
 }

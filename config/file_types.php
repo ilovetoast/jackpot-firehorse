@@ -842,7 +842,9 @@ return [
                 'conversion_required' => false,
             ],
 
-            'handlers' => [],
+            'handlers' => [
+                'thumbnail' => 'generateModel3dRasterThumbnail',
+            ],
 
             'requirements' => [],
 
@@ -925,7 +927,7 @@ return [
             ],
 
             'capabilities' => [
-                'thumbnail' => false,
+                'thumbnail' => true,
                 'metadata' => true,
                 'preview' => false,
                 'ai_analysis' => false,
@@ -936,7 +938,9 @@ return [
                 'conversion_required' => true,
             ],
 
-            'handlers' => [],
+            'handlers' => [
+                'thumbnail' => 'generateModel3dRasterThumbnail',
+            ],
 
             'requirements' => [],
 
@@ -970,7 +974,7 @@ return [
             ],
 
             'capabilities' => [
-                'thumbnail' => false,
+                'thumbnail' => true,
                 'metadata' => true,
                 'preview' => false,
                 'ai_analysis' => false,
@@ -981,7 +985,9 @@ return [
                 'conversion_required' => true,
             ],
 
-            'handlers' => [],
+            'handlers' => [
+                'thumbnail' => 'generateModel3dRasterThumbnail',
+            ],
 
             'requirements' => [],
 

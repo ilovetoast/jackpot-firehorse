@@ -18,6 +18,10 @@ Queue workers process background jobs (thumbnail generation, metadata extraction
 - **Staging/production:** Use Horizon; `supervisor-ai` already listens on `ai` and `ai-low` (see `config/horizon.php`). No change required for deployed environments.
 - **Local Sail:** `compose.yaml` runs `queue:work database` with `--queue=default,images,images-heavy,pdf-processing,ai,ai-low` (see that file for the exact flags).
 
+### Local / staging / production: Blender for DAM 3D (optional)
+
+Real 3D poster renders use **Blender 4.5.3 LTS** from the **official tarball**, symlinked as **`/usr/local/bin/blender`**, with **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** on **workers only** (the same hosts that run `images` / `images-heavy` thumbnail jobs — not web-only PHP). **Do not** use `apt install blender` for this pipeline (often ships **3.0.x** on Ubuntu). Install and verification steps: [environments/BLENDER_DAM_3D_INSTALL.md](environments/BLENDER_DAM_3D_INSTALL.md).
+
 **Manual worker (debug / one-off):**
 
 ```bash

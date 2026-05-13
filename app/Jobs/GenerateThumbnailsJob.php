@@ -711,6 +711,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                         \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
                         [
                             'reason' => $skipReason,
+                            'message' => $skipMessage,
                             'mime_type' => $asset->mime_type,
                             'file_extension' => $extension,
                         ]
@@ -806,11 +807,17 @@ class GenerateThumbnailsJob implements ShouldQueue
                           ($mimeType === 'image/svg+xml' || $extension === 'svg')) {
                     // SVG is now supported via passthrough (no GD/Imagick needed)
                     $isNowSupported = true;
+                } elseif (in_array($skipReason, ['model_3d_thumbnail_pipeline_pending', 'dam_3d_preview_disabled'], true)
+                    && $fileTypeService->supportsThumbnailPipelineForMimeAndExtension(
+                        $mimeType !== '' ? $mimeType : null,
+                        $extension !== '' ? $extension : null,
+                    )) {
+                    $isNowSupported = true;
                 }
 
                 if ($isNowSupported) {
                     // Clear the skip reason and reset status to allow regeneration
-                    unset($metadata['thumbnail_skip_reason']);
+                    unset($metadata['thumbnail_skip_reason'], $metadata['thumbnail_skip_message']);
                     $asset->update([
                         'thumbnail_status' => ThumbnailStatus::PENDING,
                         'thumbnail_error' => null,
@@ -1243,7 +1250,7 @@ class GenerateThumbnailsJob implements ShouldQueue
             }
 
             if ($detectedFileType !== null
-                && in_array($detectedFileType, ['model_glb', 'model_stl'], true)
+                && in_array($detectedFileType, ['model_glb', 'model_stl', 'model_obj', 'model_fbx', 'model_blend'], true)
                 && (bool) config('dam_3d.enabled')) {
                 $posterPath = $finalThumbnails['medium']['path'] ?? $finalThumbnails['large']['path'] ?? null;
                 $thumbP = $finalThumbnails['thumb']['path'] ?? null;
@@ -1251,25 +1258,57 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $prevDbg = is_array(($metaBaseForMerge['preview_3d']['debug'] ?? null))
                         ? $metaBaseForMerge['preview_3d']['debug']
                         : [];
+                    $m3 = is_array(($thumbnailGenResult ?? [])['model_3d_preview'] ?? null)
+                        ? ($thumbnailGenResult['model_3d_preview'] ?? [])
+                        : [];
+                    $posterStub = (bool) ($m3['poster_stub'] ?? true);
+                    $blenderUsed = (bool) ($m3['blender_used'] ?? false);
+                    $blenderVersion = isset($m3['blender_version']) && is_string($m3['blender_version']) ? $m3['blender_version'] : null;
+                    $convertedViewerKey = isset($m3['viewer_storage_key']) && is_string($m3['viewer_storage_key']) && trim($m3['viewer_storage_key']) !== ''
+                        ? trim($m3['viewer_storage_key'])
+                        : null;
+
                     $existingNativeGlbViewer = $detectedFileType === 'model_glb'
                         ? ($metaBaseForMerge['preview_3d']['viewer_path'] ?? null)
                         : null;
-                    $preservedViewerPath = is_string($existingNativeGlbViewer) && trim($existingNativeGlbViewer) !== ''
+                    $preservedNative = is_string($existingNativeGlbViewer) && trim($existingNativeGlbViewer) !== ''
                         ? trim($existingNativeGlbViewer)
                         : null;
+
+                    $mergedViewer = $convertedViewerKey !== null && $convertedViewerKey !== ''
+                        ? $convertedViewerKey
+                        : ($detectedFileType === 'model_glb' ? $preservedNative : null);
+
+                    $dbg = array_merge($prevDbg, [
+                        'poster_generated_at' => now()->toIso8601String(),
+                        'poster_stub' => $posterStub,
+                        'blender_used' => $blenderUsed,
+                    ]);
+                    if ($blenderVersion !== null && $blenderVersion !== '') {
+                        $dbg['blender_version'] = $blenderVersion;
+                    }
+                    if (array_key_exists('render_seconds', $m3)) {
+                        $dbg['render_seconds'] = $m3['render_seconds'];
+                    }
+                    if (array_key_exists('conversion_seconds', $m3)) {
+                        $dbg['conversion_seconds'] = $m3['conversion_seconds'];
+                    }
+
+                    $failure = null;
+                    if (! empty($m3['failure_message']) && is_string($m3['failure_message'])) {
+                        $failure = \Illuminate\Support\Str::limit(trim($m3['failure_message']), 500);
+                    }
+
                     $thumbnailMetadata['preview_3d'] = Preview3dMetadata::merge(
                         $metaBaseForMerge['preview_3d'] ?? [],
                         [
                             'status' => Preview3dMetadata::STATUS_READY,
                             'poster_path' => $posterPath,
                             'thumbnail_path' => $thumbP,
-                            'viewer_path' => $preservedViewerPath,
+                            'viewer_path' => $mergedViewer,
                             'skip_reason' => null,
-                            'failure_message' => null,
-                            'debug' => array_merge($prevDbg, [
-                                'poster_generated_at' => now()->toIso8601String(),
-                                'poster_stub' => true,
-                            ]),
+                            'failure_message' => $failure,
+                            'debug' => $dbg,
                         ]
                     );
                     Log::info('preview_3d.poster_generated', [
@@ -1277,7 +1316,8 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'asset_id' => $asset->id,
                         'tenant_id' => $asset->tenant_id,
                         'registry_type' => $detectedFileType,
-                        'poster_stub' => true,
+                        'poster_stub' => $posterStub,
+                        'blender_used' => $blenderUsed,
                     ]);
                 }
             }
@@ -2329,55 +2369,12 @@ class GenerateThumbnailsJob implements ShouldQueue
 
         foreach ($candidates as $rawMime) {
             $mime = is_string($rawMime) && $rawMime !== '' ? strtolower($rawMime) : '';
-            $fileType = $fileTypeService->detectFileType($mime !== '' ? $mime : null, $ext !== '' ? $ext : null);
-            if (! $fileType) {
-                continue;
-            }
-
-            if ($fileTypeService->isModel3dRegistryType($fileType)) {
-                if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
-                    continue;
-                }
-                if (! (bool) config('dam_3d.enabled')) {
-                    continue;
-                }
-                $handler = $fileTypeService->getHandler($fileType, 'thumbnail');
-                if (! is_string($handler) || $handler === '' || ! method_exists(\App\Services\ThumbnailGenerationService::class, $handler)) {
-                    continue;
-                }
-                $requirements = $fileTypeService->checkRequirements($fileType);
-                if (! $requirements['met']) {
-                    Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
-                        'asset_id' => $asset->id,
-                        'file_type' => $fileType,
-                        'missing' => $requirements['missing'],
-                        'mime_type' => $rawMime,
-                        'filename' => $asset->original_filename,
-                    ]);
-
-                    continue;
-                }
-
+            if ($fileTypeService->supportsThumbnailPipelineForMimeAndExtension(
+                $mime !== '' ? $mime : null,
+                $ext !== '' ? $ext : null,
+            )) {
                 return true;
             }
-
-            if (! $fileTypeService->supportsCapability($fileType, 'thumbnail')) {
-                continue;
-            }
-            $requirements = $fileTypeService->checkRequirements($fileType);
-            if (! $requirements['met']) {
-                Log::warning('[GenerateThumbnailsJob] File type requirements not met', [
-                    'asset_id' => $asset->id,
-                    'file_type' => $fileType,
-                    'missing' => $requirements['missing'],
-                    'mime_type' => $rawMime,
-                    'filename' => $asset->original_filename,
-                ]);
-
-                continue;
-            }
-
-            return true;
         }
 
         return false;
@@ -2419,8 +2416,10 @@ class GenerateThumbnailsJob implements ShouldQueue
             if (! is_string($handler) || $handler === '' || ! method_exists(\App\Services\ThumbnailGenerationService::class, $handler)) {
                 return 'model_3d_thumbnail_pipeline_pending';
             }
-
-            return 'model_3d_thumbnail_pipeline_pending';
+            $requirements = $fileTypeService->checkRequirements($fileType);
+            if (! $requirements['met']) {
+                return 'model_3d_thumbnail_pipeline_pending';
+            }
         }
 
         // Check requirements to determine specific skip reason

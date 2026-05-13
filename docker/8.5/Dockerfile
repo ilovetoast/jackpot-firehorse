@@ -168,6 +168,35 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# ============================================================================
+# DAM 3D — Blender 4.5.3 LTS (official linux-x64 tarball; headless deps; not apt)
+# Installs under /opt/blender/<version>; symlink /usr/local/bin/blender.
+# Same image is used by laravel.test + queue + queue_video_heavy (compose.yaml).
+# ============================================================================
+ARG BLENDER_VERSION=4.5.3
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        xz-utils \
+        libgl1 \
+        libxrender1 \
+        libxi6 \
+        libxkbcommon0 \
+        libsm6 \
+        libfontconfig1 \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && BLENDER_TARBALL="blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
+    && curl -fsSL "https://download.blender.org/release/Blender4.5/${BLENDER_TARBALL}" -o "/tmp/${BLENDER_TARBALL}" \
+    && mkdir -p /opt/blender \
+    && rm -rf "/opt/blender/${BLENDER_VERSION}" \
+    && tar -xf "/tmp/${BLENDER_TARBALL}" -C /opt/blender \
+    && mv "/opt/blender/blender-${BLENDER_VERSION}-linux-x64" "/opt/blender/${BLENDER_VERSION}" \
+    && ln -sfn "/opt/blender/${BLENDER_VERSION}/blender" /usr/local/bin/blender \
+    && chmod +x "/opt/blender/${BLENDER_VERSION}/blender" \
+    && /usr/local/bin/blender --version \
+    && /usr/local/bin/blender -b --python-expr "print('Blender OK')" \
+    && rm -f "/tmp/${BLENDER_TARBALL}"
+
 RUN setcap "cap_net_bind_service=+ep" /usr/bin/php8.5
 
 RUN userdel -r ubuntu

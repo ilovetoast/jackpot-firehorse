@@ -1,5 +1,5 @@
-# After changing docker/8.5/Dockerfile (LibreOffice, FFmpeg, ImageMagick, …), rebuild images or
-# workers will keep old binaries:  ./vendor/bin/sail build --no-cache
+# After changing docker/8.5/Dockerfile (LibreOffice, FFmpeg, ImageMagick, Blender, …), rebuild images or
+# workers will keep old binaries:  ./vendor/bin/sail build --no-cache && ./vendor/bin/sail up -d
 #
 services:
     laravel.test:

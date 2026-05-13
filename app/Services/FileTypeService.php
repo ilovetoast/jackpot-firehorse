@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\DB;
  * This service reads from config/file_types.php, which is the single source of truth.
  * All file type decisions must route through this service.
  *
- * Design Principle: "File type support is a capability decision, not a conditional."
+ * Thumbnail / grid preview lists exposed to the frontend ({@see getUploadRegistryForFrontend})
+ * use {@see registryTypeSupportsThumbnailPipeline} so they match {@see GenerateThumbnailsJob}
+ * (registry + worker deps + 3D handler wiring), not the raw `capabilities.thumbnail` flag alone.
  */
 class FileTypeService
 {
@@ -263,6 +265,44 @@ class FileTypeService
         $typeConfig = config("file_types.types.{$fileType}", []);
 
         return $typeConfig['handlers'][$operation] ?? null;
+    }
+
+    /**
+     * True when {@see GenerateThumbnailsJob} would attempt thumbnail generation for this registry key
+     * (capabilities, 3D DAM_3D + handler method, and {@see checkRequirements}).
+     */
+    public function registryTypeSupportsThumbnailPipeline(string $fileType): bool
+    {
+        if (! $this->supportsCapability($fileType, 'thumbnail')) {
+            return false;
+        }
+        if ($this->isModel3dRegistryType($fileType)) {
+            if (! (bool) config('dam_3d.enabled')) {
+                return false;
+            }
+            $handler = $this->getHandler($fileType, 'thumbnail');
+            if (! is_string($handler) || trim($handler) === '' || ! method_exists(ThumbnailGenerationService::class, $handler)) {
+                return false;
+            }
+        }
+
+        return $this->checkRequirements($fileType)['met'];
+    }
+
+    /**
+     * Same decision as one iteration of {@see GenerateThumbnailsJob::supportsThumbnailGeneration}
+     * for a MIME + extension pair (extension wins for mis-sniffed 3D uploads).
+     */
+    public function supportsThumbnailPipelineForMimeAndExtension(?string $mimeType, ?string $extension): bool
+    {
+        $mime = $mimeType !== null && $mimeType !== '' ? strtolower($mimeType) : null;
+        $ext = $extension !== null && $extension !== '' ? strtolower(ltrim(trim((string) $extension), '.')) : null;
+        $fileType = $this->detectFileType($mime, $ext);
+        if ($fileType === null || $fileType === '') {
+            return false;
+        }
+
+        return $this->registryTypeSupportsThumbnailPipeline($fileType);
     }
 
     /**
@@ -549,15 +589,16 @@ class FileTypeService
     }
 
     /**
-     * Unique lowercase MIME types for registry entries with thumbnail capability.
+     * Unique lowercase MIME types for registry rows where the thumbnail job will run
+     * ({@see registryTypeSupportsThumbnailPipeline}).
      *
      * @return list<string>
      */
     public function getThumbnailCapabilityMimeTypes(): array
     {
         $seen = [];
-        foreach (config('file_types.types', []) as $typeConfig) {
-            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+        foreach (config('file_types.types', []) as $typeKey => $typeConfig) {
+            if (! $this->registryTypeSupportsThumbnailPipeline((string) $typeKey)) {
                 continue;
             }
             foreach ($typeConfig['mime_types'] ?? [] as $m) {
@@ -569,15 +610,15 @@ class FileTypeService
     }
 
     /**
-     * Unique lowercase extensions for registry entries with thumbnail capability.
+     * Unique lowercase extensions for registry rows where the thumbnail job will run.
      *
      * @return list<string>
      */
     public function getThumbnailCapabilityExtensions(): array
     {
         $seen = [];
-        foreach (config('file_types.types', []) as $typeConfig) {
-            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+        foreach (config('file_types.types', []) as $typeKey => $typeConfig) {
+            if (! $this->registryTypeSupportsThumbnailPipeline((string) $typeKey)) {
                 continue;
             }
             foreach ($typeConfig['extensions'] ?? [] as $e) {
@@ -589,8 +630,9 @@ class FileTypeService
     }
 
     /**
-     * MIME types for Admin Asset Operations "preview issues": registry types with thumbnail capability,
-     * excluding `audio` (waveform / audio pipeline is not treated as a missing grid preview here).
+     * MIME types for Admin Asset Operations "preview issues": registry types where the thumbnail
+     * pipeline is runnable, excluding `audio` (waveform / audio pipeline is not treated as a missing
+     * grid preview here).
      *
      * @return list<string>
      */
@@ -601,7 +643,7 @@ class FileTypeService
             if ($key === 'audio') {
                 continue;
             }
-            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+            if (! $this->registryTypeSupportsThumbnailPipeline((string) $key)) {
                 continue;
             }
             foreach ($typeConfig['mime_types'] ?? [] as $m) {
@@ -624,7 +666,7 @@ class FileTypeService
             if ($key === 'audio') {
                 continue;
             }
-            if (! ($typeConfig['capabilities']['thumbnail'] ?? false)) {
+            if (! $this->registryTypeSupportsThumbnailPipeline((string) $key)) {
                 continue;
             }
             foreach ($typeConfig['extensions'] ?? [] as $e) {
@@ -639,7 +681,8 @@ class FileTypeService
     }
 
     /**
-     * AND-filter: MIME or filename extension matches a non-audio thumbnail-capable registry type.
+     * AND-filter: MIME or filename extension matches a non-audio registry type for which the
+     * thumbnail pipeline is runnable ({@see registryTypeSupportsThumbnailPipeline}).
      */
     public function constrainAssetQueryToAdminPreviewIssueFormats(Builder $query): void
     {
@@ -1058,6 +1101,9 @@ class FileTypeService
      * Exposes ONLY allowlist information (extensions + MIMEs) and the blocked
      * extension list for client-side error messaging — never the registry's
      * private internals.
+     *
+     * `thumbnail_mime_types` / `thumbnail_extensions` follow {@see registryTypeSupportsThumbnailPipeline}
+     * so the grid and {@see GenerateThumbnailsJob} agree on which formats receive thumbnail work.
      *
      * @return array{
      *   thumbnail_mime_types: list<string>,

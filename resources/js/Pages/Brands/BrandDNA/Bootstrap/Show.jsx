@@ -267,7 +267,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                 <label className="block text-xs font-medium text-gray-500">{label}</label>
                 <div className="flex flex-wrap gap-1.5">
                     {items.map((t, i) => (
-                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-primary)]">
+                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-on-soft-bg)]">
                             {t}
                             <button type="button" onClick={() => removeScoringRuleItem(ruleKey, i)} className="text-slate-400 hover:text-[var(--jp-bs-primary)]">×</button>
                         </span>
@@ -407,7 +407,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <h3 className="text-xs font-medium text-slate-500">Messaging Clusters</h3>
                                                 <div className="mt-1 flex flex-wrap gap-1.5">
                                                     {aiSignals.messaging_themes.map((t, i) => (
-                                                        <span key={i} className="rounded-full bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs text-[var(--jp-bs-primary)]">{t}</span>
+                                                        <span key={i} className="rounded-full bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs text-[var(--jp-bs-on-soft-bg)]">{t}</span>
                                                     ))}
                                                 </div>
                                             </div>
@@ -557,7 +557,7 @@ export default function BrandBootstrapShow({ brand, run }) {
                                                 <label className="block text-xs text-gray-500">Traits</label>
                                                 <div className="mt-1 flex flex-wrap gap-1.5">
                                                     {(payload.personality?.traits ?? []).map((t, i) => (
-                                                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-primary)]">
+                                                        <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[var(--jp-bs-soft-bg)] px-2 py-0.5 text-xs text-[var(--jp-bs-on-soft-bg)]">
                                                             {t}
                                                             <button type="button" onClick={() => removeTrait(i)} className="text-slate-400 hover:text-[var(--jp-bs-primary)]">×</button>
                                                         </span>

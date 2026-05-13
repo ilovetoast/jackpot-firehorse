@@ -45,6 +45,26 @@ final class Preview3dMetadataDerivativeKeysTest extends TestCase
         ], $keys);
     }
 
+    public function test_derivative_cleanup_includes_converted_glb_not_native_root(): void
+    {
+        $root = 'tenants/u1/assets/a1/v1/native.glb';
+        $converted = 'tenants/u1/assets/a1/v1/previews/model_3d_converted.glb';
+        $meta = [
+            'preview_3d' => [
+                'viewer_path' => $converted,
+                'poster_path' => 'p.webp',
+                'thumbnail_path' => 't.webp',
+            ],
+        ];
+        $keys = Preview3dMetadata::derivativeStorageKeysForCleanup($meta, $root);
+        sort($keys);
+        $this->assertSame([
+            'p.webp',
+            't.webp',
+            'tenants/u1/assets/a1/v1/previews/model_3d_converted.glb',
+        ], $keys);
+    }
+
     public function test_cache_revision_changes_when_poster_path_changes(): void
     {
         $a = ['preview_3d' => ['status' => 'ready', 'poster_path' => 'a.webp', 'viewer_path' => 'm.glb']];

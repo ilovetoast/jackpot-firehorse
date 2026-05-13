@@ -64,6 +64,7 @@ Ubuntu/Debian-style names; adjust for RHEL, Alpine, or AMI equivalents.
 | **librsvg2-bin** | **SVG → raster** (`rsvg-convert`). Without it, SVG thumbnails do not generate |
 | **librsvg2-dev** | Only if you compile extensions against librsvg on the host |
 | **ffmpeg** | Video thumbnails, previews, FFmpeg-driven processing, and **Studio `ffmpeg_native` composition export**; **`ffprobe`** is included with **`ffmpeg`** on Ubuntu/Debian (verify with `command -v ffprobe`) |
+| **Blender 4.5.3 LTS** (optional) | **DAM 3D** — headless posters / optional GLB conversion (`GenerateThumbnailsJob`). **Workers only** (not web-only PHP). **Do not** use `apt install blender` for this pipeline (often **3.0.x** on Ubuntu). Install the **official linux-x64 tarball**, symlink **`/usr/local/bin/blender`**, set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`**. Full steps: [BLENDER_DAM_3D_INSTALL.md](BLENDER_DAM_3D_INSTALL.md). Verify: `/usr/local/bin/blender --version` and `/usr/local/bin/blender -b --python-expr "print('Blender OK')"`; app check: `php artisan dam:3d:diagnose` |
 | **fontconfig** | Font configuration for stacks that resolve fonts via fontconfig (useful alongside Imagick/GD text) |
 | **libfreetype6** | **FreeType** — required for text rendering in **GD** (and common Imagick text paths) |
 | **libjpeg-turbo8** / **libpng16-16** | JPEG/PNG codecs used by **Imagick** / **GD** when rasterizing Studio text overlays to PNG (exact package names can differ by Ubuntu LTS; install equivalents on Debian/RHEL) |
@@ -85,6 +86,8 @@ sudo apt-get install -y \
   python3-opencv \
   tesseract-ocr
 ```
+
+**DAM 3D / Blender:** Do **not** add Blender via `apt` here — use the **official Blender 4.5.3 LTS tarball** and **`/usr/local/bin/blender`** (see [BLENDER_DAM_3D_INSTALL.md](BLENDER_DAM_3D_INSTALL.md)).
 
 Omit **python3-opencv** if no OpenCV-backed jobs run on that host.
 

@@ -5562,12 +5562,12 @@ export default function AssetDrawer({
                                                             })
                                                         }
                                                     }}
-                                                    className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                                    className={`inline-flex h-10 w-full items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
                                                         isInBucket
-                                                            ? 'border-transparent text-white'
+                                                            ? 'border-transparent text-white shadow-sm'
                                                             : isEligibleForDownload
-                                                                ? 'border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus-visible:outline-gray-400'
-                                                                : 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400'
+                                                                ? 'border-gray-300 bg-white text-gray-900 shadow-sm hover:bg-gray-50 focus-visible:outline-gray-400'
+                                                                : 'cursor-not-allowed border border-slate-300 bg-slate-100 text-slate-600'
                                                     }`}
                                                     style={
                                                         isEligibleForDownload
@@ -5652,10 +5652,10 @@ export default function AssetDrawer({
                                                     }
                                                     setTimeout(() => setToastMessage(null), 3000)
                                                 }}
-                                                className={`inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold shadow-sm transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                                className={`inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
                                                     canSingleAssetDownload
-                                                        ? 'text-white hover:opacity-90'
-                                                        : 'cursor-not-allowed border border-gray-200 bg-gray-50 text-gray-400'
+                                                        ? 'text-white shadow-sm hover:opacity-90'
+                                                        : 'cursor-not-allowed border border-slate-300 bg-slate-100 text-slate-600'
                                                 }`}
                                                 style={
                                                     canSingleAssetDownload

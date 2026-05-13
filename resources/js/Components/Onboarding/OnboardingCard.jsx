@@ -14,7 +14,7 @@ import {
     BuildingOfficeIcon,
 } from '@heroicons/react/24/outline'
 import { CheckCircleIcon as CheckCircleSolid } from '@heroicons/react/24/solid'
-import { ensureDarkModeContrast } from '../../utils/colorUtils'
+import { blendHex, ensureDarkModeContrast, getContrastTextColor, getSolidFillButtonForegroundHex } from '../../utils/colorUtils'
 
 const STEP_ICONS = {
     brand_name: SwatchIcon,
@@ -43,11 +43,11 @@ function ProgressBar({ percent, brandColor }) {
     )
 }
 
-function ChecklistItem({ item, brandColor }) {
+function ChecklistItem({ item, doneMarkColor }) {
     return (
         <div className="flex items-center gap-2.5 py-1">
             {item.done ? (
-                <CheckCircleSolid className="h-4 w-4 shrink-0" style={{ color: brandColor }} />
+                <CheckCircleSolid className="h-4 w-4 shrink-0" style={{ color: doneMarkColor }} />
             ) : (
                 <div
                     className="h-4 w-4 shrink-0 rounded-full border"
@@ -104,6 +104,12 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
             null
         return ensureDarkModeContrast(rawBrandColor, userDefinedFallback || '#6366f1')
     }, [rawBrandColor, brand?.accent_color, brand?.secondary_color, brand?.accent_color_user_defined, brand?.secondary_color_user_defined])
+
+    const onBrandSolidFill = useMemo(() => getSolidFillButtonForegroundHex(brandColor), [brandColor])
+    const onBrandTintWell = useMemo(() => {
+        const wellApprox = blendHex('#0B0B0D', brandColor, 0.14)
+        return getContrastTextColor(wellApprox)
+    }, [brandColor])
 
     const handlePermanentDismiss = useCallback(async () => {
         if (dismissing) return
@@ -170,7 +176,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
                                     style={{ backgroundColor: `${brandColor}18` }}
                                 >
-                                    <SparklesIcon className="h-5 w-5" style={{ color: brandColor }} />
+                                    <SparklesIcon className="h-5 w-5" style={{ color: onBrandTintWell }} />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: `${brandColor}cc` }}>
@@ -197,7 +203,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
 
                                     <div className="mt-4 space-y-0.5">
                                         {requiredItems.map(item => (
-                                            <ChecklistItem key={item.key} item={item} brandColor={brandColor} />
+                                            <ChecklistItem key={item.key} item={item} doneMarkColor={onBrandTintWell} />
                                         ))}
                                     </div>
 
@@ -205,10 +211,11 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                         <button
                                             type="button"
                                             onClick={handleResume}
-                                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-300 hover:brightness-110"
+                                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 hover:brightness-110"
                                             style={{
                                                 background: `linear-gradient(135deg, ${brandColor}, ${brandColor}dd)`,
                                                 boxShadow: `0 4px 16px ${brandColor}30`,
+                                                color: onBrandSolidFill,
                                             }}
                                         >
                                             Resume setup
@@ -257,7 +264,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                                 style={{ backgroundColor: `${brandColor}18` }}
                             >
-                                <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: brandColor }} />
+                                <ArrowPathIcon className="h-4 w-4 animate-spin" style={{ color: onBrandTintWell }} />
                             </div>
                             <div className="min-w-0 flex-1">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-white/45">
@@ -273,7 +280,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                 {optionalItems.length > 0 && (
                                     <div className="mt-3 space-y-0.5">
                                         {optionalItems.slice(0, 3).map(item => (
-                                            <ChecklistItem key={item.key} item={item} brandColor={brandColor} />
+                                            <ChecklistItem key={item.key} item={item} doneMarkColor={onBrandTintWell} />
                                         ))}
                                     </div>
                                 )}
@@ -335,7 +342,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
                                     style={{ backgroundColor: `${brandColor}18` }}
                                 >
-                                    <CheckCircleIcon className="h-4 w-4" style={{ color: brandColor }} />
+                                    <CheckCircleIcon className="h-4 w-4" style={{ color: onBrandTintWell }} />
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-white/45">
@@ -351,7 +358,7 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
 
                                     <div className="mt-2.5 space-y-0.5">
                                         {optionalItems.slice(0, 4).map(item => (
-                                            <ChecklistItem key={item.key} item={item} brandColor={brandColor} />
+                                            <ChecklistItem key={item.key} item={item} doneMarkColor={onBrandTintWell} />
                                         ))}
                                     </div>
 
@@ -359,10 +366,11 @@ export default function OnboardingCard({ progress, checklist, brandColor: rawBra
                                         <button
                                             type="button"
                                             onClick={handleResume}
-                                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white/90 transition-all duration-200 hover:brightness-110"
+                                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 hover:brightness-110"
                                             style={{
                                                 backgroundColor: `${brandColor}cc`,
                                                 boxShadow: `0 2px 8px ${brandColor}20`,
+                                                color: onBrandSolidFill,
                                             }}
                                         >
                                             Resume setup

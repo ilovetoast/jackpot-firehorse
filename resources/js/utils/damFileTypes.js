@@ -16,8 +16,8 @@
 
 /**
  * @typedef {{
- *   thumbnail_mime_types: string[],
- *   thumbnail_extensions: string[],
+ *   thumbnail_mime_types: string[], // MIMEs for registry rows where the thumbnail job will run
+ *   thumbnail_extensions: string[], // extensions same
  *   upload_mime_types: string[],
  *   upload_extensions: string[],
  *   upload_accept: string,

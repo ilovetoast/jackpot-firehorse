@@ -290,10 +290,16 @@ class ThumbnailRetryService
                 in_array($extension, ['cr2', 'avif'], true) &&
                 extension_loaded('imagick')) {
                 $isNowSupported = true;
+            } elseif (in_array($skipReason, ['model_3d_thumbnail_pipeline_pending', 'dam_3d_preview_disabled'], true)
+                && app(\App\Services\FileTypeService::class)->supportsThumbnailPipelineForMimeAndExtension(
+                    $mimeType !== '' ? $mimeType : null,
+                    $extension !== '' ? $extension : null,
+                )) {
+                $isNowSupported = true;
             }
             
             if ($isNowSupported) {
-                unset($metadata['thumbnail_skip_reason']);
+                unset($metadata['thumbnail_skip_reason'], $metadata['thumbnail_skip_message']);
                 Log::info('[ThumbnailRetryService] Cleared old skip reason during retry', [
                     'asset_id' => $asset->id,
                     'old_skip_reason' => $skipReason,

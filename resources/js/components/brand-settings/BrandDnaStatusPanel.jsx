@@ -59,7 +59,7 @@ export default function BrandDnaStatusPanel({
                         />
                     </button>
                     {hasActiveVersion && (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--jp-bs-primary)]">
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] px-2.5 py-0.5 text-xs font-medium text-[var(--jp-bs-on-soft-bg)]">
                             Active v{activeVersion.version_number}
                         </span>
                     )}
@@ -87,7 +87,7 @@ export default function BrandDnaStatusPanel({
                         <div className="flex flex-wrap items-center gap-3">
                             <span className="text-sm text-slate-500">AI-powered builder requires a paid plan.</span>
                             <Link
-                                href={typeof route === 'function' ? route('billing.index') : '/app/billing'}
+                                href={typeof route === 'function' ? route('billing') : '/app/billing'}
                                 className="inline-flex items-center rounded-md bg-[var(--jp-bs-primary)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)]"
                             >
                                 Upgrade

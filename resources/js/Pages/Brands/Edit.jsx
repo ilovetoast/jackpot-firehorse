@@ -16,6 +16,8 @@ import {
     resolveSidebarReferenceColor,
     hexToRgba,
     brandSettingsSurfaceVars,
+    blendHex,
+    normalizeHexColor,
 } from '../../utils/colorUtils'
 import BrandWorkbenchMasthead from '../../components/brand-workspace/BrandWorkbenchMasthead'
 import { BRAND_WORKBENCH_CONTENT } from '../../components/brand-workspace/brandWorkspaceTokens'
@@ -154,7 +156,7 @@ function ResearchDataModal({ open, onClose, title, loading, data, error, themeCh
                                         onClick={() => setActiveTabState(key)}
                                         className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
                                             activeTab === key
-                                                ? 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-1 ring-[var(--jp-bs-soft-border)]'
+                                                ? 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-on-soft-bg)] ring-1 ring-[var(--jp-bs-soft-border)]'
                                                 : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                                         }`}
                                     >
@@ -206,8 +208,8 @@ function ResearchInsightsPanel({ insights, brandId, workbenchChrome: wbChromePan
     const statusBadge = (status) => {
         const map = {
             completed: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-            processing: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-[var(--jp-bs-soft-border)]',
-            running: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] ring-[var(--jp-bs-soft-border)]',
+            processing: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-on-soft-bg)] ring-[var(--jp-bs-soft-border)]',
+            running: 'bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-on-soft-bg)] ring-[var(--jp-bs-soft-border)]',
             pending: 'bg-gray-50 text-gray-600 ring-gray-500/10',
             failed: 'bg-red-50 text-red-700 ring-red-600/10',
         }
@@ -487,7 +489,7 @@ function ResearchInsightsPanel({ insights, brandId, workbenchChrome: wbChromePan
                                         </span>
                                         {statusBadge(run.status)}
                                         {run.extraction_mode === 'vision' && (
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-primary)] font-medium ring-1 ring-[var(--jp-bs-soft-border)]">Vision</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--jp-bs-soft-bg)] text-[var(--jp-bs-on-soft-bg)] font-medium ring-1 ring-[var(--jp-bs-soft-border)]">Vision</span>
                                         )}
                                     </div>
                                     <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
@@ -843,7 +845,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
                             className={`flex-1 text-xs font-medium px-3 py-2 rounded-md transition-colors ${activeCategory === cat.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                         >
                                 {cat.label}
-                            {count > 0 && <span className="ml-1 text-[10px] bg-[var(--jp-bs-soft-bg-strong)] text-[var(--jp-bs-primary)] rounded-full px-1.5">{count}</span>}
+                            {count > 0 && <span className="ml-1 text-[10px] bg-[var(--jp-bs-soft-bg-strong)] text-[var(--jp-bs-on-soft-bg-strong)] rounded-full px-1.5">{count}</span>}
                         </button>
                     )
                 })}
@@ -988,7 +990,24 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
         portal_settings: portal_settings || {},
     })
 
-    const brandAccentStyle = useMemo(() => brandSettingsSurfaceVars(brand), [brand])
+    const brandAccentStyle = useMemo(() => {
+        const merged = {
+            ...brand,
+            primary_color: data.primary_color ?? brand.primary_color,
+            secondary_color: data.secondary_color ?? brand.secondary_color,
+            accent_color: data.accent_color ?? brand.accent_color,
+            nav_color: data.nav_color ?? brand.nav_color,
+            settings: { ...(brand.settings || {}), ...(data.settings || {}) },
+        }
+        return brandSettingsSurfaceVars(merged)
+    }, [
+        brand,
+        data.primary_color,
+        data.secondary_color,
+        data.accent_color,
+        data.nav_color,
+        data.settings,
+    ])
 
     const [logoVariantGenerating, setLogoVariantGenerating] = useState(false)
     const [logoVariantError, setLogoVariantError] = useState(null)
@@ -1364,8 +1383,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     </p>
                                     <div className="mt-3 flex items-center gap-3">
                                         <Link
-                                            href={route('billing.index')}
-                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[var(--jp-bs-primary-active)] transition"
+                                            href={route('billing')}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] shadow-sm hover:bg-[var(--jp-bs-primary-active)] hover:text-[var(--jp-bs-primary-active-contrast)] transition"
                                         >
                                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
                                             Upgrade Plan
@@ -1583,7 +1602,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <label className="block text-sm font-medium text-gray-900">Values</label>
                                         <textarea rows={4} value={(modelPayload.values || []).join('\n')} onChange={(e) => setModelPayloadField('values', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="One value per line" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1622,7 +1641,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <label htmlFor="tagline" className="block text-sm font-medium text-gray-900">Tagline</label>
                                         <input type="text" id="tagline" value={modelPayload.positioning?.tagline ?? ''} onChange={(e) => setModelPayloadField('positioning.tagline', e.target.value || null)} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1657,7 +1676,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <label className="block text-sm font-medium text-gray-900">Photography attributes</label>
                                         <textarea rows={3} value={(modelPayload.expression?.photography_attributes || []).join(', ')} onChange={(e) => setModelPayloadField('expression.photography_attributes', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1812,7 +1831,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 </div>
 
                                 <div className="mt-6">
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -1862,7 +1881,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         <textarea rows={3} value={(modelPayload.standards?.allowed_fonts || []).join(', ')} onChange={(e) => setModelPayloadField('standards.allowed_fonts', e.target.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))} className="mt-2 block w-full rounded-lg border-gray-300 bg-white px-4 py-3 shadow-sm focus:ring-2 focus:ring-[var(--jp-bs-ring)] focus:border-[var(--jp-bs-primary)] text-sm leading-relaxed" placeholder="Comma-separated" />
                                     </div>
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2145,7 +2164,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                         background_contrast: 'Ensure sufficient contrast between the logo and its background. Avoid placing on busy imagery without a container.',
                                                                     })
                                                                 }}
-                                                                className="rounded-md bg-[var(--jp-bs-soft-bg)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-primary)] hover:bg-[var(--jp-bs-soft-bg-strong)] transition-colors"
+                                                                className="rounded-md bg-[var(--jp-bs-soft-bg)] px-3 py-1.5 text-sm font-medium text-[var(--jp-bs-on-soft-bg)] hover:bg-[var(--jp-bs-soft-bg-strong)] transition-colors"
                                                             >
                                                                 Add Standard Defaults
                                                             </button>
@@ -2156,7 +2175,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         })()}
                                     </div>
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2183,7 +2202,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     {renderTagArrayField('banned_keywords', 'Banned Keywords', 'Words to penalize')}
                                     {renderTagArrayField('photography_attributes', 'Photography Attributes', 'e.g. minimal, lifestyle')}
 
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2210,7 +2229,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                         onChange={(updated) => setModelPayloadField('standards.reference_categories', updated)}
                                         noTopDivider
                                     />
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2366,7 +2385,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 </div>
 
                                 <div className="mt-6">
-                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--jp-bs-primary-hover)] disabled:opacity-50">
+                                    <button type="submit" disabled={dnaSaving} className="rounded-md bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] disabled:opacity-50">
                                         {dnaSaving ? 'Saving…' : 'Save Brand DNA'}
                                     </button>
                                 </div>
@@ -2425,16 +2444,16 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         <div className="rounded-xl bg-[var(--jp-bs-soft-bg)] ring-1 ring-[var(--jp-bs-soft-border)]/60 overflow-hidden">
                             <div className="px-5 py-4 sm:px-6 flex items-center justify-between gap-4">
                                 <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-[var(--jp-bs-primary)]">
+                                    <p className="text-sm font-semibold text-[var(--jp-bs-on-soft-bg)]">
                                         Brand setup isn't finished yet
                                     </p>
-                                    <p className="mt-0.5 text-xs text-[var(--jp-bs-primary)] opacity-70 leading-relaxed">
+                                    <p className="mt-0.5 text-xs text-[var(--jp-bs-on-soft-bg)] opacity-80 leading-relaxed">
                                         The guided setup helps configure your workspace faster. You can resume where you left off.
                                     </p>
                                 </div>
                                 <Link
                                     href="/app/onboarding"
-                                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] transition-colors"
+                                    className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-[var(--jp-bs-primary)] px-4 py-2 text-sm font-medium text-[var(--jp-bs-primary-contrast)] shadow-sm hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] transition-colors"
                                 >
                                     Resume setup
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
@@ -2974,11 +2993,22 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     const darkPreview = data.logo_dark_preview ?? brand.logo_dark_path
                                                     const primaryPreview = data.logo_preview ?? brand.logo_path
                                                     const src = darkPreview || primaryPreview
+                                                    const heroPrimary = normalizeHexColor(
+                                                        data.primary_color || brand.primary_color || '#6366f1'
+                                                    )
+                                                    const heroMonogramColor = getContrastTextColor(
+                                                        blendHex('#0B0B0D', heroPrimary, 0.22)
+                                                    )
                                                     if (src) {
                                                         return <img src={src} alt="" className="h-8 w-auto max-w-[120px] object-contain" />
                                                     }
                                                     return (
-                                                        <span className="text-lg font-bold text-white/90">{(data.name || brand.name || 'B').charAt(0).toUpperCase()}</span>
+                                                        <span
+                                                            className="text-lg font-bold"
+                                                            style={{ color: heroMonogramColor }}
+                                                        >
+                                                            {(data.name || brand.name || 'B').charAt(0).toUpperCase()}
+                                                        </span>
                                                     )
                                                 })()}
                                                 <p className="mt-1.5 text-[9px] text-white/30">{data.name || brand.name || 'Brand Name'}</p>
@@ -3063,7 +3093,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     href={portal_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--jp-bs-primary)] text-white text-xs font-medium hover:bg-[var(--jp-bs-primary-active)] transition-colors"
+                                    className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--jp-bs-primary)] text-[var(--jp-bs-primary-contrast)] text-xs font-medium hover:bg-[var(--jp-bs-primary-active)] hover:text-[var(--jp-bs-primary-active-contrast)] transition-colors"
                                 >
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
@@ -3186,7 +3216,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             </div>
                                             {(data.settings?.nav_display_mode || 'logo') === 'logo' && (
                                                 <div className="absolute top-2 right-2">
-                                                    <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    <svg className="h-4 w-4 text-[var(--jp-bs-on-soft-bg)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                 </div>
                                             )}
                                         </button>
@@ -3210,7 +3240,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                             </div>
                                             {data.settings?.nav_display_mode === 'text' && (
                                                 <div className="absolute top-2 right-2">
-                                                    <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                    <svg className="h-4 w-4 text-[var(--jp-bs-on-soft-bg)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                 </div>
                                             )}
                                         </button>
@@ -3317,7 +3347,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                 }}
                                                 className={`relative flex flex-1 flex-col rounded-lg border-2 p-4 text-left transition-all ${
                                                     (data.settings?.workspace_sidebar_style || 'solid') === opt.value
-                                                        ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]'
+                                                        ? 'border-[var(--jp-bs-cinematic-accent)] bg-[var(--jp-bs-cinematic-soft-bg)]'
                                                         : 'border-gray-200 hover:border-gray-300'
                                                 }`}
                                             >
@@ -3358,7 +3388,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                     }}
                                                     className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2.5 text-left transition-all ${
                                                         isActive
-                                                            ? 'border-[var(--jp-bs-primary)] bg-[var(--jp-bs-soft-bg)]'
+                                                            ? 'border-[var(--jp-bs-cinematic-accent)] bg-[var(--jp-bs-cinematic-soft-bg)]'
                                                             : isDisabled
                                                                 ? 'border-gray-100 opacity-40 cursor-not-allowed'
                                                                 : 'border-gray-200 hover:border-gray-300'
@@ -3463,12 +3493,12 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                                     }}
                                                                     className={`relative flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
                                                                         isActive
-                                                                            ? 'border-[var(--jp-bs-primary)]'
+                                                                            ? 'border-[var(--jp-bs-cinematic-accent)]'
                                                                             : 'border-gray-200 hover:border-gray-300'
                                                                     }`}
                                                                 >
                                                                     {opt.recommended && (
-                                                                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full bg-[var(--jp-bs-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                                                                        <span className="absolute -top-1.5 -right-1.5 inline-flex items-center rounded-full bg-[var(--jp-bs-cinematic-accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--jp-bs-cinematic-accent-fg)] shadow-sm">
                                                                             Rec
                                                                         </span>
                                                                     )}
@@ -3539,7 +3569,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                         autoSaveBrandField({ settings: newSettings })
                                                     }}
                                                     className={`flex-1 flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
-                                                        (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-[var(--jp-bs-primary)]' : 'border-gray-200 hover:border-gray-300'
+                                                        (data.settings?.asset_grid_style ?? 'clean') === opt.value ? 'border-[var(--jp-bs-cinematic-accent)]' : 'border-gray-200 hover:border-gray-300'
                                                     }`}
                                                 >
                                                     <span className="text-sm font-medium text-gray-900">{opt.label}</span>
@@ -3601,7 +3631,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                                         <span className="text-xs font-medium text-gray-900">{opt.label}</span>
                                                         {isSelected && (
                                                             <div className="absolute top-1.5 right-1.5">
-                                                                <svg className="h-4 w-4 text-[var(--jp-bs-primary)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                                                <svg className="h-4 w-4" style={{ color: getContrastTextColor(opt.color) }} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                                                             </div>
                                                         )}
                                                     </button>
@@ -3756,7 +3786,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         <button
                             type="submit"
                             disabled={processing}
-                            className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[var(--jp-bs-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
+                            className="rounded-md bg-[var(--jp-bs-primary)] px-3 py-2 text-sm font-semibold text-[var(--jp-bs-primary-contrast)] shadow-sm hover:bg-[var(--jp-bs-primary-hover)] hover:text-[var(--jp-bs-primary-hover-contrast)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--jp-bs-ring)] disabled:opacity-50"
                         >
                             {processing ? 'Updating...' : 'Update Brand'}
                         </button>

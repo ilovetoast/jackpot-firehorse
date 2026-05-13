@@ -21,6 +21,10 @@ class FileTypeHeicConfigTest extends TestCase
     {
         $svc = app(FileTypeService::class);
 
+        if (! $svc->registryTypeSupportsThumbnailPipeline('heic')) {
+            $this->markTestSkipped('HEIC pipeline requirements (Imagick + HEIF) not met in this environment');
+        }
+
         $mimes = $svc->getThumbnailCapabilityMimeTypes();
         $exts = $svc->getThumbnailCapabilityExtensions();
 

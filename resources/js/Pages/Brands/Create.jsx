@@ -333,7 +333,7 @@ export default function BrandsCreate() {
                                     >
                                         <div className="px-4 py-3 flex items-center justify-between">
                                             <div className="flex items-center">
-                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-white font-bold text-sm">
+                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-[var(--jp-bs-primary-contrast)] font-bold text-sm">
                                                     {data.name?.charAt(0).toUpperCase() || 'B'}
                                                 </div>
                                             </div>
@@ -343,7 +343,7 @@ export default function BrandsCreate() {
                                                 }}>
                                                     User Name
                                                 </span>
-                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-sm font-medium text-white">
+                                                <div className="h-8 w-8 rounded-full bg-[var(--jp-bs-primary)] flex items-center justify-center text-sm font-medium text-[var(--jp-bs-primary-contrast)]">
                                                     U
                                                 </div>
                                             </div>

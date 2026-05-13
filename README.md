@@ -24,13 +24,14 @@
 - [Features](docs/FEATURES.md) — value proposition and product-level behavior
 - [Technical overview](docs/TECHNICAL_OVERVIEW.md) — architecture and stack
 - [Production worker software](docs/environments/PRODUCTION_WORKER_SOFTWARE.md) — single checklist for staging/production worker hosts (thumbnails, PDF, video, OCR, Studio)
+- [Blender 4.5.3 LTS for DAM 3D](docs/environments/BLENDER_DAM_3D_INSTALL.md) — tarball install, `/usr/local/bin/blender`, workers + local Sail (not `apt` Blender)
 - [Phase index](docs/PHASE_INDEX.md) — where former phase docs were merged (canonical guide map)
 
 ---
 
 ## 🚀 Queue Workers (Local Development)
 
-**Queue workers are required for thumbnail processing, PDF/metadata pipelines, and upload AI jobs.** The Sail `queue` service listens on `default`, `images`, `images-heavy`, `pdf-processing`, **`ai`**, and `ai-low` (see `compose.yaml`). **Without `ai`,** `AiMetadataGenerationJob` and related jobs never run locally while thumbnails still process. Details: [docs/UPLOAD_AND_QUEUE.md](docs/UPLOAD_AND_QUEUE.md).
+**Queue workers are required for thumbnail processing, PDF/metadata pipelines, and upload AI jobs.** The Sail `queue` service listens on `default`, `images`, `images-heavy`, `pdf-processing`, **`ai`**, and `ai-low` (see `compose.yaml`). **Without `ai`,** `AiMetadataGenerationJob` and related jobs never run locally while thumbnails still process. Details: [docs/UPLOAD_AND_QUEUE.md](docs/UPLOAD_AND_QUEUE.md). **Optional:** for real DAM 3D headless renders (not stub posters), install **Blender 4.5.3 LTS** at **`/usr/local/bin/blender`** on the worker image or host and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** — see [docs/environments/BLENDER_DAM_3D_INSTALL.md](docs/environments/BLENDER_DAM_3D_INSTALL.md).
 
 ### Quick Start
 

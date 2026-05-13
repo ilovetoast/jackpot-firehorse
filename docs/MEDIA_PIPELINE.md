@@ -60,6 +60,8 @@ Worker safety is centralized in `App\Services\Assets\AssetProcessingBudgetServic
 
 **Child jobs:** `GenerateThumbnailsJob`, `GeneratePreviewJob`, `GenerateVideoPreviewJob`, and `PdfPageRenderJob` each re-check the budget before decode/FFmpeg/PDF work so manual retries or mis-routed jobs do not retry heavy work forever.
 
+**3D models (GLB / STL / OBJ / FBX / BLEND):** When `DAM_3D=true`, the same thumbnail job generates raster posters (and merges `metadata.preview_3d`). **Workers only** may run **Blender 4.5.3 LTS** headlessly at **`/usr/local/bin/blender`** (`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`, official tarball — not `apt` Blender; see [environments/BLENDER_DAM_3D_INSTALL.md](environments/BLENDER_DAM_3D_INSTALL.md)), script `resources/blender/render_model_preview.py`. Missing Blender or render errors **fall back** to the stub poster and **do not** fail the upload. Realtime `<model-viewer>` remains **native GLB only**; converted GLB is optional behind `config/dam_3d.conversion_enabled`. Operational detail: [GLB_PREVIEW_PRODUCTION.md](GLB_PREVIEW_PRODUCTION.md); worker checklist: [PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md); diagnostics: `php artisan dam:3d:diagnose`.
+
 **Tuning:** Override MB/pixel limits per profile via env vars documented on `config/asset_processing.php` (e.g. `ASSET_MAX_PSD_MB`, `ASSET_MAX_IMAGE_MB`, `ASSET_MAX_PIXELS`). **1 GB PSD on `staging_small`:** over `max_psd_mb` (default 250) → `deferred_to_heavy_worker` (or `file_exceeds_worker_limits` if it exceeds the `heavy` profile too), user-facing message explains a heavy media worker is required, no thumbnail chain, no Imagick on that worker.
 
 ## Supported File Types

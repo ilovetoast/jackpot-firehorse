@@ -61,7 +61,10 @@ export default function AIInsights({ insights = [], brandColor = '#6366f1', icon
                             const style = priorityStyles[item.priority] ?? priorityStyles.medium
                             const inner = (
                                 <>
-                                    <LightBulbIcon className="w-3.5 h-3.5 text-amber-400/40 shrink-0 mt-0.5" />
+                                    <LightBulbIcon
+                                        className="w-3.5 h-3.5 shrink-0 mt-0.5"
+                                        style={{ color: iconFill, opacity: 0.42 }}
+                                    />
                                     <span className={`${style} flex-1`}>{item.text}</span>
                                     {item.href && (
                                         <ArrowRightIcon className="w-3.5 h-3.5 text-white/25 shrink-0 mt-0.5" />

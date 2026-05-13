@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, router, usePage } from '@inertiajs/react'
 import { DELIVERABLES_PAGE_LABEL } from '../utils/uiLabels'
-import { resolveOverviewIconColor, getContrastRatio, darkenColor, normalizeHexColor } from '../utils/colorUtils'
+import {
+    resolveOverviewIconColor,
+    getContrastRatio,
+    darkenColor,
+    normalizeHexColor,
+    resolveCinematicAccentColor,
+} from '../utils/colorUtils'
 import { JACKPOT_VIOLET } from '../components/brand-workspace/brandWorkspaceTokens'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
 import AppBrandLogo from './AppBrandLogo'
@@ -480,7 +486,11 @@ export default function AppNav({
         const rawBrandColor = activeBrand?.primary_color || JACKPOT_VIOLET
 
         const accent = (() => {
-            if (variant === 'transparent') return rawBrandColor
+            if (variant === 'transparent') {
+                return activeBrand
+                    ? resolveCinematicAccentColor(activeBrand, rawBrandColor)
+                    : rawBrandColor
+            }
             const c = normalizeHexColor(rawBrandColor)
             if (getContrastRatio(c, '#ffffff') >= 3) return c
             let darkened = c
