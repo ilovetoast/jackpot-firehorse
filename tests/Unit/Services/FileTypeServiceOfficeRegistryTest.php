@@ -57,8 +57,9 @@ final class FileTypeServiceOfficeRegistryTest extends TestCase
     public function test_is_office_document_true_when_mime_resolves_to_non_office_but_extension_is_office(): void
     {
         $svc = app(FileTypeService::class);
-        // MIME-first registry order returns `image` before extension is considered.
-        $this->assertSame('image', $svc->detectFileType('image/jpeg', 'pptx'));
+        // Filename suffix wins for {@see FileTypeService::detectFileType} so mis-sniffed MIME
+        // (e.g. a `.pptx` reported as `image/jpeg`) still classifies as office.
+        $this->assertSame('office', $svc->detectFileType('image/jpeg', 'pptx'));
         $this->assertTrue($svc->isOfficeDocument('image/jpeg', 'pptx'));
     }
 

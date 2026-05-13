@@ -91,7 +91,7 @@ class HelpAskEndpointTest extends TestCase
             ->with(
                 'in_app_help_assistant',
                 AITaskType::IN_APP_HELP_ACTION_ANSWER,
-                Mockery::on(fn (string $p) => str_contains($p, 'USER_QUESTION:') && str_contains($p, 'HELP_ACTIONS:')),
+                Mockery::on(fn (string $p) => str_contains($p, 'USER_QUESTION:') && str_contains($p, 'HELP_ACTIONS:') && str_contains($p, 'WORKSPACE_FACTS:')),
                 Mockery::on(fn (array $o) => isset($o['tenant'], $o['user']))
             )
             ->andReturn([
@@ -399,6 +399,64 @@ class HelpAskEndpointTest extends TestCase
             ->withSession($session)
             ->postJson('/app/help/ask', $body)
             ->assertStatus(429);
+    }
+
+    public function test_help_ask_prompt_includes_workspace_facts_json(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'T2',
+            'slug' => 't-help-ws-facts',
+            'manual_plan_override' => 'free',
+        ]);
+        $brand = Brand::create(['tenant_id' => $tenant->id, 'name' => 'B2', 'slug' => 'b-help-ws-facts']);
+        $user = User::create([
+            'email' => 'help-ws-facts@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'W',
+            'last_name' => 'F',
+            'email_verified_at' => now(),
+        ]);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
+        $user->brands()->attach($brand->id, ['role' => 'admin', 'removed_at' => null]);
+
+        $capturedPrompt = null;
+        $mock = Mockery::mock(AIService::class);
+        $mock->shouldReceive('executeAgent')
+            ->once()
+            ->andReturnUsing(function (...$args) use (&$capturedPrompt) {
+                $capturedPrompt = $args[2];
+
+                return [
+                    'text' => json_encode([
+                        'severity' => 'info',
+                        'confidence' => 0.9,
+                        'summary' => 'limits',
+                        'direct_answer' => 'Your Free plan caps single-file uploads at 10 MB unless a file type has a lower registry cap.',
+                        'numbered_steps' => [],
+                        'recommended_page' => null,
+                        'related_actions' => [],
+                        'confidence_tier' => 'high',
+                    ], JSON_UNESCAPED_UNICODE),
+                    'agent_run_id' => 777,
+                    'cost' => 0.0,
+                    'tokens_in' => 10,
+                    'tokens_out' => 10,
+                    'model' => 'gpt-4o-mini',
+                    'metadata' => [],
+                ];
+            });
+        $this->app->instance(AIService::class, $mock);
+
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brand->id])
+            ->postJson('/app/help/ask', ['question' => 'what is the limit of file size i can upload'])
+            ->assertOk()
+            ->assertJsonPath('kind', 'ai');
+
+        $this->assertIsString($capturedPrompt);
+        $this->assertStringContainsString('WORKSPACE_FACTS:', $capturedPrompt);
+        $this->assertStringContainsString('"max_upload_size_mb":10', $capturedPrompt);
+        $this->assertStringContainsString('"display_name":"Free"', $capturedPrompt);
     }
 
     protected function tearDown(): void

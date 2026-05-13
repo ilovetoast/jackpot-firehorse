@@ -168,6 +168,9 @@ export default function AssetCard({
                     'x-msvideo': 'AVI',
                     'vnd.adobe.photoshop': 'PSD',
                     'vnd.adobe.illustrator': 'AI',
+                    'x-adobe-indesign': 'INDD',
+                    'x-indesign': 'INDD',
+                    'vnd.adobe.indesign-idml': 'IDML',
                 }
                 if (mimeToExt[mimeSubtype]) {
                     return mimeToExt[mimeSubtype]

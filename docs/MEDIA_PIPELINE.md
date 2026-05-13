@@ -42,6 +42,8 @@ In parallel on the dedicated `ai` queue (when tenant policy allows):
 
 **Video (`.mov` / QuickTime):** Phone exports are often magic-sniffed as **`audio/mp4`** even when the file is a video container; `FileTypeService` would otherwise match **`audio`** before **`video`** (MIME order in the registry). **`FileInspectionService`** maps **`audio/mp4` / `application/mp4`** on **`.mov` / `.m4v`** keys to **`video/quicktime` / `video/x-m4v`**, and **`ThumbnailGenerationService::detectFileType`** forces **`video`** when the extension is **`.mov`/`.m4v`** but resolution would still be **`audio`**, **`image`**, or **`unknown`** — so FFmpeg poster thumbnails and **`GenerateVideoPreviewJob`** still run. Workers need **FFmpeg** (see [PRODUCTION_WORKER_SOFTWARE.md](environments/PRODUCTION_WORKER_SOFTWARE.md)).
 
+**Full-length in-browser playback** today streams the **original** where possible; the short **`GenerateVideoPreviewJob`** clip is for hover only. Containers we accept (AVI, MKV, some MOV/WebM, etc.) are often **not** natively playable in every browser. The implementation plan for a **full-length H.264/AAC MP4 derivative** on the **`video-heavy`** queue (parallel to the images chain, same idea as audio web playback) lives in **[VIDEO_WEB_PLAYBACK_PLAN.md](VIDEO_WEB_PLAYBACK_PLAN.md)**.
+
 ## Worker profiles and processing budgets
 
 Worker safety is centralized in `App\Services\Assets\AssetProcessingBudgetService` and `config/asset_processing.php` (`worker_profile` + `profiles.*`). This is **not** a global “turn off workers” switch: Horizon queues stay enabled; each job consults the same budget rules for the current profile.

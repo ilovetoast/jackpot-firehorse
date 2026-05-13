@@ -18,7 +18,7 @@ import AppHead from '../../Components/AppHead'
 import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import ManagedCompaniesClientList from '../../Components/dashboard/ManagedCompaniesClientList'
 import AgencyBrandQuickJump from '../../Components/agency/AgencyBrandQuickJump'
-import JackpotQuietFooterMark from '../../Components/JackpotQuietFooterMark'
+import AppFooter from '../../Components/AppFooter'
 import { showWorkspaceSwitchingOverlay } from '../../utils/workspaceSwitchOverlay'
 
 /**
@@ -1185,18 +1185,7 @@ export default function AgencyDashboard({
                         </div>
                         </div>
 
-                        <footer className="mt-12 border-t border-white/10 pt-8 text-center text-xs text-white/30">
-                            <JackpotQuietFooterMark className="mb-3 sm:mb-4" />
-                            <span>Jackpot</span> © {new Date().getFullYear()} —{' '}
-                            <a
-                                href="https://velvetysoft.com"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-white/45 hover:text-white/70"
-                            >
-                                Velvetysoft
-                            </a>
-                        </footer>
+                        <AppFooter variant="dark" className="mt-12 border-t border-white/10 pt-8" />
                     </div>
                 </main>
             </div>

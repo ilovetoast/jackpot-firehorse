@@ -26,6 +26,7 @@ import {
 } from '@heroicons/react/24/outline'
 import ThumbnailPreview from './ThumbnailPreview'
 import Model3dViewer from './Model3dViewer'
+import PlainTextSnippet from './PlainTextSnippet'
 import AssetTimeline from './AssetTimeline'
 import { resolveRasterPrimaryThumbnailUrl } from '../utils/thumbnailRasterPrimaryUrl'
 import { failedRasterThumbnailUrls } from '../utils/thumbnailRasterFailedCache'
@@ -235,43 +236,46 @@ export default function AssetDetailDrawer({ asset, onClose }) {
                         <h3 className="text-sm font-medium text-gray-900">Preview</h3>
 
                         {asset.id ? (
-                            <div className="relative">
-                                <div
-                                    className={`aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${
-                                        zoomClickable ? 'cursor-pointer group' : ''
-                                    }`}
-                                    onClick={() => zoomClickable && setShowZoomModal(true)}
-                                    role={zoomClickable ? 'button' : undefined}
-                                    tabIndex={zoomClickable ? 0 : undefined}
-                                    onKeyDown={(e) => {
-                                        if (!zoomClickable) return
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            e.preventDefault()
-                                            setShowZoomModal(true)
-                                        }
-                                    }}
-                                >
-                                    {showRealtimeGlb ? (
-                                        <Model3dViewer asset={asset} className="h-full w-full min-h-[280px] border-0 bg-transparent" />
-                                    ) : (
-                                        <ThumbnailPreview
-                                            asset={asset}
-                                            alt={asset.title || asset.original_filename || 'Asset preview'}
-                                            className="w-full h-full object-contain"
-                                            size="lg"
-                                            liveThumbnailUpdates
-                                            preferLargeForVector
-                                        />
-                                    )}
-                                    {zoomClickable && (
-                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-                                            <span className="text-white text-sm font-medium drop-shadow">
-                                                Click to zoom
-                                            </span>
-                                        </div>
-                                    )}
+                            <>
+                                <div className="relative">
+                                    <div
+                                        className={`aspect-video bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${
+                                            zoomClickable ? 'cursor-pointer group' : ''
+                                        }`}
+                                        onClick={() => zoomClickable && setShowZoomModal(true)}
+                                        role={zoomClickable ? 'button' : undefined}
+                                        tabIndex={zoomClickable ? 0 : undefined}
+                                        onKeyDown={(e) => {
+                                            if (!zoomClickable) return
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault()
+                                                setShowZoomModal(true)
+                                            }
+                                        }}
+                                    >
+                                        {showRealtimeGlb ? (
+                                            <Model3dViewer asset={asset} className="h-full w-full min-h-[280px] border-0 bg-transparent" />
+                                        ) : (
+                                            <ThumbnailPreview
+                                                asset={asset}
+                                                alt={asset.title || asset.original_filename || 'Asset preview'}
+                                                className="w-full h-full object-contain"
+                                                size="lg"
+                                                liveThumbnailUpdates
+                                                preferLargeForVector
+                                            />
+                                        )}
+                                        {zoomClickable && (
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                                                <span className="text-white text-sm font-medium drop-shadow">
+                                                    Click to zoom
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
+                                <PlainTextSnippet asset={asset} />
+                            </>
                         ) : (
                             <div className="aspect-video bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
                                 {getFileTypeIcon()}

@@ -1,12 +1,26 @@
+import JackpotQuietFooterMark from './JackpotQuietFooterMark'
+
 /**
- * @param {{ variant?: 'light' | 'dark' | 'settings' }} props
- * Use variant="dark" on cinematic / full-bleed dark pages (e.g. Creators dashboard).
+ * @param {{
+ *   variant?: 'light' | 'dark' | 'settings'
+ *   showWordmark?: boolean
+ *   showLegalLinks?: boolean
+ *   className?: string
+ * }} props
+ * Use variant="dark" on cinematic / full-bleed dark pages (e.g. Creators dashboard, Agency overview).
  * Use variant="settings" on account/company settings: compact legal + copyright only.
  * Light variant uses a transparent background so the page background shows through (no solid white strip).
+ * Legal links default on for light/settings (authenticated manage surfaces); default off for dark unless you pass showLegalLinks.
  */
-export default function AppFooter({ variant = 'light' }) {
+export default function AppFooter({
+    variant = 'light',
+    showWordmark = true,
+    showLegalLinks: showLegalLinksProp,
+    className = '',
+}) {
     const dark = variant === 'dark'
     const settings = variant === 'settings'
+    const showLegalLinks = showLegalLinksProp !== undefined ? showLegalLinksProp : !dark
 
     const linkBase = 'underline-offset-2 transition hover:underline'
     const linkClass = dark
@@ -29,15 +43,14 @@ export default function AppFooter({ variant = 'light' }) {
 
     return (
         <footer
-            className={
-                dark
-                    ? 'bg-transparent'
-                    : 'border-t border-gray-200/35 bg-transparent'
-            }
+            className={`${dark ? 'bg-transparent' : 'border-t border-gray-200/35 bg-transparent'} ${className}`.trim()}
         >
             <div
-                className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-0.5 py-2.5"
+                className={`mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2.5 ${showWordmark ? 'space-y-1' : 'space-y-0.5'}`}
             >
+                {showWordmark ? (
+                    <JackpotQuietFooterMark surface={dark ? 'dark' : 'light'} />
+                ) : null}
                 <p className={`${copyrightClass} antialiased`}>
                     <span
                         className={
@@ -78,35 +91,37 @@ export default function AppFooter({ variant = 'light' }) {
                         Velvetysoft
                     </a>
                 </p>
-                <p className={`${legalClass} antialiased`}>
-                    <a href="/terms" className={linkClass}>
-                        Terms
-                    </a>
-                    <span aria-hidden className="mx-1 opacity-30">
-                        ·
-                    </span>
-                    <a href="/privacy" className={linkClass}>
-                        Privacy
-                    </a>
-                    <span aria-hidden className="mx-1 opacity-30">
-                        ·
-                    </span>
-                    <a href="/dpa" className={linkClass}>
-                        DPA
-                    </a>
-                    <span aria-hidden className="mx-1 opacity-30">
-                        ·
-                    </span>
-                    <a href="/subprocessors" className={linkClass}>
-                        Subprocessors
-                    </a>
-                    <span aria-hidden className="mx-1 opacity-30">
-                        ·
-                    </span>
-                    <a href="/accessibility" className={linkClass}>
-                        Accessibility
-                    </a>
-                </p>
+                {showLegalLinks ? (
+                    <p className={`${legalClass} antialiased`}>
+                        <a href="/terms" className={linkClass}>
+                            Terms
+                        </a>
+                        <span aria-hidden className="mx-1 opacity-30">
+                            ·
+                        </span>
+                        <a href="/privacy" className={linkClass}>
+                            Privacy
+                        </a>
+                        <span aria-hidden className="mx-1 opacity-30">
+                            ·
+                        </span>
+                        <a href="/dpa" className={linkClass}>
+                            DPA
+                        </a>
+                        <span aria-hidden className="mx-1 opacity-30">
+                            ·
+                        </span>
+                        <a href="/subprocessors" className={linkClass}>
+                            Subprocessors
+                        </a>
+                        <span aria-hidden className="mx-1 opacity-30">
+                            ·
+                        </span>
+                        <a href="/accessibility" className={linkClass}>
+                            Accessibility
+                        </a>
+                    </p>
+                ) : null}
             </div>
         </footer>
     )

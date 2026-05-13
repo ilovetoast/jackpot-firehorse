@@ -81,6 +81,18 @@ export default function AgencyContextNavPicker({
     const addBrandScopeHint = addBrandIsAgencyWorkspace ? 'Your agency' : 'Managed client'
     const addBrandAriaLabel = `Create a new brand for ${addBrandTargetName} (${addBrandScopeHint})`
 
+    const hasLogo = Boolean(navLogoSrc && !logoError)
+    const contextDescription = [
+        'Switch brand or workspace',
+        brandName,
+        !onAgencyWorkspace && agencyPicker.active_tenant_name?.trim()
+            ? `Client: ${agencyPicker.active_tenant_name.trim()}`
+            : null,
+    ]
+        .filter(Boolean)
+        .join(' — ')
+    const contextButtonTitle = hasLogo ? contextDescription : 'Switch brand or workspace'
+
     if (!agencyPicker.has_multiple_contexts) {
         return (
             <div className="flex min-w-0 max-w-full items-center gap-2.5 py-2">
@@ -118,11 +130,12 @@ export default function AgencyContextNavPicker({
                 onClick={() => setMenuOpen(!menuOpen)}
                 aria-expanded={menuOpen}
                 aria-haspopup="true"
+                aria-label={contextDescription}
                 className={`flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors focus:outline-none sm:px-3 ${buttonRing}`}
                 style={{ color: textColor }}
-                title="Switch brand or workspace"
+                title={contextButtonTitle}
             >
-                {navLogoSrc && !logoError ? (
+                {hasLogo ? (
                     <img
                         src={navLogoSrc}
                         alt={brandName}
@@ -133,17 +146,20 @@ export default function AgencyContextNavPicker({
                 ) : (
                     <BrandIconUnified brand={activeBrand} size="lg" />
                 )}
-                <div className="flex min-w-0 flex-1 flex-col items-start text-left leading-tight">
-                    <span className="w-full truncate font-semibold">{brandName}</span>
-                    {!onAgencyWorkspace && (
-                        <span
-                            className="w-full truncate text-[10px] font-normal opacity-70"
-                            title={agencyPicker.active_tenant_name}
-                        >
-                            {agencyPicker.active_tenant_name}
-                        </span>
-                    )}
-                </div>
+                {/** Logo wordmark carries the brand (and often company) name — never stack duplicate text beside it. */}
+                {!hasLogo && (
+                    <div className="flex min-w-0 flex-1 flex-col items-start text-left leading-tight">
+                        <span className="w-full truncate font-semibold">{brandName}</span>
+                        {!onAgencyWorkspace && (
+                            <span
+                                className="w-full truncate text-[10px] font-normal opacity-70"
+                                title={agencyPicker.active_tenant_name}
+                            >
+                                {agencyPicker.active_tenant_name}
+                            </span>
+                        )}
+                    </div>
+                )}
                 <svg
                     className={`h-5 w-5 shrink-0 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
                     style={{ color: textColor === '#ffffff' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)' }}

@@ -879,6 +879,9 @@ class AssetController extends Controller
                             'image/vnd.adobe.photoshop' => 'psd',
                             'image/x-canon-cr2' => 'cr2',
                             'application/vnd.adobe.illustrator' => 'ai',
+                            'application/x-adobe-indesign' => 'indd',
+                            'application/x-indesign' => 'indd',
+                            'application/vnd.adobe.indesign-idml' => 'idml',
                         ];
                         $mimeTypeLower = strtolower(trim($asset->mime_type));
                         $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
@@ -2031,16 +2034,91 @@ class AssetController extends Controller
 
         $validated = $request->validate([
             'kind' => 'required|string|in:model_viewer_error,model_viewer_retry,model_viewer_open_full,model_viewer_fallback_active',
+            'page_origin' => 'sometimes|nullable|string|max:512',
+            'model_origin' => 'sometimes|nullable|string|max:512',
         ]);
+
+        $pageOrigin = isset($validated['page_origin']) ? trim((string) $validated['page_origin']) : '';
+        $modelOrigin = isset($validated['model_origin']) ? trim((string) $validated['model_origin']) : '';
+        $likelyCrossOriginModel = $pageOrigin !== '' && $modelOrigin !== '' && $pageOrigin !== $modelOrigin;
 
         Log::info('preview_3d.client_event', [
             'event' => 'preview_3d.client_event',
             'kind' => $validated['kind'],
             'asset_id' => $asset->id,
             'tenant_id' => $asset->tenant_id,
+            'page_origin' => $pageOrigin !== '' ? $pageOrigin : null,
+            'model_origin' => $modelOrigin !== '' ? $modelOrigin : null,
+            'likely_cross_origin_model' => $likelyCrossOriginModel,
         ]);
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * First ~256 KiB of a .txt / .csv asset for in-app preview (UTF-8, invalid bytes stripped).
+     *
+     * GET /app/assets/{asset}/text-snippet
+     */
+    public function textSnippet(Request $request, Asset $asset): JsonResponse
+    {
+        $this->authorize('view', $asset);
+
+        if ($response = AssetSessionWorkspace::jsonMismatchResponse($request, $asset, true)) {
+            return $response;
+        }
+
+        $fileTypeService = app(FileTypeService::class);
+        $ext = strtolower(pathinfo((string) ($asset->original_filename ?? ''), PATHINFO_EXTENSION));
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        $detected = $fileTypeService->detectFileType($mime !== '' ? $mime : null, $ext !== '' ? $ext : null);
+        if ($detected !== 'plaintext') {
+            return response()->json([
+                'message' => 'Plain-text preview is only available for .txt and .csv assets.',
+            ], 422);
+        }
+
+        $asset->loadMissing('storageBucket');
+        $bucket = $asset->storageBucket;
+        $key = $asset->storage_root_path;
+        if ($bucket === null || $key === null || $key === '') {
+            return response()->json(['message' => 'File not available'], 404);
+        }
+
+        $maxBytes = 262_144;
+        try {
+            $s3 = $this->createS3ClientForVerification();
+            $result = $s3->getObject([
+                'Bucket' => $bucket->name,
+                'Key' => $key,
+                'Range' => 'bytes=0-'.($maxBytes - 1),
+            ]);
+            $body = (string) $result['Body'];
+        } catch (\Throwable $e) {
+            Log::warning('asset.text_snippet_read_failed', [
+                'asset_id' => $asset->id,
+                'tenant_id' => $asset->tenant_id,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Unable to read file'], 502);
+        }
+
+        $utf8 = @iconv('UTF-8', 'UTF-8//IGNORE', $body);
+        if (! is_string($utf8) || $utf8 === '') {
+            $utf8 = preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $body) ?? '';
+        }
+        $utf8 = str_replace("\0", '', $utf8);
+
+        $sizeBytes = (int) ($asset->size_bytes ?? 0);
+        $truncated = $sizeBytes > strlen($body) || strlen($body) >= $maxBytes;
+
+        return response()->json([
+            'content' => $utf8,
+            'truncated' => $truncated,
+            'max_bytes' => $maxBytes,
+        ]);
     }
 
     /**

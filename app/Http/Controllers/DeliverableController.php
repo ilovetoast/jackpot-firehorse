@@ -657,6 +657,9 @@ class DeliverableController extends Controller
                         'image/vnd.adobe.photoshop' => 'psd',
                         'image/x-canon-cr2' => 'cr2',
                         'application/vnd.adobe.illustrator' => 'ai',
+                        'application/x-adobe-indesign' => 'indd',
+                        'application/x-indesign' => 'indd',
+                        'application/vnd.adobe.indesign-idml' => 'idml',
                     ];
                     $mimeTypeLower = strtolower(trim($asset->mime_type));
                     $fileExtension = $mimeToExt[$mimeTypeLower] ?? null;
