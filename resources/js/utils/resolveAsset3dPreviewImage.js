@@ -110,6 +110,27 @@ export function isRegistryModelGlbAsset(asset, damOverride) {
 }
 
 /**
+ * When true, the thumbnail pipeline determined the stored bytes are not a valid GLB
+ * (e.g. HTML or corrupt upload). Do not fall back to `original` for &lt;model-viewer&gt;.
+ *
+ * @param {object|null|undefined} asset
+ * @returns {boolean}
+ */
+export function isRegistryModelGlbRealtimeViewerDisabled(asset) {
+    const p3 = asset?.metadata?.preview_3d
+    if (!p3 || typeof p3 !== 'object') {
+        return false
+    }
+    if (p3.disable_realtime_viewer === true) {
+        return true
+    }
+    if (p3.skip_reason === 'invalid_glb_source') {
+        return true
+    }
+    return false
+}
+
+/**
  * Signed GLB URL for model-viewer (registry GLB only).
  *
  * @param {object|null|undefined} asset
@@ -133,6 +154,9 @@ export function getRegistryModelGlbViewerDisplayUrl(asset) {
  */
 export function getRegistryModelGlbModelSourceUrl(asset, damOverride) {
     if (!isRegistryModelGlbAsset(asset, damOverride)) {
+        return null
+    }
+    if (isRegistryModelGlbRealtimeViewerDisabled(asset)) {
         return null
     }
     const fromPreview = getRegistryModelGlbViewerDisplayUrl(asset)

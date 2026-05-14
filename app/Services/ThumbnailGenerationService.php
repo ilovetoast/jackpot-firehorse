@@ -8,6 +8,7 @@ use App\Models\StorageBucket;
 use App\Models\Tenant;
 use App\Services\FileTypeService;
 use App\Services\Models\BlenderModelPreviewService;
+use App\Services\Security\MagicByteVerifier;
 use App\Support\EditorAssetOriginalBytesLoader;
 use App\Support\Logging\ThumbnailProfilingRecorder;
 use App\Support\ThumbnailMode;
@@ -136,7 +137,8 @@ class ThumbnailGenerationService
      *   render_seconds: ?float,
      *   conversion_seconds: ?float,
      *   failure_message: ?string,
-     *   viewer_storage_key: ?string
+     *   viewer_storage_key: ?string,
+     *   invalid_glb_source?: bool
      * }
      */
     protected array $model3dPreviewReport = [
@@ -147,6 +149,7 @@ class ThumbnailGenerationService
         'conversion_seconds' => null,
         'failure_message' => null,
         'viewer_storage_key' => null,
+        'invalid_glb_source' => false,
     ];
 
     /**
@@ -2355,6 +2358,7 @@ class ThumbnailGenerationService
             'conversion_seconds' => null,
             'failure_message' => null,
             'viewer_storage_key' => null,
+            'invalid_glb_source' => false,
         ];
     }
 
@@ -2365,6 +2369,28 @@ class ThumbnailGenerationService
         }
         $px = max(256, min(4096, (int) config('dam_3d.poster_blender_max_px', 1024)));
         $this->attemptBlenderOrStubMaster($sourcePath, $fileType, $px, $asset->original_filename);
+    }
+
+    /**
+     * GLB failed magic-byte validation — stub poster only, skip Blender, flag job merge to disable browser viewer.
+     */
+    protected function abortModel3dInvalidGlbSource(
+        int $masterSquarePx,
+        ?string $originalFilenameForLabel,
+        string $sourcePath,
+        string $failureMessage,
+    ): void {
+        if (is_string($this->model3dConvertedGlbLocalForUpload ?? null) && is_file($this->model3dConvertedGlbLocalForUpload)) {
+            @unlink($this->model3dConvertedGlbLocalForUpload);
+        }
+        $this->model3dConvertedGlbLocalForUpload = null;
+        $this->model3dPreviewReport['invalid_glb_source'] = true;
+        $this->model3dPreviewReport['failure_message'] = Str::limit($failureMessage, 500);
+        $this->model3dPreviewReport['poster_stub'] = true;
+        $this->model3dPreviewReport['blender_used'] = false;
+        $this->model3dMasterPngPath = $this->writeModel3dStubPngMaster($masterSquarePx, [
+            '_original_filename' => (string) ($originalFilenameForLabel ?? basename($sourcePath)),
+        ]);
     }
 
     /**
@@ -2394,6 +2420,45 @@ class ThumbnailGenerationService
                 $this->model3dConvertedGlbLocalForUpload = $glbOut;
             } else {
                 $exportGlb = false;
+            }
+        }
+
+        if ($fileType === 'model_glb' && is_string($sourcePath) && is_file($sourcePath)) {
+            $byteSize = @filesize($sourcePath);
+            if ($byteSize === false || $byteSize < 20) {
+                $this->abortModel3dInvalidGlbSource(
+                    $masterSquarePx,
+                    $originalFilenameForLabel,
+                    $sourcePath,
+                    'This file is too small to be a valid GLB (glTF binary). Realtime 3D preview was skipped.',
+                );
+
+                return;
+            }
+            $head = @file_get_contents($sourcePath, false, null, 0, 4096);
+            if (! is_string($head) || $head === '') {
+                $this->abortModel3dInvalidGlbSource(
+                    $masterSquarePx,
+                    $originalFilenameForLabel,
+                    $sourcePath,
+                    'Could not read the beginning of this GLB for validation. Realtime 3D preview was skipped.',
+                );
+
+                return;
+            }
+            $verify = app(MagicByteVerifier::class)->verify($head, 'model/gltf-binary');
+            if (! ($verify['ok'] ?? false)) {
+                $reason = is_string($verify['reason'] ?? null) ? $verify['reason'] : 'unknown';
+                $detected = is_string($verify['detected_signature'] ?? null) ? $verify['detected_signature'] : null;
+                $suffix = $detected !== null && $detected !== '' ? " (detected: {$detected})" : '';
+                $this->abortModel3dInvalidGlbSource(
+                    $masterSquarePx,
+                    $originalFilenameForLabel,
+                    $sourcePath,
+                    "This object is not valid GLB binary ({$reason}){$suffix}. Realtime 3D preview was disabled; you can still download the file.",
+                );
+
+                return;
             }
         }
 

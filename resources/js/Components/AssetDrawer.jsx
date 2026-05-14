@@ -3673,6 +3673,7 @@ export default function AssetDrawer({
 
     const showPreviewMissingInfo = useMemo(() => {
         if (!displayAsset?.id || isVirtualGoogleFont) return false
+        if (showDrawerRealtimeGlb) return false
         if (isFontFile) return false
         const mime = (displayAsset?.mime_type || '').toLowerCase()
         if (!supportsThumbnail(mime, extForThumbnailUtils)) return false
@@ -3692,11 +3693,15 @@ export default function AssetDrawer({
         isVirtualGoogleFont,
         isFontFile,
         thumbnailsFailed,
+        showDrawerRealtimeGlb,
     ])
 
     /** Short note under the drawer preview when no raster is available (OBJ, failed/skipped pipeline, unsupported). */
     const drawerPreviewTerminalNote = useMemo(() => {
         if (!displayAsset?.id || isVirtualGoogleFont || isVideo || isAudio) {
+            return null
+        }
+        if (showDrawerRealtimeGlb) {
             return null
         }
         if (drawerEphemeralLocalPreviewUrl) {
@@ -3724,6 +3729,7 @@ export default function AssetDrawer({
         isVideo,
         isVirtualGoogleFont,
         thumbnailRetryCount,
+        showDrawerRealtimeGlb,
     ])
 
     // Preview & Styles and Processing & Automation stay collapsed by default (status remains visible in section headers).

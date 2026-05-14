@@ -1275,9 +1275,13 @@ class GenerateThumbnailsJob implements ShouldQueue
                         ? trim($existingNativeGlbViewer)
                         : null;
 
-                    $mergedViewer = $convertedViewerKey !== null && $convertedViewerKey !== ''
+                    $invalidGlb = $detectedFileType === 'model_glb' && (bool) ($m3['invalid_glb_source'] ?? false);
+
+                    $mergedViewer = $invalidGlb
+                        ? null
+                        : ($convertedViewerKey !== null && $convertedViewerKey !== ''
                         ? $convertedViewerKey
-                        : ($detectedFileType === 'model_glb' ? $preservedNative : null);
+                        : ($detectedFileType === 'model_glb' ? $preservedNative : null));
 
                     $dbg = array_merge($prevDbg, [
                         'poster_generated_at' => now()->toIso8601String(),
@@ -1302,23 +1306,33 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $thumbnailMetadata['preview_3d'] = Preview3dMetadata::merge(
                         $metaBaseForMerge['preview_3d'] ?? [],
                         [
-                            'status' => Preview3dMetadata::STATUS_READY,
+                            'status' => $invalidGlb ? Preview3dMetadata::STATUS_SKIPPED : Preview3dMetadata::STATUS_READY,
                             'poster_path' => $posterPath,
                             'thumbnail_path' => $thumbP,
                             'viewer_path' => $mergedViewer,
-                            'skip_reason' => null,
+                            'skip_reason' => $invalidGlb ? 'invalid_glb_source' : null,
                             'failure_message' => $failure,
+                            'disable_realtime_viewer' => $invalidGlb,
                             'debug' => $dbg,
                         ]
                     );
-                    Log::info('preview_3d.poster_generated', [
-                        'event' => 'preview_3d.poster_generated',
-                        'asset_id' => $asset->id,
-                        'tenant_id' => $asset->tenant_id,
-                        'registry_type' => $detectedFileType,
-                        'poster_stub' => $posterStub,
-                        'blender_used' => $blenderUsed,
-                    ]);
+                    if ($invalidGlb) {
+                        Log::warning('preview_3d.invalid_glb_source', [
+                            'event' => 'preview_3d.invalid_glb_source',
+                            'asset_id' => $asset->id,
+                            'tenant_id' => $asset->tenant_id,
+                            'registry_type' => $detectedFileType,
+                        ]);
+                    } else {
+                        Log::info('preview_3d.poster_generated', [
+                            'event' => 'preview_3d.poster_generated',
+                            'asset_id' => $asset->id,
+                            'tenant_id' => $asset->tenant_id,
+                            'registry_type' => $detectedFileType,
+                            'poster_stub' => $posterStub,
+                            'blender_used' => $blenderUsed,
+                        ]);
+                    }
                 }
             }
 

@@ -54,6 +54,7 @@ final class Preview3dMetadata
                 'blender_used' => null,
                 'blender_version' => null,
             ],
+            'disable_realtime_viewer' => false,
         ];
     }
 
