@@ -398,6 +398,21 @@ class SystemCategoryService
                     'error' => $e->getMessage(),
                 ]);
             }
+
+            // Phase 4.1 — apply Folder Quick Filter defaults for this brand-new
+            // system category. Without this, fresh tenants only got quick
+            // filters when an operator manually re-ran the FolderQuickFilterDefaultsSeeder.
+            // The applier is itself idempotent + defensive: it skips
+            // suppressed rows and never overwrites an admin-touched source.
+            try {
+                app(\App\Services\Filters\FolderQuickFilterDefaultsApplier::class)
+                    ->applyForCategory($category);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('SystemCategoryService: failed to apply quick filter defaults for new category', [
+                    'category_id' => $category->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return $category;

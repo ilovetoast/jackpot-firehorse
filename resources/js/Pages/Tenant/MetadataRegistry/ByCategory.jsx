@@ -252,8 +252,8 @@ export default function ByCategoryView({
                     const n = Number(data.rows_updated)
                     const msg =
                         Number.isFinite(n) && n > 0
-                            ? `Enabled ${n} new platform field row${n === 1 ? '' : 's'} on your folders.`
-                            : 'Folder fields updated.'
+                            ? `Enabled ${n} new platform filter row${n === 1 ? '' : 's'} on your folders.`
+                            : 'Folder filters updated.'
                     window.toast(msg, 'success')
                 }
             } else if (typeof window !== 'undefined' && window.toast) {
@@ -1152,7 +1152,7 @@ export default function ByCategoryView({
                                 <div className="text-center max-w-xl mx-auto py-4">
                                     <p className="text-sm text-gray-600">
                                         Field enablement, upload and filter visibility, AI options, and ordering are
-                                        managed in <strong className="text-gray-900">Manage → Folders & fields</strong>{' '}
+                                        managed in <strong className="text-gray-900">Manage → Folders & filters</strong>{' '}
                                         with a table layout for this brand&apos;s folders.
                                     </p>
                                     <Link

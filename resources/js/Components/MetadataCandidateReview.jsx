@@ -28,6 +28,7 @@ export default function MetadataCandidateReview({
     const [reviewItems, setReviewItems] = useState([])
     const [loading, setLoading] = useState(true)
     const [processing, setProcessing] = useState(new Set())
+    const [acceptAllBusy, setAcceptAllBusy] = useState(false)
     const [showConfirmReject, setShowConfirmReject] = useState(null)
     /** @type {Record<string, string>} candidate id -> selected option `value` (select fields only) */
     const [selectOverrides, setSelectOverrides] = useState({})
@@ -150,12 +151,80 @@ export default function MetadataCandidateReview({
         return a !== b
     }
 
+    /** Core approve request (no processing-set / alert wrapper) — used by single Approve and Accept all. */
+    const approveCandidateRequest = async (candidate, item) => {
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+        if (!csrfToken) {
+            throw new Error('CSRF token not found. Please refresh the page.')
+        }
+
+        if (candidate.ephemeral && candidate.field_key) {
+            const payload = { _token: csrfToken }
+            const fieldType = item?.field_type
+            if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
+                payload.value = getSelectValueForCandidate(fieldType, candidate)
+            }
+            const response = await fetch(
+                `/app/assets/${assetId}/metadata/suggestions/${encodeURIComponent(candidate.field_key)}/accept`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        Accept: 'application/json',
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload),
+                }
+            )
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}))
+                throw new Error(data.message || 'Failed to accept suggestion')
+            }
+            refreshReview()
+            return
+        }
+
+        const approveBody = { _token: csrfToken }
+        const fieldType = item?.field_type
+        if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
+            approveBody.value = getSelectValueForCandidate(fieldType, candidate)
+        }
+
+        const response = await fetch(`/app/metadata/candidates/${candidate.id}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(approveBody),
+        })
+
+        if (!response.ok) {
+            if (response.status === 419) {
+                throw new Error('Session expired. Please refresh the page and try again.')
+            }
+            let data
+            try {
+                data = await response.json()
+            } catch (e) {
+                throw new Error(`Failed to approve candidate (${response.status})`)
+            }
+            throw new Error(data.message || 'Failed to approve candidate')
+        }
+
+        refreshReview()
+    }
+
     // Handle approve candidate (DB row) or ephemeral Jackpot embedded suggestion (field_key)
     const handleApprove = async (candidate, item) => {
         const candidateId = candidate.id
-        if (processing.has(candidateId)) return
+        if (processing.has(candidateId) || acceptAllBusy) return
 
-        // Check permission before approving
         if (!canApplySuggestions) {
             alert('You do not have permission to approve metadata suggestions.')
             return
@@ -164,75 +233,7 @@ export default function MetadataCandidateReview({
         setProcessing((prev) => new Set(prev).add(candidateId))
 
         try {
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
-            if (!csrfToken) {
-                throw new Error('CSRF token not found. Please refresh the page.')
-            }
-
-            if (candidate.ephemeral && candidate.field_key) {
-                const payload = { _token: csrfToken }
-                const fieldType = item?.field_type
-                if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
-                    payload.value = getSelectValueForCandidate(fieldType, candidate)
-                }
-                const response = await fetch(
-                    `/app/assets/${assetId}/metadata/suggestions/${encodeURIComponent(candidate.field_key)}/accept`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': csrfToken,
-                            'X-Requested-With': 'XMLHttpRequest',
-                            Accept: 'application/json',
-                        },
-                        credentials: 'same-origin',
-                        body: JSON.stringify(payload),
-                    }
-                )
-                if (!response.ok) {
-                    const data = await response.json().catch(() => ({}))
-                    throw new Error(data.message || 'Failed to accept suggestion')
-                }
-                refreshReview()
-                return
-            }
-
-            const approveBody = { _token: csrfToken }
-            const fieldType = item?.field_type
-            if (fieldType === 'select' && selectValueDiffersFromCandidate(fieldType, candidate)) {
-                approveBody.value = getSelectValueForCandidate(fieldType, candidate)
-            }
-
-            const response = await fetch(`/app/metadata/candidates/${candidateId}/approve`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Accept': 'application/json',
-                },
-                credentials: 'same-origin',
-                body: JSON.stringify(approveBody),
-            })
-
-            if (!response.ok) {
-                // Handle 419 CSRF token mismatch
-                if (response.status === 419) {
-                    throw new Error('Session expired. Please refresh the page and try again.')
-                }
-                
-                let data
-                try {
-                    data = await response.json()
-                } catch (e) {
-                    // Response might not be JSON
-                    throw new Error(`Failed to approve candidate (${response.status})`)
-                }
-                throw new Error(data.message || 'Failed to approve candidate')
-            }
-
-            // Refresh review items and approved metadata
-            refreshReview()
+            await approveCandidateRequest(candidate, item)
         } catch (error) {
             console.error('[MetadataCandidateReview] Failed to approve', error)
             alert(error.message || 'Failed to approve candidate')
@@ -245,9 +246,38 @@ export default function MetadataCandidateReview({
         }
     }
 
+    const handleAcceptAll = async () => {
+        if (!canApplySuggestions || acceptAllBusy) return
+        const queue = reviewItems.flatMap((item) => (item.candidates || []).map((candidate) => ({ candidate, item })))
+        if (queue.length === 0) return
+        setAcceptAllBusy(true)
+        try {
+            for (const { candidate, item } of queue) {
+                if (!canApplySuggestions) break
+                const candidateId = candidate.id
+                setProcessing((prev) => new Set(prev).add(candidateId))
+                try {
+                    await approveCandidateRequest(candidate, item)
+                } catch (err) {
+                    console.error('[MetadataCandidateReview] Accept all stopped', err)
+                    alert(err.message || 'Failed to approve suggestion')
+                    break
+                } finally {
+                    setProcessing((prev) => {
+                        const next = new Set(prev)
+                        next.delete(candidateId)
+                        return next
+                    })
+                }
+            }
+        } finally {
+            setAcceptAllBusy(false)
+        }
+    }
+
     const handleReject = async (candidate) => {
         const candidateId = candidate.id
-        if (processing.has(candidateId)) return
+        if (processing.has(candidateId) || acceptAllBusy) return
 
         // Check permission before rejecting
         if (!canApplySuggestions) {
@@ -335,7 +365,7 @@ export default function MetadataCandidateReview({
         if (candidate.ephemeral) {
             return
         }
-        if (processing.has(candidateId)) return
+        if (processing.has(candidateId) || acceptAllBusy) return
         if (!canViewSuggestions) return
 
         setProcessing((prev) => new Set(prev).add(candidateId))
@@ -476,8 +506,34 @@ export default function MetadataCandidateReview({
         return null // Hide if no reviewable candidates
     }
 
+    const showAcceptAll =
+        canApplySuggestions &&
+        reviewItems.some((item) => Array.isArray(item.candidates) && item.candidates.length > 0)
+
     const list = (
         <div className="space-y-2">
+            {showAcceptAll ? (
+                <div className="flex items-center justify-between gap-2">
+                    {compactDrawerReview ? (
+                        <h3 className="min-w-0 truncate text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                            Suggested fields
+                        </h3>
+                    ) : (
+                        <span className="min-w-0 truncate text-xs font-medium text-gray-700">Pending suggestions</span>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => void handleAcceptAll()}
+                        disabled={acceptAllBusy}
+                        className="inline-flex flex-shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ backgroundColor: brandColor }}
+                        title="Accept all suggested field values shown below"
+                    >
+                        <CheckIcon className="h-3 w-3" />
+                        Accept all
+                    </button>
+                </div>
+            ) : null}
             {reviewItems.map((item) => (
                 <div
                     key={item.metadata_field_id}
@@ -538,7 +594,7 @@ export default function MetadataCandidateReview({
                                                                     [candidate.id]: e.target.value,
                                                                 }))
                                                             }
-                                                            disabled={processing.has(candidate.id)}
+                                                            disabled={processing.has(candidate.id) || acceptAllBusy}
                                                         >
                                                             {(() => {
                                                                 const optVals = new Set(
@@ -592,7 +648,7 @@ export default function MetadataCandidateReview({
                                                         <button
                                                             type="button"
                                                             onClick={() => handleApprove(candidate, item)}
-                                                            disabled={processing.has(candidate.id)}
+                                                            disabled={processing.has(candidate.id) || acceptAllBusy}
                                                             className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             <CheckIcon className="mr-0.5 h-2.5 w-2.5" />
@@ -601,7 +657,7 @@ export default function MetadataCandidateReview({
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowConfirmReject(candidate)}
-                                                            disabled={processing.has(candidate.id)}
+                                                            disabled={processing.has(candidate.id) || acceptAllBusy}
                                                             className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-red-600 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             <XMarkIcon className="mr-0.5 h-2.5 w-2.5" />
@@ -611,7 +667,7 @@ export default function MetadataCandidateReview({
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleDefer(candidate)}
-                                                                disabled={processing.has(candidate.id)}
+                                                                disabled={processing.has(candidate.id) || acceptAllBusy}
                                                                 className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
                                                             >
                                                                 <ClockIcon className="mr-0.5 h-2.5 w-2.5" />

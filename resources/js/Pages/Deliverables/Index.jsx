@@ -1018,7 +1018,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                         />
                     )}
 
-                    {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on category change */}
+                    {/* Selection + Create Download: SelectionActionBar only (no duplicate app-level bucket bar). */}
                 </div>
             </div>
             
@@ -1040,6 +1040,7 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
 
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkActionsModal
+                    placement="brand"
                     assetIds={bulkSelectedAssetIds}
                     selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
                         const a = safeAssetsList.find((x) => x.id === id)

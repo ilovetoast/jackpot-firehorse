@@ -1423,7 +1423,7 @@ export default function AssetGridSecondaryFilters({
                                 className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors"
                             >
                                 <PlusIcon className="h-4 w-4" />
-                                <span>Add field to this folder</span>
+                                <span>Add filter to this folder</span>
                             </Link>
                         </div>
                     )}

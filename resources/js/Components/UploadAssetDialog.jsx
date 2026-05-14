@@ -67,7 +67,7 @@ import { FloatingUploadProgressTray } from './FloatingUploadProgressTray'
 import { formatBytesHuman } from '../utils/formatBytesHuman'
 import { computeUploadCounts } from '../utils/uploadTrayCounts'
 import { computeOverallBatchUploadPercent } from '../utils/uploadQueueProgress'
-import { uploadModalScrollbarCssVars, getSolidFillButtonForegroundHex } from '../utils/colorUtils'
+import { uploadModalScrollbarCssVars, getSolidFillButtonForegroundHex, getWorkspacePrimaryActionButtonColors } from '../utils/colorUtils'
 
 /** Tailwind class merge (additive; avoids new dependencies) */
 function cn(...parts) {
@@ -191,7 +191,18 @@ export default function UploadAssetDialog({
     )
     const uploadAcceptAttribute = damFileTypesProp?.upload_accept || getUploadAcceptAttribute()
     const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
-    const brandPrimaryOnButton = useMemo(() => getSolidFillButtonForegroundHex(brandPrimary), [brandPrimary])
+    /** Same resting/hover fills as {@link AddAssetButton} — not raw primary (see getWorkspacePrimaryActionButtonColors). */
+    const workspacePrimaryBtn = useMemo(() => getWorkspacePrimaryActionButtonColors(auth?.activeBrand), [auth?.activeBrand])
+    const workspacePrimaryBtnBg = workspacePrimaryBtn.resting
+    const workspacePrimaryBtnHoverBg = workspacePrimaryBtn.hover
+    const workspacePrimaryBtnFg = useMemo(
+        () => getSolidFillButtonForegroundHex(workspacePrimaryBtnBg),
+        [workspacePrimaryBtnBg],
+    )
+    const workspacePrimaryBtnFgHover = useMemo(
+        () => getSolidFillButtonForegroundHex(workspacePrimaryBtnHoverBg),
+        [workspacePrimaryBtnHoverBg],
+    )
     const uploadScrollbarCssVars = useMemo(() => uploadModalScrollbarCssVars(brandPrimary), [brandPrimary])
 
     // TASK 1: Check if user is a contributor (not approver) - only show notice to contributors
@@ -5188,7 +5199,8 @@ export default function UploadAssetDialog({
                     countLine={trayCountLine}
                     phase={trayPhase}
                     aggregateProgress={trayAggregateProgress}
-                    brandPrimary={brandPrimary}
+                    brandPrimary={workspacePrimaryBtnBg}
+                    brandPrimaryHover={workspacePrimaryBtnHoverBg}
                     listExpanded={trayUploadDetails}
                     onToggleList={() => {
                         setTrayUploadDetails((v) => {
@@ -5292,8 +5304,19 @@ export default function UploadAssetDialog({
                                 <button
                                     type="button"
                                     onClick={handleSuccessViewAssets}
-                                    className="rounded-md px-4 py-2 text-sm font-medium hover:opacity-90"
-                                    style={{ backgroundColor: brandPrimary, color: brandPrimaryOnButton }}
+                                    className="rounded-md px-4 py-2 text-sm font-medium transition-colors"
+                                    style={{
+                                        backgroundColor: workspacePrimaryBtnBg,
+                                        color: workspacePrimaryBtnFg,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.backgroundColor = workspacePrimaryBtnHoverBg
+                                        e.currentTarget.style.color = workspacePrimaryBtnFgHover
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.backgroundColor = workspacePrimaryBtnBg
+                                        e.currentTarget.style.color = workspacePrimaryBtnFg
+                                    }}
                                 >
                                     {defaultAssetType === 'asset'
                                         ? 'View assets'
@@ -6166,16 +6189,29 @@ export default function UploadAssetDialog({
                                         disabled={!canFinalizeV2 || batchStatus === 'finalizing' ||
                                         batchStatus === 'processing_followup' ||
                                         isFinalizeSuccess}
-                                        className={`inline-flex min-w-[17.5rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium tabular-nums ${
+                                        className={`inline-flex min-w-[17.5rem] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium tabular-nums transition-colors ${
                                             uploadFinalizePrimaryActive
-                                                ? 'hover:opacity-90'
+                                                ? ''
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
                                         style={
                                             uploadFinalizePrimaryActive
-                                                ? { backgroundColor: brandPrimary, color: brandPrimaryOnButton }
+                                                ? {
+                                                      backgroundColor: workspacePrimaryBtnBg,
+                                                      color: workspacePrimaryBtnFg,
+                                                  }
                                                 : undefined
                                         }
+                                        onMouseEnter={(e) => {
+                                            if (!uploadFinalizePrimaryActive) return
+                                            e.currentTarget.style.backgroundColor = workspacePrimaryBtnHoverBg
+                                            e.currentTarget.style.color = workspacePrimaryBtnFgHover
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!uploadFinalizePrimaryActive) return
+                                            e.currentTarget.style.backgroundColor = workspacePrimaryBtnBg
+                                            e.currentTarget.style.color = workspacePrimaryBtnFg
+                                        }}
                                         title={!selectedCategoryId ? 'Choose a folder to finalize uploads' : undefined}
                                         aria-describedby={showCategoryRequiredHint ? 'jp-upload-category-required-hint' : undefined}
                                     >

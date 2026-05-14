@@ -1793,6 +1793,17 @@ class CompanyController extends Controller
     {
         $settings = $this->aiTagPolicyService->getTenantSettings($tenant);
         $tenant = $tenant->fresh() ?? $tenant;
+
+        $planService = app(PlanService::class);
+        $maxTagsPerAsset = $planService->getMaxTagsPerAsset($tenant);
+        $planKey = $planService->getCurrentPlan($tenant);
+        $planLimitsDisplayName = (string) (config("plans.{$planKey}.name") ?? ucfirst((string) $planKey));
+        $recommendedAiTagAutoApply = max(1, min(5, $maxTagsPerAsset));
+
+        $settings['max_tags_per_asset'] = $maxTagsPerAsset;
+        $settings['plan_limits_display_name'] = $planLimitsDisplayName;
+        $settings['recommended_ai_tag_auto_apply_limit'] = $recommendedAiTagAutoApply;
+
         $settings['ai_insights_enabled'] = (bool) $tenant->ai_insights_enabled;
 
         $last = Cache::get("tenant:{$tenant->id}:metadata_insights:last_run_at");

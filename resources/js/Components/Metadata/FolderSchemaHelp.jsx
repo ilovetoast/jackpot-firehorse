@@ -206,6 +206,165 @@ function FieldDetailHeader({ field, folderLabel, categoryId, canToggle, onInvali
     )
 }
 
+/**
+ * Phase 2 — Folder Quick Filter controls inside the per-field submenu.
+ *
+ * Renders:
+ *   - "Show in folder quick filters" toggle (eligibility-gated; disabled with
+ *     a tooltip explanation when the field is ineligible)
+ *   - When enabled: a compact order input
+ *   - "Advanced" disclosure with a weight input (Phase 3 will read weight)
+ *
+ * Only patches the dedicated quick-filter route — never mutates the existing
+ * folder-enable / visibility flags. When the backend `quick_filter` payload
+ * is missing (older deploy / feature off), the whole control hides itself.
+ */
+function QuickFilterControls({ field, categoryId, canToggle, onChanged }) {
+    const qf = field?.quick_filter
+    const [busy, setBusy] = useState(false)
+    const [showAdvanced, setShowAdvanced] = useState(false)
+    if (!qf || qf.feature_enabled === false) return null
+
+    const enabled = !!qf.enabled
+    const supported = !!qf.supported
+    const ineligibleReason = qf.ineligible_reason || null
+    const order = qf.order
+    const weight = qf.weight
+
+    const patch = async (body) => {
+        if (!canToggle || busy) return
+        setBusy(true)
+        try {
+            const res = await fetch(
+                `/app/api/tenant/metadata/fields/${field.id}/categories/${categoryId}/folder-quick-filter`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': getCsrfToken(),
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(body),
+                }
+            )
+            if (res.ok) onChanged?.()
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const onToggle = (next) => patch({ enabled: !!next })
+    const onOrderChange = (e) => {
+        const raw = e.target.value
+        const parsed = raw === '' ? null : Number(raw)
+        if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0)) return
+        patch({ order: parsed })
+    }
+    const onWeightChange = (e) => {
+        const raw = e.target.value
+        const parsed = raw === '' ? null : Number(raw)
+        if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0)) return
+        patch({ weight: parsed })
+    }
+
+    const toggleClasses = `relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring,#6366f180)] focus-visible:ring-offset-1 ${
+        supported && enabled
+            ? 'border-2 shadow-sm'
+            : 'border-2 border-slate-300 bg-slate-300 shadow-inner'
+    } ${supported && canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`
+
+    const knobClasses = `pointer-events-none inline-block h-4 w-4 transform rounded-full transition ${
+        supported && enabled
+            ? 'translate-x-4 bg-white shadow-md ring-1 ring-black/20'
+            : 'translate-x-0.5 bg-white shadow-md ring-1 ring-slate-600/35'
+    }`
+
+    return (
+        <div className="border-b border-slate-100 bg-white/60 px-3 py-2.5">
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <p className="text-[11px] font-medium text-slate-700">
+                        Show in folder quick filters
+                    </p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+                        {ineligibleReason
+                            ? ineligibleReason
+                            : 'Surfaces this filter as a contextual shortcut for this folder.'}
+                    </p>
+                </div>
+                <Switch
+                    checked={enabled}
+                    disabled={!supported || !canToggle || busy}
+                    onChange={onToggle}
+                    className={toggleClasses}
+                    style={
+                        supported && enabled
+                            ? {
+                                  backgroundColor: 'var(--wb-accent, #6366f1)',
+                                  borderColor:
+                                      'color-mix(in srgb, var(--wb-accent, #6366f1) 78%, #0f172a)',
+                              }
+                            : undefined
+                    }
+                    title={ineligibleReason || undefined}
+                >
+                    <span className="sr-only">Show {field.label} as a folder quick filter</span>
+                    <span aria-hidden className={knobClasses} />
+                </Switch>
+            </div>
+
+            {supported && enabled ? (
+                <div className="mt-2 flex items-center gap-2">
+                    <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                        Order
+                    </label>
+                    <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={order ?? ''}
+                        onBlur={onOrderChange}
+                        disabled={!canToggle || busy}
+                        className="h-7 w-16 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-800 focus:border-[var(--wb-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--wb-accent)] disabled:opacity-60"
+                        aria-label="Quick filter order"
+                    />
+                    <button
+                        type="button"
+                        onClick={() => setShowAdvanced((v) => !v)}
+                        className="ml-auto text-[10px] font-medium text-[var(--wb-link)] hover:opacity-90"
+                    >
+                        {showAdvanced ? 'Hide advanced' : 'Advanced'}
+                    </button>
+                </div>
+            ) : null}
+
+            {supported && enabled && showAdvanced ? (
+                <div className="mt-2 flex items-center gap-2">
+                    <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                        Weight
+                    </label>
+                    <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        defaultValue={weight ?? ''}
+                        onBlur={onWeightChange}
+                        disabled={!canToggle || busy}
+                        placeholder="—"
+                        className="h-7 w-20 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-800 focus:border-[var(--wb-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--wb-accent)] disabled:opacity-60"
+                        aria-label="Quick filter weight"
+                    />
+                    <span className="text-[10px] italic text-slate-400">
+                        Higher = more important. Reserved for future ranking.
+                    </span>
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
 function SubmenuPanel({ field, categoryId, categorySlug, folderLabel, permissions, onInvalidate }) {
     const hasList = field.values_expandable && field.options_total > 0
     const isListType = field.field_type === 'select' || field.field_type === 'multiselect'
@@ -248,6 +407,12 @@ function SubmenuPanel({ field, categoryId, categorySlug, folderLabel, permission
         return (
             <div className="flex min-h-0 flex-1 flex-col">
                 <FieldDetailHeader {...headerProps} />
+                <QuickFilterControls
+                    field={field}
+                    categoryId={categoryId}
+                    canToggle={canToggle}
+                    onChanged={onInvalidate}
+                />
                 <div className="wb-panel-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
                     <p className="text-[11px] leading-snug text-slate-600">
                         This field doesn&apos;t have any options yet.
@@ -261,6 +426,12 @@ function SubmenuPanel({ field, categoryId, categorySlug, folderLabel, permission
     return (
         <div className="flex h-full max-h-[min(70vh,22rem)] min-h-0 flex-1 flex-col sm:max-h-none">
             <FieldDetailHeader {...headerProps} />
+            <QuickFilterControls
+                field={field}
+                categoryId={categoryId}
+                canToggle={canToggle}
+                onChanged={onInvalidate}
+            />
             <div className="wb-panel-scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
                 {hasList ? (
                     <ul className="space-y-0.5 text-[12px] text-slate-700">
@@ -566,11 +737,11 @@ export default function FolderSchemaHelp({ category, className = '', triggerClas
                     void load()
                 }}
                 className={triggerCombinedClass}
-                title={triggerShowsSettings ? 'Folder fields — manage' : 'Folder fields'}
+                title={triggerShowsSettings ? 'Folder filters — manage' : 'Folder filters'}
                 aria-label={
                     triggerShowsSettings
-                        ? `Folder fields and settings for ${category.name}`
-                        : `Folder fields for ${category.name} (view only)`
+                        ? `Folder filters and settings for ${category.name}`
+                        : `Folder filters for ${category.name} (view only)`
                 }
             >
                 {triggerShowsSettings ? (

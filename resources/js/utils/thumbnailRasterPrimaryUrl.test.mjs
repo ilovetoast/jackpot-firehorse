@@ -50,6 +50,17 @@ test('non-3D uses final thumbnail', () => {
     )
 })
 
+test('thumbnail_status failed returns null even when finals exist', () => {
+    const failed = new Set()
+    const asset = {
+        file_extension: 'jpg',
+        mime_type: 'image/jpeg',
+        final_thumbnail_url: 'https://cdn.example.com/final.webp',
+        thumbnail_status: 'failed',
+    }
+    assert.equal(resolveRasterPrimaryThumbnailUrl(asset, false, failed, DAM), null)
+})
+
 test('failed poster falls back to final', () => {
     const poster = 'https://cdn.example.com/poster.webp'
     const failed = new Set([poster])

@@ -16,7 +16,7 @@ class Model3dBlenderThumbnailPipelineTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_blender_failure_falls_back_to_stub_master(): void
+    public function test_blender_failure_throws_without_stub_master(): void
     {
         config(['dam_3d.enabled' => true, 'dam_3d.real_render_enabled' => true]);
         BlenderModelPreviewService::$processRunnerOverride = static fn (array $cmd, string $cwd, float $timeout): array => [
@@ -38,21 +38,23 @@ class Model3dBlenderThumbnailPipelineTest extends TestCase
         file_put_contents($tmp, 'x');
 
         try {
-            $attempt->invoke($svc, $tmp, 'model_stl', 256, 'part.stl');
+            try {
+                $attempt->invoke($svc, $tmp, 'model_stl', 256, 'part.stl');
+                $this->fail('Expected RuntimeException when Blender render fails');
+            } catch (\RuntimeException $e) {
+                $this->assertNotSame('', $e->getMessage());
+            }
             $rp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dPreviewReport');
             $rp->setAccessible(true);
             /** @var array<string, mixed> $r */
             $r = $rp->getValue($svc);
-            $this->assertTrue($r['poster_stub']);
-            $this->assertFalse($r['blender_used']);
+            $this->assertFalse($r['poster_stub'] ?? true);
+            $this->assertFalse($r['blender_used'] ?? true);
             $this->assertNotEmpty($r['failure_message'] ?? null);
 
             $mp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dMasterPngPath');
             $mp->setAccessible(true);
-            $p = $mp->getValue($svc);
-            $this->assertIsString($p);
-            $this->assertFileExists($p);
-            @unlink($p);
+            $this->assertNull($mp->getValue($svc));
         } finally {
             @unlink($tmp);
         }
@@ -82,7 +84,9 @@ class Model3dBlenderThumbnailPipelineTest extends TestCase
 
         $tmp = tempnam(sys_get_temp_dir(), 'm3d_');
         $this->assertNotFalse($tmp);
-        file_put_contents($tmp, 'x');
+        $fixture = dirname(__DIR__, 2).'/fixtures/3d/minimal_valid.glb';
+        $this->assertFileExists($fixture, 'Commit tests/fixtures/3d/minimal_valid.glb for GLB gate tests');
+        file_put_contents($tmp, (string) file_get_contents($fixture));
 
         try {
             $attempt->invoke($svc, $tmp, 'model_glb', 128, 'a.glb');
@@ -120,22 +124,27 @@ class Model3dBlenderThumbnailPipelineTest extends TestCase
 
         $tmp = tempnam(sys_get_temp_dir(), 'm3d_');
         $this->assertNotFalse($tmp);
-        file_put_contents($tmp, 'x');
+        $fixture = dirname(__DIR__, 2).'/fixtures/3d/minimal_valid.glb';
+        $this->assertFileExists($fixture, 'Commit tests/fixtures/3d/minimal_valid.glb for GLB gate tests');
+        file_put_contents($tmp, (string) file_get_contents($fixture));
 
         try {
-            $attempt->invoke($svc, $tmp, 'model_glb', 64, 'x.glb');
+            try {
+                $attempt->invoke($svc, $tmp, 'model_glb', 64, 'x.glb');
+                $this->fail('Expected RuntimeException when real_render_enabled is false');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsStringIgnoringCase('blender', $e->getMessage());
+            }
             $rp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dPreviewReport');
             $rp->setAccessible(true);
             /** @var array<string, mixed> $r */
             $r = $rp->getValue($svc);
-            $this->assertTrue($r['poster_stub']);
-            $this->assertFalse($r['blender_used']);
+            $this->assertFalse($r['poster_stub'] ?? true);
+            $this->assertFalse($r['blender_used'] ?? true);
 
             $mp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dMasterPngPath');
             $mp->setAccessible(true);
-            $p = $mp->getValue($svc);
-            $this->assertIsString($p);
-            @unlink($p);
+            $this->assertNull($mp->getValue($svc));
         } finally {
             @unlink($tmp);
         }

@@ -43,13 +43,15 @@ import { createRoot } from 'react-dom/client'
 import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'
 import AssetProcessingTray from './Components/AssetProcessingTray'
-import DownloadBucketBarGlobal from './Components/DownloadBucketBarGlobal'
 import PWAInstallPopover from './Components/PWAInstallPopover'
 import CookieConsentBanner from './Components/CookieConsentBanner'
 import HelpHighlightController from './Components/HelpHighlightController'
 // import PushServiceInit from './Components/PushServiceInit' // off while PUSH_CLIENT_DISABLED — see pushService.js
 import { BucketProvider } from './contexts/BucketContext'
 import { SelectionProvider } from './contexts/SelectionContext'
+import { DownloadsPanelProvider } from './contexts/DownloadsPanelContext'
+import DownloadsSlideOver from './Components/downloads/DownloadsSlideOver'
+import DownloadReadyToastHost from './Components/downloads/DownloadReadyToastHost'
 
 if (typeof window !== 'undefined' && import.meta.env.PROD && !window.__jackpotPwaInitialized) {
     window.__jackpotPwaInitialized = true
@@ -120,7 +122,7 @@ createInertiaApp({
     resolve: async (name) => {
         const PageComponent = await loadPageDefaultExport(name)
 
-        // Standalone cinematic pages: no global UI (FlashMessage, tray, download bar)
+        // Standalone cinematic pages: no global UI (FlashMessage, tray, downloads slide-over)
         const isExperience =
             name.startsWith('Experience/') ||
             name.startsWith('Gateway/') ||
@@ -139,10 +141,8 @@ createInertiaApp({
             )
         }
 
-        // Wrap the page component with FlashMessage, AssetProcessingTray, and app-level download bucket bar.
-        // DownloadBucketBarGlobal uses BucketContext so state is shared; rendering this here keeps it in the
-        // same DOM tree as the page so it's visible (fixed bottom bar). Bucket state lives in BucketProvider
-        // so the bar shows the correct count without refetch on category change.
+        // Wrap the page component with FlashMessage, AssetProcessingTray, and global overlays.
+        // Download bucket / selection UX: SelectionActionBar on Assets, Collections, Deliverables, etc. (not a second app-level bar).
         return (props) => (
             <>
                 <PageComponent {...props} />
@@ -153,7 +153,8 @@ createInertiaApp({
                 {/* {props.auth?.user && <PushServiceInit />} */}
                 <FlashMessage />
                 <AssetProcessingTray />
-                {false && <DownloadBucketBarGlobal />}
+                <DownloadsSlideOver />
+                {props.auth?.user && <DownloadReadyToastHost />}
                 <GlobalErrorDialog />
                 <PermissionDeniedHost />
             </>
@@ -165,9 +166,11 @@ createInertiaApp({
         root.render(
             <BrandThemeProvider initialPage={props.initialPage}>
                 <BucketProvider initialPage={props.initialPage}>
-                    <SelectionProvider>
-                        <App {...props} />
-                    </SelectionProvider>
+                    <DownloadsPanelProvider>
+                        <SelectionProvider>
+                            <App {...props} />
+                        </SelectionProvider>
+                    </DownloadsPanelProvider>
                 </BucketProvider>
             </BrandThemeProvider>
         )

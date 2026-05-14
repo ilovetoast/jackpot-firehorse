@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { Link } from '@inertiajs/react'
 import axios from 'axios'
 import ConfirmDialog from '../ConfirmDialog'
 import { WorkbenchEmptyState } from '../../components/brand-workspace/workbenchPatterns'
+
+const MANAGE_CATEGORIES_HREF =
+    typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'
 
 function getCsrfToken() {
     if (typeof document === 'undefined') return ''
@@ -10,7 +14,8 @@ function getCsrfToken() {
 }
 
 /**
- * Approved metadata values by field (excludes tags). Purge removes matching asset_metadata rows brand-wide.
+ * Approved picklist / multi-select metadata values by field (not tags, not grid filter UI).
+ * Purge removes matching asset_metadata rows brand-wide.
  */
 export default function ManageValuesWorkspace({ brandId, brandName, canPurgeMetadataValues }) {
     const [fields, setFields] = useState([])
@@ -106,7 +111,15 @@ export default function ManageValuesWorkspace({ brandId, brandName, canPurgeMeta
             ) : fields.length === 0 ? (
                 <WorkbenchEmptyState
                     title="No custom field values yet"
-                    description={`Approved values from custom fields on assets in ${brandName ?? 'this brand'} will appear here. System and automated values are hidden; use Tags for tag values.`}
+                    description={`When assets use custom fields with fixed choices (dropdowns, multi-select, etc.), the option text they store will show here grouped by field. Plain text fields won’t appear. System and automated values are hidden; tag strings belong on Tags.`}
+                    action={
+                        <Link
+                            href={MANAGE_CATEGORIES_HREF}
+                            className="inline-flex items-center justify-center rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-violet-500"
+                        >
+                            Open Folders &amp; filters
+                        </Link>
+                    }
                 />
             ) : (
                 <div className="space-y-2">

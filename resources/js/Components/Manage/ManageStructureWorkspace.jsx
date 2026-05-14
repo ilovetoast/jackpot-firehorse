@@ -374,12 +374,12 @@ export default function ManageStructureWorkspace({
                 </div>
                 {!hubLayout && (
                     <p className="mt-6 text-sm text-gray-600">
-                        To configure metadata fields, filters, and visibility per folder, open{' '}
+                        To configure metadata filters and visibility per folder, open{' '}
                         <Link
                             href={MANAGE_CATEGORIES_URL}
                             className="font-medium text-[var(--wb-link)] hover:opacity-90"
                         >
-                            Manage → Folders & fields
+                            Manage → Folders & filters
                         </Link>
                         .
                     </p>

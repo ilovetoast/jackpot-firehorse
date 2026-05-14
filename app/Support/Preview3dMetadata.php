@@ -112,6 +112,26 @@ final class Preview3dMetadata
     }
 
     /**
+     * True when asset or current version metadata marks the 3D raster poster as a pipeline stub
+     * (e.g. Blender unavailable on the worker). Thumbnail_status may still be "completed".
+     */
+    public static function assetOrVersionHasPosterStub(Asset $asset): bool
+    {
+        $asset->loadMissing('currentVersion');
+        foreach ([$asset->metadata ?? [], $asset->currentVersion?->metadata ?? []] as $meta) {
+            if (! is_array($meta)) {
+                continue;
+            }
+            $debug = $meta['preview_3d']['debug'] ?? null;
+            if (is_array($debug) && (($debug['poster_stub'] ?? false) === true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Initial preview_3d blob after upload / inspection (Phase 1–3).
      *
      * @param  array<string, mixed>  $registryCapabilities  file_types.types.<key>.capabilities

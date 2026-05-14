@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, usePage } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
+import BrandWorkspaceCallout, {
+    WorkspacePrimaryCtaLink,
+    WorkspaceSecondaryCtaLink,
+} from '../../components/brand-workspace/BrandWorkspaceCallout'
 import { isUnlimitedCount, isUnlimitedStorageMB } from '../../utils/planLimitDisplay'
 import {
     formatAiCreditsSubtext,
@@ -48,6 +52,18 @@ function MetadataAnalyticsSkeleton() {
                 </div>
             </div>
         </div>
+    )
+}
+
+function InsightsSectionTitle({ id, icon: Icon, children }) {
+    return (
+        <h2
+            id={id}
+            className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"
+        >
+            {Icon ? <Icon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden /> : null}
+            {children}
+        </h2>
     )
 }
 
@@ -168,6 +184,10 @@ export default function AnalyticsOverview({
     const ai_effectiveness = lazyMeta?.ai_effectiveness ?? {}
     const rights_risk = lazyMeta?.rights_risk ?? {}
     const lowestCoverage = coverage?.lowest_coverage_fields?.slice(0, 5) ?? []
+    const showAiEffectiveness =
+        !metadataLoading &&
+        !metadataLoadError &&
+        (ai_effectiveness?.total_suggestions > 0 || ai_effectiveness?.approved_suggestions > 0)
 
     const { auth } = usePage().props
     const activeBrand = auth?.activeBrand
@@ -184,7 +204,7 @@ export default function AnalyticsOverview({
 
     return (
         <InsightsLayout title="Insights Overview" activeSection="overview">
-            <div className="space-y-8 animate-fadeInUp-d1">
+            <div className="space-y-6 animate-fadeInUp-d1">
                 {ai_monthly_cap_alert?.features?.length > 0 && (
                     <section
                         className="rounded-xl border border-amber-300 bg-amber-50 p-4 sm:p-5"
@@ -207,96 +227,67 @@ export default function AnalyticsOverview({
                         </div>
                     </section>
                 )}
-                {/* Brand guidelines — product intelligence module when active (violet); amber only when setup needed */}
-                <section
-                    className={`rounded-xl border p-4 sm:p-5 ${
-                        dnaReady
-                            ? 'border-violet-200/90 bg-gradient-to-br from-violet-50/50 via-white to-slate-50/80 shadow-sm ring-1 ring-violet-500/[0.08]'
-                            : 'border-amber-200/90 bg-amber-50/90'
-                    }`}
-                    aria-labelledby="insights-brand-guidelines-heading"
-                >
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="flex gap-3 min-w-0">
-                            <div
-                                className={`flex-shrink-0 rounded-lg p-2.5 ${
-                                    dnaReady ? 'bg-violet-100/90 ring-1 ring-violet-200/60' : 'bg-amber-100'
-                                }`}
-                            >
-                                <DocumentTextIcon
-                                    className={`h-6 w-6 ${dnaReady ? 'text-violet-700' : 'text-amber-800'}`}
-                                    aria-hidden
-                                />
-                            </div>
-                            <div className="min-w-0">
-                                <h2
-                                    id="insights-brand-guidelines-heading"
-                                    className="text-base font-semibold text-slate-900"
-                                >
-                                    {dnaReady ? 'Brand guidelines are active' : 'Set up brand guidelines for full Insights'}
-                                </h2>
-                                <p className="mt-1.5 text-sm text-slate-600 leading-relaxed">
-                                    {dnaReady ? (
-                                        <>
-                                            Your published brand DNA powers{' '}
-                                            <span className="font-medium text-slate-800">brand scoring</span>,{' '}
-                                            <span className="font-medium text-slate-800">generative AI</span> (tagging
-                                            &amp; suggestions), and alignment features. Keep guidelines up to date as
-                                            your brand evolves.
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="font-medium">Brand scoring</span> and{' '}
-                                            <span className="font-medium">generative AI</span> need a completed,
-                                            published brand guidelines model. Finish research → review → build →
-                                            publish so we can score assets and personalize AI to your brand.
-                                        </>
-                                    )}
-                                </p>
-                                {!dnaReady && hasPublished && !scoringOn && (
-                                    <p className="mt-2 text-sm text-amber-900/90">
+                <BrandWorkspaceCallout
+                    variant={dnaReady ? 'positive' : 'brand'}
+                    headingId="insights-brand-guidelines-heading"
+                    icon={<DocumentTextIcon aria-hidden />}
+                    title={
+                        dnaReady ? 'Brand guidelines are active' : 'Set up brand guidelines for full Insights'
+                    }
+                    description={
+                        dnaReady ? (
+                            <>
+                                Your published brand DNA powers{' '}
+                                <span className="font-medium text-slate-800">brand scoring</span>,{' '}
+                                <span className="font-medium text-slate-800">generative AI</span> (tagging &amp;
+                                suggestions), and alignment features. Keep guidelines up to date as your brand evolves.
+                            </>
+                        ) : (
+                            <>
+                                <span className="font-medium">Brand scoring</span> and{' '}
+                                <span className="font-medium">generative AI</span> need a completed, published brand
+                                guidelines model. Finish research → review → build → publish so we can score assets and
+                                personalize AI to your brand.
+                                {hasPublished && !scoringOn && (
+                                    <p className="mt-2 text-sm text-slate-700">
                                         Published guidelines found, but{' '}
                                         <span className="font-medium">brand DNA scoring is off</span>. Turn it on in
                                         Brand Settings (Strategy) so scoring and AI can use your DNA.
                                     </p>
                                 )}
-                            </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2 sm:flex-shrink-0 w-full sm:w-auto">
-                            {!dnaReady && (
-                                <Link
-                                    href={g.research_url || '#'}
-                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
-                                >
-                                    <SparklesIcon className="h-5 w-5" aria-hidden />
-                                    {hasPublished ? 'Update brand guidelines' : 'Start brand guidelines'}
-                                    <ArrowRightIcon className="h-4 w-4" aria-hidden />
-                                </Link>
-                            )}
-                            {(dnaReady || hasPublished) && g.guidelines_url && (
-                                <Link
-                                    href={g.guidelines_url}
-                                    className={`inline-flex justify-center items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm ${
-                                        dnaReady
-                                            ? 'bg-white text-violet-800 ring-1 ring-inset ring-violet-200 hover:bg-violet-50/80'
-                                            : 'bg-white/80 text-slate-800 ring-1 ring-inset ring-amber-200 hover:bg-white'
-                                    }`}
-                                >
-                                    View guidelines
-                                    <ArrowRightIcon className="h-4 w-4" aria-hidden />
-                                </Link>
-                            )}
-                            {!dnaReady && hasPublished && !scoringOn && g.brand_settings_url && (
-                                <Link
-                                    href={g.brand_settings_url}
-                                    className="inline-flex justify-center items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-amber-900 ring-1 ring-inset ring-amber-300 hover:bg-amber-50"
-                                >
-                                    Brand settings (Strategy)
-                                </Link>
-                            )}
-                        </div>
-                    </div>
-                </section>
+                            </>
+                        )
+                    }
+                >
+                    {!dnaReady && (
+                        <WorkspacePrimaryCtaLink href={g.research_url || '#'}>
+                            <SparklesIcon className="h-5 w-5 shrink-0" aria-hidden />
+                            {hasPublished ? 'Update brand guidelines' : 'Start brand guidelines'}
+                            <ArrowRightIcon className="h-4 w-4 shrink-0" aria-hidden />
+                        </WorkspacePrimaryCtaLink>
+                    )}
+                    {(dnaReady || hasPublished) && g.guidelines_url ? (
+                        dnaReady ? (
+                            <Link
+                                href={g.guidelines_url}
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-violet-800 shadow-sm ring-1 ring-inset ring-violet-200 hover:bg-violet-50/80 sm:w-auto"
+                            >
+                                View guidelines
+                                <ArrowRightIcon className="h-4 w-4 shrink-0" aria-hidden />
+                            </Link>
+                        ) : (
+                            <WorkspaceSecondaryCtaLink href={g.guidelines_url}>
+                                View guidelines
+                                <ArrowRightIcon className="h-4 w-4 shrink-0" aria-hidden />
+                            </WorkspaceSecondaryCtaLink>
+                        )
+                    ) : null}
+                    {!dnaReady && hasPublished && !scoringOn && g.brand_settings_url ? (
+                        <WorkspaceSecondaryCtaLink href={g.brand_settings_url}>
+                            Brand settings (Strategy)
+                        </WorkspaceSecondaryCtaLink>
+                    ) : null}
+                </BrandWorkspaceCallout>
 
                 {/* Logo white-on-white insight */}
                 {logoWhiteRisk && !logoAnalysisLoading && (
@@ -353,9 +344,9 @@ export default function AnalyticsOverview({
                     </section>
                 )}
 
-                {/* Brand totals — single rail w/ dividers (editorial hierarchy, no floating icon tiles) */}
-                <section>
-                    <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Brand totals</h2>
+                {/* Brand totals + storage — one footprint card */}
+                <section aria-labelledby="insights-brand-totals-heading">
+                    <InsightsSectionTitle id="insights-brand-totals-heading">Brand totals</InsightsSectionTitle>
                     <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm">
                         <div
                             className={`grid grid-cols-2 divide-x divide-y divide-slate-100 sm:grid-cols-3 ${
@@ -400,25 +391,22 @@ export default function AnalyticsOverview({
                                 />
                             ) : null}
                         </div>
-                    </div>
-                    <div className="mt-5">
-                        <StorageInsightPanel storage_insight={storage_insight} formatStorage={formatStorage} />
+                        <StorageInsightPanel
+                            storage_insight={storage_insight}
+                            formatStorage={formatStorage}
+                            variant="embedded"
+                        />
                     </div>
                 </section>
 
-                {creator_module_enabled && creator_insights != null && (
-                    <CreatorInsights insights={creator_insights} />
-                )}
-
-                {/* Metadata Health Summary — loaded after first paint */}
-                <section>
-                    <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
-                        <ChartBarIcon className="mr-2 h-4 w-4 text-slate-400" />
-                        Metadata health summary
-                    </h2>
-                    {metadataLoadError && (
+                {/* Metadata + AI — side by side on large screens when both present */}
+                {metadataLoadError && (
+                    <section aria-labelledby="insights-metadata-heading">
+                        <InsightsSectionTitle id="insights-metadata-heading" icon={ChartBarIcon}>
+                            Metadata health summary
+                        </InsightsSectionTitle>
                         <div
-                            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-4"
+                            className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
                             role="alert"
                         >
                             <p>Couldn&apos;t load metadata summary. Your brand totals above are still accurate.</p>
@@ -430,114 +418,131 @@ export default function AnalyticsOverview({
                                 Try again
                             </button>
                         </div>
-                    )}
-                    {metadataLoading ? (
+                    </section>
+                )}
+                {metadataLoading && (
+                    <section aria-labelledby="insights-metadata-heading">
+                        <InsightsSectionTitle id="insights-metadata-heading" icon={ChartBarIcon}>
+                            Metadata health summary
+                        </InsightsSectionTitle>
                         <MetadataAnalyticsSkeleton />
-                    ) : (
-                        !metadataLoadError && (
-                            <>
-                                <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
+                    </section>
+                )}
+                {!metadataLoading && !metadataLoadError && (
+                    <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
+                        <section className="min-w-0" aria-labelledby="insights-metadata-heading">
+                            <InsightsSectionTitle id="insights-metadata-heading" icon={ChartBarIcon}>
+                                Metadata health summary
+                            </InsightsSectionTitle>
+                            <div className="rounded-xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
+                                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                                    <div>
+                                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                            Completeness
+                                        </p>
+                                        <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                            {overview.completeness_percentage?.toFixed(1) ?? '0'}%
+                                        </p>
+                                        <p className="mt-0.5 text-xs text-slate-500">
+                                            {overview.assets_with_metadata?.toLocaleString() ?? 0} of{' '}
+                                            {overview.total_assets?.toLocaleString() ?? 0} assets
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                            Avg metadata per asset
+                                        </p>
+                                        <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                            {overview.avg_metadata_per_asset?.toFixed(1) ?? '0'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                            Total metadata values
+                                        </p>
+                                        <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                            {overview.total_metadata_values?.toLocaleString() ?? '0'}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-end lg:items-end lg:justify-end">
+                                        <Link
+                                            href="/app/insights/metadata"
+                                            className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
+                                        >
+                                            View full metadata insights
+                                            <ArrowRightIcon className="h-4 w-4" />
+                                        </Link>
+                                    </div>
+                                </div>
+                                {lowestCoverage.length > 0 && (
+                                    <div className="mt-5 border-t border-slate-100 pt-5">
+                                        <h3 className="mb-3 text-sm font-semibold text-slate-900">
+                                            Fields with lowest coverage
+                                        </h3>
+                                        <div className="space-y-2">
+                                            {lowestCoverage.map((field, idx) => (
+                                                <div
+                                                    key={field.field_key ?? idx}
+                                                    className="flex items-center justify-between text-sm"
+                                                >
+                                                    <span className="text-slate-700">{field.field_label}</span>
+                                                    <span className="tabular-nums text-slate-500">
+                                                        {field.coverage_percentage}%
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </section>
+
+                        {showAiEffectiveness ? (
+                            <section className="min-w-0" aria-labelledby="insights-ai-effectiveness-heading">
+                                <InsightsSectionTitle id="insights-ai-effectiveness-heading" icon={SparklesIcon}>
+                                    AI suggestion effectiveness
+                                </InsightsSectionTitle>
+                                <div className="rounded-xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
                                     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                                         <div>
-                                            <p className="text-sm font-medium text-gray-500">Completeness</p>
-                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                                {overview.completeness_percentage?.toFixed(1) ?? '0'}%
+                                            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                                Total suggestions
                                             </p>
-                                            <p className="mt-0.5 text-xs text-gray-500">
-                                                {overview.assets_with_metadata?.toLocaleString() ?? 0} of{' '}
-                                                {overview.total_assets?.toLocaleString() ?? 0} assets
+                                            <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                                {ai_effectiveness.total_suggestions?.toLocaleString() ?? 0}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-sm font-medium text-gray-500">Avg Metadata per Asset</p>
-                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                                {overview.avg_metadata_per_asset?.toFixed(1) ?? '0'}
+                                            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                                Approved
+                                            </p>
+                                            <p className="mt-1 text-2xl font-semibold text-violet-700">
+                                                {ai_effectiveness.approved_suggestions?.toLocaleString() ?? 0}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-sm font-medium text-gray-500">Total Metadata Values</p>
-                                            <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                                {overview.total_metadata_values?.toLocaleString() ?? '0'}
+                                            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                                                Acceptance rate
+                                            </p>
+                                            <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                                {ai_effectiveness.acceptance_rate?.toFixed(1) ?? 0}%
                                             </p>
                                         </div>
-                                        <div>
+                                        <div className="flex items-end lg:items-end lg:justify-end">
                                             <Link
                                                 href="/app/insights/metadata"
                                                 className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
                                             >
-                                                View full metadata insights
+                                                View details
                                                 <ArrowRightIcon className="h-4 w-4" />
                                             </Link>
                                         </div>
                                     </div>
-                                    {lowestCoverage.length > 0 && (
-                                        <div className="mt-6 pt-6 border-t border-gray-200">
-                                            <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                                                Fields with Lowest Coverage
-                                            </h3>
-                                            <div className="space-y-2">
-                                                {lowestCoverage.map((field, idx) => (
-                                                    <div
-                                                        key={field.field_key ?? idx}
-                                                        className="flex items-center justify-between text-sm"
-                                                    >
-                                                        <span className="text-gray-700">{field.field_label}</span>
-                                                        <span className="text-gray-500 tabular-nums">
-                                                            {field.coverage_percentage}%
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
-                            </>
-                        )
-                    )}
-                </section>
-
-                {/* AI Suggestion Effectiveness (preview) */}
-                {!metadataLoading &&
-                    !metadataLoadError &&
-                    (ai_effectiveness?.total_suggestions > 0 || ai_effectiveness?.approved_suggestions > 0) && (
-                    <section>
-                        <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
-                            <SparklesIcon className="mr-2 h-4 w-4 text-slate-400" />
-                            AI suggestion effectiveness
-                        </h2>
-                        <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
-                            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                                <div>
-                                    <p className="text-sm font-medium text-gray-500">Total Suggestions</p>
-                                    <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                        {ai_effectiveness.total_suggestions?.toLocaleString() ?? 0}
-                                    </p>
-                                </div>
-                                <div>
-                                    <p className="text-sm font-medium text-gray-500">Approved</p>
-                                    <p className="mt-1 text-2xl font-semibold text-violet-700">
-                                        {ai_effectiveness.approved_suggestions?.toLocaleString() ?? 0}
-                                    </p>
-                                </div>
-                                <div>
-                                    <p className="text-sm font-medium text-gray-500">Acceptance Rate</p>
-                                    <p className="mt-1 text-2xl font-semibold text-gray-900">
-                                        {ai_effectiveness.acceptance_rate?.toFixed(1) ?? 0}%
-                                    </p>
-                                </div>
-                                <div>
-                                    <Link
-                                        href="/app/insights/metadata"
-                                        className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-600 hover:text-violet-500"
-                                    >
-                                        View details
-                                        <ArrowRightIcon className="h-4 w-4" />
-                                    </Link>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                    )}
+                            </section>
+                        ) : null}
+                    </div>
+                )}
 
                 {/* Rights & Risk Indicators */}
                 {!metadataLoading &&
@@ -546,12 +551,11 @@ export default function AnalyticsOverview({
                     rights_risk?.expiring_30_days > 0 ||
                     rights_risk?.expiring_60_days > 0 ||
                     rights_risk?.expiring_90_days > 0) && (
-                    <section>
-                        <h2 className="mb-4 flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500">
-                            <ShieldCheckIcon className="mr-2 h-4 w-4 text-slate-400" />
+                    <section aria-labelledby="insights-rights-risk-heading">
+                        <InsightsSectionTitle id="insights-rights-risk-heading" icon={ShieldCheckIcon}>
                             Rights &amp; risk indicators
-                        </h2>
-                        <div className="rounded-xl border border-slate-200/90 bg-white p-6 shadow-sm">
+                        </InsightsSectionTitle>
+                        <div className="rounded-xl border border-slate-200/90 bg-white p-5 shadow-sm sm:p-6">
                             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                                 {rights_risk.expired_count > 0 && (
                                     <div className="flex items-center gap-3">
@@ -604,6 +608,10 @@ export default function AnalyticsOverview({
                         </div>
                     </section>
                     )}
+
+                {creator_module_enabled && creator_insights != null && (
+                    <CreatorInsights insights={creator_insights} />
+                )}
             </div>
 
             {/* AI suggestions review modal — opened via ?open=suggestions deep link */}

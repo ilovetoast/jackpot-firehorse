@@ -387,6 +387,41 @@ export default function AssetGrid({
         }
     }
 
+    /**
+     * When quickview / AssetDrawer opens, the scroll parent often gains horizontal padding (`md:pr-[480px]`),
+     * masonry column count changes (ResizeObserver), and the selected card can reflow out of the viewport.
+     * Keep the selection visible without fighting smooth-scroll preferences.
+     */
+    useLayoutEffect(() => {
+        if (selectedAssetId == null || selectedAssetId === '') {
+            return undefined
+        }
+        const idStr = String(selectedAssetId)
+        let cancelled = false
+        const scrollSelectedIntoView = () => {
+            if (cancelled) return
+            const el = itemRefs.current.get(idStr)
+            if (!el || typeof el.scrollIntoView !== 'function') return
+            try {
+                el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' })
+            } catch {
+                el.scrollIntoView()
+            }
+        }
+        scrollSelectedIntoView()
+        let innerRaf = null
+        const rafOuter = requestAnimationFrame(() => {
+            innerRaf = requestAnimationFrame(scrollSelectedIntoView)
+        })
+        const t = window.setTimeout(scrollSelectedIntoView, 72)
+        return () => {
+            cancelled = true
+            cancelAnimationFrame(rafOuter)
+            if (innerRaf != null) cancelAnimationFrame(innerRaf)
+            window.clearTimeout(t)
+        }
+    }, [selectedAssetId, masonryColumnCount, layoutMode])
+
     const renderPendingCell = (clientId) => (
         <div
             key={`pending:${clientId}`}

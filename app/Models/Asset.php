@@ -1552,6 +1552,35 @@ class Asset extends Model
     }
 
     /**
+     * True when {@see \App\Http\Controllers\Editor\EditorAssetBridgeController::thumbnail} is expected to
+     * return bytes displayable in an HTML {@code <img>} (generated thumbnail or raster/SVG original fallback).
+     *
+     * Audio, fonts, and other types without a stored thumbnail path are false so list UIs can omit
+     * {@code thumbnail_url} instead of embedding a URL that responds with 404.
+     */
+    public function hasRenderableApiThumbnail(): bool
+    {
+        if (! in_array($this->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)) {
+            return false;
+        }
+
+        foreach (['medium', 'thumb', 'large'] as $style) {
+            if ($this->thumbnailPathForStyle($style)) {
+                return true;
+            }
+        }
+
+        $mime = strtolower((string) ($this->mime_type ?? ''));
+        $ext = strtolower(pathinfo((string) ($this->original_filename ?? ''), PATHINFO_EXTENSION));
+        $isSvg = $mime === 'image/svg+xml' || $ext === 'svg';
+        $canStreamOriginal = str_starts_with($mime, 'image/') || $isSvg;
+
+        return $canStreamOriginal
+            && (bool) $this->storage_root_path
+            && (bool) $this->storage_bucket_id;
+    }
+
+    /**
      * Request full PDF page extraction (background).
      */
     public function requestFullPdfExtraction(?string $requestedBy = null): bool

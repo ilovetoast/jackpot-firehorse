@@ -443,6 +443,20 @@ export function normalizeHexColor(hexColor) {
 }
 
 /**
+ * Comma-separated R, G, B for `rgba(var(--token), a)` when `--token` is set to this value.
+ *
+ * @param {string|null|undefined} hexColor
+ * @returns {string}
+ */
+export function hexRgbCommaTriplet(hexColor) {
+    const h = normalizeHexColor(hexColor).slice(1)
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    return `${r}, ${g}, ${b}`
+}
+
+/**
  * HSL saturation 0–1 for a #RRGGBB color.
  * @param {string} hex6
  * @returns {number}

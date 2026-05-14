@@ -1261,7 +1261,7 @@ class GenerateThumbnailsJob implements ShouldQueue
                     $m3 = is_array(($thumbnailGenResult ?? [])['model_3d_preview'] ?? null)
                         ? ($thumbnailGenResult['model_3d_preview'] ?? [])
                         : [];
-                    $posterStub = (bool) ($m3['poster_stub'] ?? true);
+                    $posterStub = (bool) ($m3['poster_stub'] ?? false);
                     $blenderUsed = (bool) ($m3['blender_used'] ?? false);
                     $blenderVersion = isset($m3['blender_version']) && is_string($m3['blender_version']) ? $m3['blender_version'] : null;
                     $convertedViewerKey = isset($m3['viewer_storage_key']) && is_string($m3['viewer_storage_key']) && trim($m3['viewer_storage_key']) !== ''
@@ -1288,6 +1288,9 @@ class GenerateThumbnailsJob implements ShouldQueue
                         'poster_stub' => $posterStub,
                         'blender_used' => $blenderUsed,
                     ]);
+                    if (! empty($m3['blender_render_debug']) && is_array($m3['blender_render_debug'])) {
+                        $dbg['blender_render_debug'] = $m3['blender_render_debug'];
+                    }
                     if ($blenderVersion !== null && $blenderVersion !== '') {
                         $dbg['blender_version'] = $blenderVersion;
                     }
@@ -1631,8 +1634,12 @@ class GenerateThumbnailsJob implements ShouldQueue
                 // Sanitize error message for user display (remove technical details)
                 $userFriendlyError = $this->sanitizeErrorMessage($errorMessage);
 
-                // P2: Never leave failed if thumbnails exist — overwrite with completed
-                $hasThumbnails = ThumbnailMetadata::hasThumb($asset->metadata ?? []);
+                // P2: Never leave failed if thumbnails exist — overwrite with completed.
+                // Forced regeneration replaces existing files; treat failures as real failures even when old paths remain.
+                $versionMeta = ($version instanceof AssetVersion) ? ($version->metadata ?? []) : [];
+                $assetMeta = $asset->metadata ?? [];
+                $hasExistingThumbnails = ThumbnailMetadata::hasThumb($versionMeta) || ThumbnailMetadata::hasThumb($assetMeta);
+                $hasThumbnails = ! $this->force && $hasExistingThumbnails;
 
                 // TASK 2: Terminal state guarantee - ALWAYS set FAILED in catch block (unless thumbnails exist)
                 // This prevents assets from remaining in PROCESSING forever

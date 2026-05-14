@@ -28,6 +28,22 @@ const emptyEngagement = {
     top_uploaders: [],
 }
 
+function InsightsTopAssetThumbnail({ url }) {
+    const [failed, setFailed] = useState(false)
+    if (!url || failed) {
+        return <div className="h-10 w-10 shrink-0 rounded bg-gray-100" aria-hidden />
+    }
+    return (
+        <img
+            src={url}
+            alt=""
+            className="h-10 w-10 shrink-0 rounded bg-gray-100 object-cover"
+            loading="lazy"
+            onError={() => setFailed(true)}
+        />
+    )
+}
+
 export default function AnalyticsUsage({
     stats = {},
     ai_usage = null,
@@ -250,16 +266,7 @@ export default function AnalyticsUsage({
                                 <ul className="divide-y divide-gray-100">
                                     {engagement.top_assets.map((row) => (
                                         <li key={row.asset_id} className="flex items-center gap-3 px-4 py-3">
-                                            {row.thumbnail_url ? (
-                                                <img
-                                                    src={row.thumbnail_url}
-                                                    alt=""
-                                                    className="h-10 w-10 flex-shrink-0 rounded object-cover bg-gray-100"
-                                                    loading="lazy"
-                                                />
-                                            ) : (
-                                                <div className="h-10 w-10 flex-shrink-0 rounded bg-gray-100" aria-hidden />
-                                            )}
+                                            <InsightsTopAssetThumbnail url={row.thumbnail_url} />
                                             <div className="min-w-0 flex-1">
                                                 <Link
                                                     href={row.asset_url}

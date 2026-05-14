@@ -126,6 +126,13 @@ function syntheticBars(seed, count = 56) {
  */
 function sampleAnalyser(buffer, count) {
     if (!buffer || buffer.length === 0) return null
+    let rawMax = 0
+    for (let i = 0; i < buffer.length; i++) {
+        if (buffer[i] > rawMax) rawMax = buffer[i]
+    }
+    // Dead tap (nothing feeding the analyser, or all bins zero) → let the
+    // caller use syntheticBounceLevels instead of a flat line.
+    if (rawMax === 0) return null
     const out = new Array(count)
     const step = buffer.length / count
     for (let i = 0; i < count; i++) {

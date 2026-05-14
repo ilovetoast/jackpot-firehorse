@@ -196,6 +196,35 @@ class AppServiceProvider extends ServiceProvider
             \App\Studio\Rendering\FfmpegNativeCompositionRenderer::class,
         );
 
+        // -----------------------------------------------------------------
+        // Phase 2 / 5 — Folder Quick Filters: facet + personalization seams.
+        //
+        // Phase 5 swaps the Null facet-count provider for the real
+        // AssetMetadataFacetCountProvider, wrapped in CachedFacetCountProvider
+        // so production traffic hits the cache layer and not the per-value
+        // count queries on every flyout open.
+        //
+        // To opt out of facet counts entirely (e.g. for tests or for tenants
+        // on cold infrastructure), set
+        // `categories.folder_quick_filters.counts_enabled = false`. The
+        // provider stays bound but the value service skips the call.
+        // -----------------------------------------------------------------
+        $this->app->singleton(
+            \App\Services\Filters\Contracts\FacetCountProvider::class,
+            function ($app) {
+                $real = $app->make(\App\Services\Filters\Facet\AssetMetadataFacetCountProvider::class);
+
+                return new \App\Services\Filters\Facet\CachedFacetCountProvider($real);
+            },
+        );
+        $this->app->singleton(
+            \App\Services\Filters\Contracts\QuickFilterPersonalizationProvider::class,
+            \App\Services\Filters\Personalization\NullQuickFilterPersonalizationProvider::class,
+        );
+        $this->app->singleton(\App\Services\Filters\Facet\AssetFacetCountService::class);
+        $this->app->singleton(\App\Services\Filters\Facet\FolderQuickFilterFacetService::class);
+        $this->app->singleton(\App\Services\Filters\Facet\FilterFacetAggregationService::class);
+
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 
         $this->app->scoped(\App\Services\ImpersonationService::class);

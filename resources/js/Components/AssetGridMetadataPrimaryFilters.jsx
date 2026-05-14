@@ -58,6 +58,7 @@ import { updateFilterDebug } from '../utils/assetFilterDebug'
 import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { resolveVisibilityAssetType } from '../utils/filterScopeRules'
+import { ensureAccentContrastOnWhite, hexToRgba } from '../utils/colorUtils'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
@@ -245,7 +246,21 @@ export default function AssetGridMetadataPrimaryFilters({
         const field = (filterable_schema || []).find(f => (f.field_key || f.key) === fieldKey)
         return field?.display_label || field?.label || fieldKey
     }
-    
+
+    // Brand-tinted "Applied:" chip tokens — same recipe as `--jp-bs-soft-bg` /
+    // `--jp-bs-soft-border` (brand settings) and the SortDropdown accent: a soft
+    // tint of the workspace primary on white, with a contrast-corrected accent
+    // color for the label/icon (WCAG AA on white via ensureAccentContrastOnWhite).
+    const appliedChipStyle = useMemo(() => {
+        const accentText = ensureAccentContrastOnWhite(primaryColor)
+        return {
+            background: hexToRgba(primaryColor, 0.10),
+            border: `1px solid ${hexToRgba(primaryColor, 0.22)}`,
+            color: accentText,
+            removeColor: accentText,
+        }
+    }, [primaryColor])
+
     // Always render the primary filter container
     if (compact) {
         if (visiblePrimaryFilters.length === 0 && appliedPrimaryFiltersList.length === 0) {
@@ -309,7 +324,12 @@ export default function AssetGridMetadataPrimaryFilters({
                         return (
                             <span
                                 key={fieldKey}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded"
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded"
+                                style={{
+                                    backgroundColor: appliedChipStyle.background,
+                                    border: appliedChipStyle.border,
+                                    color: appliedChipStyle.color,
+                                }}
                             >
                                 {getFieldLabel(fieldKey)}: {optionColor ? (
                                     <span className="inline-flex items-center gap-1">
@@ -317,7 +337,13 @@ export default function AssetGridMetadataPrimaryFilters({
                                         {valueLabel}
                                     </span>
                                 ) : valueLabel}
-                                <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}>
+                                <button
+                                    type="button"
+                                    onClick={() => handleRemoveFilter(fieldKey)}
+                                    className="hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded"
+                                    style={{ color: appliedChipStyle.removeColor, '--tw-ring-color': primaryColor }}
+                                    aria-label={`Remove ${fieldKey} filter`}
+                                >
                                     <XMarkIcon className="h-3.5 w-3.5" />
                                 </button>
                             </span>

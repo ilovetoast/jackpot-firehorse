@@ -18,12 +18,15 @@ import {
 } from '@heroicons/react/24/outline'
 import { usePermission } from '../../hooks/usePermission'
 import { InsightsBadge, useInsightsCounts } from '../../contexts/InsightsCountsContext'
-import { getContrastTextColor, hexToRgba } from '../../utils/colorUtils'
+import {
+    hexToRgba,
+    getWorkspaceButtonColor,
+    normalizeHexColor,
+    getSolidFillButtonForegroundHex,
+    hexRgbCommaTriplet,
+} from '../../utils/colorUtils'
 
 const VALID_TABS = ['tags', 'categories', 'values', 'fields']
-
-/** Jackpot product violet — not tenant brand colors */
-const JACKPOT_UI_ACCENT_HEX = '#7c3aed'
 
 /** Sunken well + segmented pills (matches CollectionFiltersBar / PrimaryFilterToolbarControls). */
 const reviewWellClass =
@@ -33,6 +36,14 @@ const reviewSegBase =
     'inline-flex items-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--review-accent)] focus-visible:ring-offset-2'
 
 const reviewSegInactive = 'text-slate-600 hover:bg-white/80 hover:text-slate-800'
+
+/** Primary canvas for Review tab controls (contrasts with sidebar + list cards). */
+const reviewChromeShellClass =
+    'rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm shadow-slate-900/[0.04] ring-1 ring-slate-900/[0.03] sm:p-5'
+
+/** Nested tier: sub-tabs / upload queue sit visually under the workspace row. */
+const reviewNestedInsetClass =
+    'rounded-xl border border-slate-200/70 border-l-[3px] border-l-[color:var(--review-accent)] bg-slate-50/85 p-3 shadow-inner sm:p-4'
 
 function activeReviewSegStyle(accent, onAccent) {
     return {
@@ -217,18 +228,18 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
         <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
             <div className="relative">
                 <div
-                    className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_50%_-15%,rgba(79,70,229,0.11),transparent)]"
+                    className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_50%_-15%,rgba(var(--review-accent-rgb),0.11),transparent)]"
                     aria-hidden
                 />
                 <div className="relative grid gap-8 p-8 sm:grid-cols-[minmax(0,7.5rem)_1fr] sm:items-center sm:gap-10 sm:p-10">
                     <div
-                        className="mx-auto flex aspect-square w-28 shrink-0 items-center justify-center rounded-2xl border border-violet-100/90 bg-gradient-to-br from-violet-50 to-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.95)] sm:mx-0 sm:w-full"
+                        className="mx-auto flex aspect-square w-28 shrink-0 items-center justify-center rounded-2xl border border-[rgba(var(--review-accent-rgb),0.14)] bg-gradient-to-br from-[rgba(var(--review-accent-rgb),0.09)] to-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.95)] sm:mx-0 sm:w-full"
                         aria-hidden
                     >
-                        <MainIcon className="h-12 w-12 text-violet-600" />
+                        <MainIcon className="h-12 w-12 text-[color:var(--review-accent)]" />
                     </div>
                     <div className="text-center sm:text-left">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600/90">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)] opacity-90">
                             {isValues ? 'Dropdown options' : 'New metadata fields'}
                         </p>
                         <h3 className="mt-1 text-xl font-semibold tracking-tight text-gray-900">
@@ -242,7 +253,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                         <ul className="mx-auto mt-5 max-w-xl space-y-2.5 text-left text-sm text-slate-700 sm:mx-0">
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--review-accent)]"
                                     aria-hidden
                                 />
                                 <span>
@@ -252,7 +263,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                             </li>
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--review-accent)]"
                                     aria-hidden
                                 />
                                 <span>
@@ -262,7 +273,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                             </li>
                             <li className="flex gap-2.5">
                                 <span
-                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--review-accent)]"
                                     aria-hidden
                                 />
                                 <span>
@@ -342,7 +353,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                     type="button"
                                     disabled={scanButtonDisabled}
                                     onClick={() => void runLibraryScan()}
-                                    className="inline-flex items-center justify-center rounded-lg border border-violet-200 bg-white px-4 py-2 text-sm font-medium text-violet-700 shadow-sm hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-lg border border-[rgba(var(--review-accent-rgb),0.22)] bg-white px-4 py-2 text-sm font-medium text-[color:var(--review-accent)] shadow-sm hover:bg-[rgba(var(--review-accent-rgb),0.08)] disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {!insightsStatusLoaded
                                         ? 'Loading…'
@@ -365,7 +376,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                     In{' '}
                                     <Link
                                         href="/app/companies/settings#ai-settings"
-                                        className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                        className="font-medium text-[color:var(--review-accent)] hover:opacity-90 hover:underline"
                                     >
                                         AI settings
                                     </Link>
@@ -377,7 +388,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                                         {scanError}{' '}
                                         <Link
                                             href="/app/companies/settings#ai-settings"
-                                            className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                            className="font-medium text-[color:var(--review-accent)] hover:opacity-90 hover:underline"
                                         >
                                             Company → AI settings
                                         </Link>
@@ -389,7 +400,7 @@ function ReviewInsightStructuralEmptyState({ variant, onLibraryScanQueued }) {
                 </div>
             </div>
             <div className="flex items-start gap-3 border-t border-slate-100 bg-slate-50/90 px-6 py-4 sm:px-10">
-                <SparklesIcon className="mt-0.5 h-5 w-5 shrink-0 text-violet-500" aria-hidden />
+                <SparklesIcon className="mt-0.5 h-5 w-5 shrink-0 text-[color:var(--review-accent)]" aria-hidden />
                 <p className="text-xs leading-relaxed text-slate-600">
                     These ideas come from the same scheduled “library pattern” job that powers this tab. If you never see rows, your categories may still be
                     building up volume, or insights may need to be enabled under Company → AI settings (depending on your plan).
@@ -474,7 +485,7 @@ function SectionBulkBar({
                     checked={sectionKeys.length > 0 && allSelected}
                     onChange={onToggleSelectAll}
                     disabled={sectionKeys.length === 0 || someBusy}
-                    className="h-4 w-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                    className="h-4 w-4 rounded border-gray-300 text-[color:var(--review-accent)] focus:ring-[rgba(var(--review-accent-rgb),0.45)]"
                 />
                 <span>
                     Select all ({sectionKeys.length})
@@ -487,7 +498,7 @@ function SectionBulkBar({
                         type="button"
                         disabled={selectedInSection.length === 0 || someBusy}
                         onClick={() => onBulkAccept(selectedInSection)}
-                        className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-[color:var(--review-accent)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-[0.92] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <CheckIcon className="h-4 w-4" />
                         Accept selected ({selectedInSection.length})
@@ -557,8 +568,11 @@ export default function AnalyticsReview({
         can('metadata.tenant.field.create') ||
         can('metadata.tenant.field.manage')
     const insightsCounts = useInsightsCounts()
-    const reviewAccent = JACKPOT_UI_ACCENT_HEX
-    const onReviewAccent = getContrastTextColor(reviewAccent)
+    const reviewAccent = useMemo(
+        () => normalizeHexColor(getWorkspaceButtonColor(auth?.activeBrand)),
+        [auth?.activeBrand],
+    )
+    const onReviewAccent = useMemo(() => getSolidFillButtonForegroundHex(reviewAccent), [reviewAccent])
 
     const refetchReviewBadges = useCallback(async () => {
         const headers = { Accept: 'application/json' }
@@ -975,13 +989,13 @@ export default function AnalyticsReview({
                         checked={selected.has(pk)}
                         onChange={() => toggleSelected(pk)}
                         disabled={processing.has(pk)}
-                        className="mt-2 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                        className="mt-2 h-4 w-4 shrink-0 rounded border-gray-300 text-[color:var(--review-accent)] focus:ring-[rgba(var(--review-accent-rgb),0.45)]"
                     />
                 )}
                 <button
                     type="button"
                     onClick={() => openInsightPreviewAt(itemIndex)}
-                    className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+                    className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--review-accent-rgb),0.45)] focus-visible:ring-offset-2"
                     title="Larger preview & quick review"
                 >
                     {item.thumbnail_url ? (
@@ -996,7 +1010,7 @@ export default function AnalyticsReview({
                     </span>
                 </button>
                 <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">
                         {isTag ? 'Suggested tag' : isCandidate ? 'Suggested field value' : 'Suggestion'}
                     </p>
                     <p className="mt-0.5 text-lg font-semibold leading-snug text-gray-900">{item.suggestion}</p>
@@ -1033,7 +1047,7 @@ export default function AnalyticsReview({
                                         type="button"
                                         onClick={() => handleApprove(item)}
                                         disabled={processing.has(pk)}
-                                        className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                                        className="inline-flex items-center gap-1 rounded-md bg-[color:var(--review-accent)] px-3 py-1.5 text-sm font-medium text-white hover:brightness-[0.92] disabled:opacity-50"
                                     >
                                         <CheckIcon className="h-4 w-4" />
                                         Accept
@@ -1054,7 +1068,7 @@ export default function AnalyticsReview({
                         )}
                         <Link
                             href={`/app/assets?q=${encodeURIComponent(item.asset_id)}&asset=${encodeURIComponent(item.asset_id)}`}
-                            className="text-gray-400 hover:text-violet-600"
+                            className="text-gray-400 hover:text-[color:var(--review-accent)]"
                             title="Open in grid"
                         >
                             <ArrowTopRightOnSquareIcon className="h-5 w-5" />
@@ -1076,10 +1090,20 @@ export default function AnalyticsReview({
     }
 
     const showWorkspaceToggle = canViewAi && canViewUploadApprovals
+    const showReviewChrome =
+        showWorkspaceToggle ||
+        (canViewAi && workspace === 'ai') ||
+        (workspace === 'uploads' && canViewUploadApprovals && creatorModuleEnabled)
 
     return (
         <InsightsLayout title="Review" activeSection="review">
-            <div className="space-y-6">
+            <div
+                className="space-y-6"
+                style={{
+                    ['--review-accent']: reviewAccent,
+                    ['--review-accent-rgb']: hexRgbCommaTriplet(reviewAccent),
+                }}
+            >
                 <div>
                     <h1 className="text-2xl font-semibold text-gray-900">Review</h1>
                     <p className="mt-1 text-sm text-gray-500">
@@ -1088,108 +1112,189 @@ export default function AnalyticsReview({
                     </p>
                 </div>
 
-                {showWorkspaceToggle ? (
-                    <div
-                        style={{ ['--review-accent']: reviewAccent }}
-                        className={reviewWellClass}
-                        role="tablist"
-                        aria-label="Review workspace"
-                    >
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={workspace === 'ai'}
-                            onClick={() => setWorkspace('ai')}
-                            style={workspace === 'ai' ? activeReviewSegStyle(reviewAccent, onReviewAccent) : undefined}
-                            className={`${reviewSegBase} ${workspace === 'ai' ? 'font-semibold' : reviewSegInactive}`}
-                        >
-                            <SparklesIcon className="h-5 w-5 shrink-0 opacity-90" />
-                            <span className="whitespace-nowrap">AI suggestions</span>
-                            {aiSuggestionsGrandTotal > 0 && (
-                                <InsightsBadge
-                                    count={aiSuggestionsGrandTotal}
-                                    className={badgeOnAccent(workspace === 'ai')}
-                                />
-                            )}
-                        </button>
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={workspace === 'uploads'}
-                            onClick={() => setWorkspace('uploads')}
-                            style={
-                                workspace === 'uploads'
-                                    ? activeReviewSegStyle(reviewAccent, onReviewAccent)
-                                    : undefined
-                            }
-                            className={`${reviewSegBase} ${workspace === 'uploads' ? 'font-semibold' : reviewSegInactive}`}
-                        >
-                            <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
-                            <span className="whitespace-nowrap">Upload approvals</span>
-                            {mergedUploadTotal > 0 && (
-                                <InsightsBadge
-                                    count={mergedUploadTotal}
-                                    className={badgeOnAccent(workspace === 'uploads')}
-                                />
-                            )}
-                        </button>
-                    </div>
-                ) : null}
+                {showReviewChrome ? (
+                    <div className={reviewChromeShellClass}>
+                        {showWorkspaceToggle ? (
+                            <>
+                                <div>
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                        What to triage
+                                    </p>
+                                    <p className="mt-1 max-w-2xl text-xs leading-snug text-slate-500">
+                                        Pick the source of work first. A second row appears when that source has more
+                                        than one queue—lists always load in the main column below this card.
+                                    </p>
+                                </div>
+                                <div
+                                    className={`mt-3 ${reviewWellClass}`}
+                                    style={{ ['--review-accent']: reviewAccent }}
+                                    role="tablist"
+                                    aria-label="Review workspace"
+                                >
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={workspace === 'ai'}
+                                        onClick={() => setWorkspace('ai')}
+                                        style={workspace === 'ai' ? activeReviewSegStyle(reviewAccent, onReviewAccent) : undefined}
+                                        className={`${reviewSegBase} ${workspace === 'ai' ? 'font-semibold' : reviewSegInactive}`}
+                                    >
+                                        <SparklesIcon className="h-5 w-5 shrink-0 opacity-90" />
+                                        <span className="whitespace-nowrap">AI suggestions</span>
+                                        {aiSuggestionsGrandTotal > 0 && (
+                                            <InsightsBadge
+                                                count={aiSuggestionsGrandTotal}
+                                                className={badgeOnAccent(workspace === 'ai')}
+                                            />
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={workspace === 'uploads'}
+                                        onClick={() => setWorkspace('uploads')}
+                                        style={
+                                            workspace === 'uploads'
+                                                ? activeReviewSegStyle(reviewAccent, onReviewAccent)
+                                                : undefined
+                                        }
+                                        className={`${reviewSegBase} ${workspace === 'uploads' ? 'font-semibold' : reviewSegInactive}`}
+                                    >
+                                        <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
+                                        <span className="whitespace-nowrap">Upload approvals</span>
+                                        {mergedUploadTotal > 0 && (
+                                            <InsightsBadge
+                                                count={mergedUploadTotal}
+                                                className={badgeOnAccent(workspace === 'uploads')}
+                                            />
+                                        )}
+                                    </button>
+                                </div>
+                            </>
+                        ) : canViewAi && workspace === 'ai' ? (
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    AI suggestions
+                                </p>
+                                <p className="mt-1 max-w-2xl text-xs leading-snug text-slate-500">
+                                    Choose what kind of metadata idea you are triaging; the list updates below this
+                                    card.
+                                </p>
+                            </div>
+                        ) : workspace === 'uploads' && canViewUploadApprovals && creatorModuleEnabled ? (
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Upload approvals
+                                </p>
+                                <p className="mt-1 max-w-2xl text-xs leading-snug text-slate-500">
+                                    Choose which ingest queue to open—the panel below follows your selection.
+                                </p>
+                            </div>
+                        ) : null}
 
-                {workspace === 'uploads' && canViewUploadApprovals && creatorModuleEnabled ? (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                            Upload queue
-                        </span>
-                        <div
-                            style={{ ['--review-accent']: reviewAccent }}
-                            className={reviewWellClass}
-                            role="tablist"
-                            aria-label="Upload approval queue"
-                        >
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={approvalQueue === 'team'}
-                                onClick={() => setApprovalQueue('team')}
-                                style={
-                                    approvalQueue === 'team'
-                                        ? activeReviewSegStyle(reviewAccent, onReviewAccent)
-                                        : undefined
-                                }
-                                className={`${reviewSegBase} ${approvalQueue === 'team' ? 'font-semibold' : reviewSegInactive}`}
+                        {workspace === 'uploads' && canViewUploadApprovals && creatorModuleEnabled ? (
+                            <div
+                                className={`${reviewNestedInsetClass} ${showWorkspaceToggle ? 'mt-4' : 'mt-3'}`}
                             >
-                                <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
-                                <span className="whitespace-nowrap">Team uploads</span>
-                                {mergedUploadTeam > 0 && (
-                                    <InsightsBadge
-                                        count={mergedUploadTeam}
-                                        className={badgeOnAccent(approvalQueue === 'team')}
-                                    />
-                                )}
-                            </button>
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={approvalQueue === 'creator'}
-                                onClick={() => setApprovalQueue('creator')}
-                                style={
-                                    approvalQueue === 'creator'
-                                        ? activeReviewSegStyle(reviewAccent, onReviewAccent)
-                                        : undefined
-                                }
-                                className={`${reviewSegBase} ${approvalQueue === 'creator' ? 'font-semibold' : reviewSegInactive}`}
-                            >
-                                <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
-                                <span className="whitespace-nowrap">Creator uploads</span>
-                                {mergedUploadCreator > 0 && (
-                                    <InsightsBadge
-                                        count={mergedUploadCreator}
-                                        className={badgeOnAccent(approvalQueue === 'creator')}
-                                    />
-                                )}
-                            </button>
-                        </div>
+                                {showWorkspaceToggle ? (
+                                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                        Within upload approvals
+                                    </p>
+                                ) : null}
+                                <div
+                                    className={reviewWellClass}
+                                    style={{ ['--review-accent']: reviewAccent }}
+                                    role="tablist"
+                                    aria-label="Upload approval queue"
+                                >
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={approvalQueue === 'team'}
+                                        onClick={() => setApprovalQueue('team')}
+                                        style={
+                                            approvalQueue === 'team'
+                                                ? activeReviewSegStyle(reviewAccent, onReviewAccent)
+                                                : undefined
+                                        }
+                                        className={`${reviewSegBase} ${approvalQueue === 'team' ? 'font-semibold' : reviewSegInactive}`}
+                                    >
+                                        <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
+                                        <span className="whitespace-nowrap">Team uploads</span>
+                                        {mergedUploadTeam > 0 && (
+                                            <InsightsBadge
+                                                count={mergedUploadTeam}
+                                                className={badgeOnAccent(approvalQueue === 'team')}
+                                            />
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={approvalQueue === 'creator'}
+                                        onClick={() => setApprovalQueue('creator')}
+                                        style={
+                                            approvalQueue === 'creator'
+                                                ? activeReviewSegStyle(reviewAccent, onReviewAccent)
+                                                : undefined
+                                        }
+                                        className={`${reviewSegBase} ${approvalQueue === 'creator' ? 'font-semibold' : reviewSegInactive}`}
+                                    >
+                                        <CloudArrowUpIcon className="h-5 w-5 shrink-0 opacity-90" />
+                                        <span className="whitespace-nowrap">Creator uploads</span>
+                                        {mergedUploadCreator > 0 && (
+                                            <InsightsBadge
+                                                count={mergedUploadCreator}
+                                                className={badgeOnAccent(approvalQueue === 'creator')}
+                                            />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {workspace === 'ai' && canViewAi ? (
+                            <div className={`${reviewNestedInsetClass} ${showWorkspaceToggle ? 'mt-4' : 'mt-3'}`}>
+                                {showWorkspaceToggle ? (
+                                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                        Within AI suggestions
+                                    </p>
+                                ) : null}
+                                <p className="mb-3 max-w-2xl text-xs leading-snug text-slate-500">
+                                    Tags, categories, dropdown options, and new fields each have their own queue.
+                                </p>
+                                <div
+                                    className={reviewWellClass}
+                                    style={{ ['--review-accent']: reviewAccent }}
+                                    role="tablist"
+                                    aria-label="Suggestion categories"
+                                >
+                                    {AI_REVIEW_SUB_TABS.map(({ id, Icon, label, countKey, title, aria, hint }) => {
+                                        const isActive = activeTab === id
+                                        const count = mergedAiTabCounts[countKey] ?? 0
+                                        return (
+                                            <button
+                                                key={id}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={isActive}
+                                                onClick={() => setActiveTab(id)}
+                                                title={count > 0 ? title(count) : hint}
+                                                aria-label={count > 0 ? aria(count) : `${label}. ${hint}`}
+                                                style={isActive ? activeReviewSegStyle(reviewAccent, onReviewAccent) : undefined}
+                                                className={`${reviewSegBase} ${isActive ? 'font-semibold' : reviewSegInactive}`}
+                                            >
+                                                <Icon className="h-5 w-5 shrink-0 opacity-90" />
+                                                <span className="whitespace-nowrap">{label}</span>
+                                                {count > 0 && (
+                                                    <InsightsBadge count={count} className={badgeOnAccent(isActive)} />
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                 ) : null}
 
@@ -1216,43 +1321,8 @@ export default function AnalyticsReview({
                 ) : null}
 
                 {workspace === 'ai' && canViewAi ? (
-            <>
-                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 shrink-0">
-                        What to review
-                    </span>
-                    <div
-                        style={{ ['--review-accent']: reviewAccent }}
-                        className={reviewWellClass}
-                        role="tablist"
-                        aria-label="Suggestion categories"
-                    >
-                        {AI_REVIEW_SUB_TABS.map(({ id, Icon, label, countKey, title, aria, hint }) => {
-                            const isActive = activeTab === id
-                            const count = mergedAiTabCounts[countKey] ?? 0
-                            return (
-                                <button
-                                    key={id}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={isActive}
-                                    onClick={() => setActiveTab(id)}
-                                    title={count > 0 ? title(count) : hint}
-                                    aria-label={count > 0 ? aria(count) : `${label}. ${hint}`}
-                                    style={isActive ? activeReviewSegStyle(reviewAccent, onReviewAccent) : undefined}
-                                    className={`${reviewSegBase} ${isActive ? 'font-semibold' : reviewSegInactive}`}
-                                >
-                                    <Icon className="h-5 w-5 shrink-0 opacity-90" />
-                                    <span className="whitespace-nowrap">{label}</span>
-                                    {count > 0 && (
-                                        <InsightsBadge count={count} className={badgeOnAccent(isActive)} />
-                                    )}
-                                </button>
-                            )
-                        })}
-                    </div>
-                </div>
-                <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{AI_REVIEW_TAB_CONTEXT[activeTab]}</p>
+                    <>
+                        <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{AI_REVIEW_TAB_CONTEXT[activeTab]}</p>
 
                 {loading ? (
                     <div className="rounded-lg bg-white p-8 text-center text-gray-500">Loading...</div>
@@ -1264,7 +1334,7 @@ export default function AnalyticsReview({
                                 No items on this page.{' '}
                                 <button
                                     type="button"
-                                    className="font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                    className="font-medium text-[color:var(--review-accent)] hover:opacity-90 hover:underline"
                                     onClick={() => setPage(1)}
                                 >
                                     Go to first page
@@ -1288,8 +1358,8 @@ export default function AnalyticsReview({
                 ) : activeTab === 'tags' ? (
                     <div className="space-y-3">
                         <div className="overflow-hidden rounded-lg bg-white shadow">
-                            <div className="sticky top-0 z-20 border-b border-violet-100 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">Tag suggestions</p>
+                            <div className="sticky top-0 z-20 border-b border-[rgba(var(--review-accent-rgb),0.14)] bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">Tag suggestions</p>
                                 <p className="mt-0.5 text-sm text-slate-600">
                                     The highlighted label is the tag we want to add—click a thumbnail for a larger preview and fast Accept / Reject / Skip.
                                 </p>
@@ -1319,8 +1389,8 @@ export default function AnalyticsReview({
                                     key={section.fieldKey}
                                     className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-violet-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-[rgba(var(--review-accent-rgb),0.14)] bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">
                                             Metadata field group
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1364,8 +1434,8 @@ export default function AnalyticsReview({
                                     key={section.fieldKey}
                                     className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-violet-100 bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-[rgba(var(--review-accent-rgb),0.14)] bg-gradient-to-b from-white via-white to-slate-50/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">
                                             Dropdown field
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1396,7 +1466,7 @@ export default function AnalyticsReview({
                                                             checked={selected.has(processingKey(item))}
                                                             onChange={() => toggleSelected(processingKey(item))}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-[color:var(--review-accent)] focus:ring-[rgba(var(--review-accent-rgb),0.45)]"
                                                         />
                                                     )}
                                                     <div className="min-w-0 space-y-1">
@@ -1424,7 +1494,7 @@ export default function AnalyticsReview({
                                                             )}
                                                         </p>
                                                         {item.reason && (
-                                                            <p className="mt-2 border-l-2 border-violet-200 pl-3 text-sm text-gray-600">
+                                                            <p className="mt-2 border-l-2 border-[rgba(var(--review-accent-rgb),0.22)] pl-3 text-sm text-gray-600">
                                                                 {item.reason}
                                                             </p>
                                                         )}
@@ -1436,7 +1506,7 @@ export default function AnalyticsReview({
                                                             type="button"
                                                             onClick={() => handleApprove(item)}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                                                            className="inline-flex items-center gap-1 rounded-md bg-[color:var(--review-accent)] px-3 py-2 text-sm font-medium text-white hover:brightness-[0.92] disabled:opacity-50"
                                                         >
                                                             <CheckIcon className="h-4 w-4" />
                                                             Add to dropdown
@@ -1469,10 +1539,10 @@ export default function AnalyticsReview({
                             return (
                                 <div
                                     key={section.categorySlug}
-                                    className="overflow-hidden rounded-lg border border-violet-100 bg-gradient-to-br from-white to-violet-50/40 shadow-sm"
+                                    className="overflow-hidden rounded-lg border border-[rgba(var(--review-accent-rgb),0.14)] bg-gradient-to-br from-white to-[rgba(var(--review-accent-rgb),0.05)] shadow-sm"
                                 >
-                                    <div className="sticky top-0 z-20 border-b-2 border-violet-200/80 bg-white/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
-                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                                    <div className="sticky top-0 z-20 border-b-2 border-[rgba(var(--review-accent-rgb),0.22)]/80 bg-white/95 px-4 py-3 shadow-md backdrop-blur supports-[backdrop-filter]:bg-white/90">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">
                                             Category · new field ideas
                                         </p>
                                         <h3 className="mt-0.5 text-base font-semibold text-gray-900">
@@ -1490,7 +1560,7 @@ export default function AnalyticsReview({
                                         canReject={canReject}
                                         processing={processing}
                                     />
-                                    <ul className="divide-y divide-violet-100/80">
+                                    <ul className="divide-y divide-[rgba(var(--review-accent-rgb),0.12)]">
                                         {section.rows.map((item) => (
                                             <li key={processingKey(item)} className="p-5">
                                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
@@ -1500,11 +1570,11 @@ export default function AnalyticsReview({
                                                             checked={selected.has(processingKey(item))}
                                                             onChange={() => toggleSelected(processingKey(item))}
                                                             disabled={processing.has(processingKey(item))}
-                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-[color:var(--review-accent)] focus:ring-[rgba(var(--review-accent-rgb),0.45)]"
                                                         />
                                                     )}
                                                     <div className="min-w-0 flex-1">
-                                                        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                                                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--review-accent)]">
                                                             Suggested new field
                                                         </p>
                                                         <p className="mt-2 text-sm text-gray-700">
@@ -1528,7 +1598,7 @@ export default function AnalyticsReview({
                                                             )}
                                                         </p>
                                                         {item.reason && (
-                                                            <p className="mt-2 border-l-2 border-violet-200 pl-3 text-sm text-gray-600">
+                                                            <p className="mt-2 border-l-2 border-[rgba(var(--review-accent-rgb),0.22)] pl-3 text-sm text-gray-600">
                                                                 {item.reason}
                                                             </p>
                                                         )}
@@ -1549,7 +1619,7 @@ export default function AnalyticsReview({
                                                                     type="button"
                                                                     onClick={() => handleApprove(item)}
                                                                     disabled={processing.has(processingKey(item))}
-                                                                    className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                                                                    className="inline-flex items-center gap-1 rounded-md bg-[color:var(--review-accent)] px-3 py-2 text-sm font-medium text-white hover:brightness-[0.92] disabled:opacity-50"
                                                                 >
                                                                     <CheckIcon className="h-4 w-4" />
                                                                     Create field
@@ -1596,10 +1666,10 @@ export default function AnalyticsReview({
                         canReject={canReject}
                         onApprove={handleApprove}
                         onReject={handleReject}
-                        accentHex={JACKPOT_UI_ACCENT_HEX}
+                        accentHex={reviewAccent}
                     />
                 )}
-            </>
+                    </>
                 ) : null}
 
             </div>

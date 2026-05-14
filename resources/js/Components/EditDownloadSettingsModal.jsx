@@ -26,7 +26,7 @@ function formatAnalyticsDate(iso) {
 
 const SETTINGS_ERROR_KEYS = ['message', 'password', 'access_mode', 'user_ids', 'landing_copy']
 
-export default function EditDownloadSettingsModal({ open, download, onClose, onSaved }) {
+export default function EditDownloadSettingsModal({ open, download, onClose, onSaved, overlayZClass = 'z-50' }) {
   const { download_features: features = {}, auth = {}, collection_only: collectionOnlySession = false } = usePage().props
   const isCollectionGuest = auth?.is_collection_guest_experience === true
   const blockPublicLink = collectionOnlySession === true || isCollectionGuest
@@ -44,6 +44,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const showCompanyOption = canCompany || !canSharePublic
   const showBrandOption = canBrand && !isCollectionGuest
   const canPasswordProtect = !!features.password_protection
+  const brandPrimary = auth?.activeBrand?.primary_color || '#6366f1'
 
   const [activeTab, setActiveTab] = useState('settings')
   const [accessMode, setAccessMode] = useState('public')
@@ -146,10 +147,13 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
   const showPassword = canPasswordProtect
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" aria-modal="true" role="dialog">
+    <div className={`fixed inset-0 ${overlayZClass} overflow-y-auto`} aria-modal="true" role="dialog">
       <div className="flex min-h-full items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={onClose} aria-hidden="true" />
-        <div className="relative w-full max-w-lg rounded-lg bg-white shadow-xl">
+        <div
+          className="relative w-full max-w-lg rounded-lg bg-white shadow-xl"
+          style={{ ['--primary']: brandPrimary }}
+        >
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <h2 className="text-lg font-semibold text-gray-900">Download settings</h2>
             <button
@@ -165,7 +169,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
             <button
               type="button"
               onClick={() => setActiveTab('settings')}
-              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'settings' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'settings' ? 'border-[color:var(--primary)] text-[color:var(--primary)]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
             >
               <span className="flex items-center gap-2">
                 <Cog6ToothIcon className="h-4 w-4" />
@@ -175,7 +179,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
             <button
               type="button"
               onClick={() => setActiveTab('analytics')}
-              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'analytics' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+              className={`border-b-2 py-3 px-4 text-sm font-medium ${activeTab === 'analytics' ? 'border-[color:var(--primary)] text-[color:var(--primary)]' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
             >
               <span className="flex items-center gap-2">
                 <ChartBarIcon className="h-4 w-4" />
@@ -255,7 +259,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                         value="public"
                         checked={accessMode === 'public'}
                         onChange={() => setAccessMode('public')}
-                        className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-4 w-4 border-gray-300 text-[color:var(--primary)] focus:ring-[color:var(--primary)]"
                       />
                       <span className="text-sm text-gray-700">Public (anyone with the link)</span>
                     </label>
@@ -270,7 +274,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                           checked={accessMode === 'brand'}
                           onChange={() => !isMultiBrand && setAccessMode('brand')}
                           disabled={isMultiBrand}
-                          className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                          className="h-4 w-4 border-gray-300 text-[color:var(--primary)] focus:ring-[color:var(--primary)] disabled:opacity-50"
                         />
                         <span className="text-sm text-gray-700">Brand members</span>
                       </label>
@@ -289,7 +293,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                         value="company"
                         checked={accessMode === 'company'}
                         onChange={() => setAccessMode('company')}
-                        className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-4 w-4 border-gray-300 text-[color:var(--primary)] focus:ring-[color:var(--primary)]"
                       />
                       <span className="text-sm text-gray-700">Company members (sign-in required)</span>
                     </label>
@@ -302,7 +306,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                         value="users"
                         checked={accessMode === 'users'}
                         onChange={() => setAccessMode('users')}
-                        className="h-4 w-4 border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="h-4 w-4 border-gray-300 text-[color:var(--primary)] focus:ring-[color:var(--primary)]"
                       />
                       <span className="text-sm text-gray-700">Specific people</span>
                     </label>
@@ -322,7 +326,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                               type="checkbox"
                               checked={allowedUserIds.includes(u.id)}
                               onChange={() => toggleUser(u.id)}
-                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              className="h-4 w-4 rounded border-gray-300 text-[color:var(--primary)] focus:ring-[color:var(--primary)]"
                             />
                             <span className="text-sm text-gray-700">
                               {[u.first_name, u.last_name].filter(Boolean).join(' ') || u.email}
@@ -373,7 +377,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={download.password_protected ? 'Enter new password to change' : 'Set a password'}
-                  className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm sm:text-sm ${getFieldError('password') ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500'}`}
+                  className={`mt-1 block w-full rounded-md border px-3 py-2 shadow-sm sm:text-sm ${getFieldError('password') ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-gray-300 focus:border-[color:var(--primary)] focus:ring-[color:var(--primary)]'}`}
                   autoComplete="new-password"
                 />
                 {getFieldError('password') && (
@@ -400,7 +404,7 @@ export default function EditDownloadSettingsModal({ open, download, onClose, onS
               <button
                 type="submit"
                 disabled={submitting || (!hasAccessOptions && !showPassword)}
-                className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50"
+                className="rounded-md bg-[color:var(--primary)] px-3 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50"
               >
                 {submitting ? 'Saving…' : 'Save settings'}
               </button>

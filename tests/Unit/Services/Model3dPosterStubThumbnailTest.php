@@ -4,12 +4,18 @@ namespace Tests\Unit\Services;
 
 use App\Jobs\GenerateThumbnailsJob;
 use App\Models\Asset;
+use App\Services\Models\BlenderModelPreviewService;
 use App\Services\ThumbnailGenerationService;
 use ReflectionMethod;
 use Tests\TestCase;
 
 class Model3dPosterStubThumbnailTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        BlenderModelPreviewService::$processRunnerOverride = null;
+        parent::tearDown();
+    }
     public function test_stub_requires_dam_3d(): void
     {
         config(['dam_3d.enabled' => false]);
@@ -20,32 +26,35 @@ class Model3dPosterStubThumbnailTest extends TestCase
         file_put_contents($tmp, 'bin');
         try {
             $this->expectException(\RuntimeException::class);
-            $this->expectExceptionMessage('DAM_3D');
+            $this->expectExceptionMessage('DAM_3D processing');
             $m->invoke($svc, $tmp, ['width' => 64, 'height' => 64, '_original_filename' => 'x.glb']);
         } finally {
             @unlink($tmp);
         }
     }
 
-    public function test_stub_generates_raster_with_dam_3d(): void
+    public function test_invalid_glb_bytes_throw_without_raster_when_dam_3d_enabled(): void
     {
-        config(['dam_3d.enabled' => true]);
+        config(['dam_3d.enabled' => true, 'dam_3d.real_render_enabled' => true]);
+        BlenderModelPreviewService::$processRunnerOverride = static function (): array {
+            throw new \RuntimeException('Blender must not run for invalid GLB bytes');
+        };
+
         $svc = app(ThumbnailGenerationService::class);
         $m = new ReflectionMethod(ThumbnailGenerationService::class, 'generateModel3dRasterThumbnail');
         $m->setAccessible(true);
         $tmp = tempnam(sys_get_temp_dir(), 'glb_');
         file_put_contents($tmp, 'fakeglb');
         try {
-            $out = $m->invoke($svc, $tmp, [
+            $this->expectException(\RuntimeException::class);
+            $m->invoke($svc, $tmp, [
                 'width' => 120,
                 'height' => 120,
                 'quality' => 80,
                 '_original_filename' => 'chair.glb',
                 '_asset_id' => 1,
+                '_file_type' => 'model_glb',
             ]);
-            $this->assertFileExists($out);
-            $this->assertGreaterThan(200, filesize($out));
-            @unlink($out);
         } finally {
             @unlink($tmp);
         }

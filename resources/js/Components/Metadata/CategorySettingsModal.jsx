@@ -203,20 +203,20 @@ export default function CategorySettingsModal({
 
                         <hr className="border-gray-200" />
 
-                        {/* Section: Metadata Fields */}
+                        {/* Section: Metadata Filters */}
                         {canViewMetadataRegistry && (
                             <>
                                 <section>
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Fields</h3>
+                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">Filters</h3>
                                     <p className="text-sm text-gray-500 mb-3">
-                                        Configure which fields appear for assets in this folder.
+                                        Configure which filters appear for assets in this folder.
                                     </p>
                                     <a
                                         href={manageCategoriesUrl}
                                         className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                     >
                                         <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                                        Configure folder fields
+                                        Configure folder filters
                                     </a>
                                 </section>
                                 <hr className="border-gray-200" />

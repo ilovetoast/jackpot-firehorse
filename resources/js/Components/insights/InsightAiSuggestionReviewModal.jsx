@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Link } from '@inertiajs/react'
+import { hexToRgba, normalizeHexColor, getSolidFillButtonForegroundHex } from '../../utils/colorUtils'
 import {
     ArrowLeftIcon,
     ArrowRightIcon,
@@ -39,8 +40,10 @@ export default function InsightAiSuggestionReviewModal({
     canReject = false,
     onApprove = async () => {},
     onReject = async () => {},
-    accentHex = '#4f46e5',
+    accentHex = '#6366f1',
 }) {
+    const accent = normalizeHexColor(accentHex)
+    const onAccent = getSolidFillButtonForegroundHex(accent)
     const [index, setIndex] = useState(0)
     const [slideDir, setSlideDir] = useState(1)
 
@@ -136,10 +139,10 @@ export default function InsightAiSuggestionReviewModal({
                 <DialogPanel className="flex max-h-[min(92vh,900px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80">
                     <div
                         className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"
-                        style={{ borderBottomColor: `${accentHex}22` }}
+                        style={{ borderBottomColor: hexToRgba(accent, 0.14) }}
                     >
                         <div className="flex items-center gap-2 min-w-0">
-                            <SparklesIcon className="h-6 w-6 shrink-0 text-violet-500" aria-hidden />
+                            <SparklesIcon className="h-6 w-6 shrink-0" style={{ color: accent }} aria-hidden />
                             <div className="min-w-0">
                                 <DialogTitle className="text-lg font-semibold text-slate-900 truncate">
                                     Quick review
@@ -180,8 +183,17 @@ export default function InsightAiSuggestionReviewModal({
                                     className="space-y-5"
                                 >
                                     {headline ? (
-                                        <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50/90 to-white px-4 py-4">
-                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-600">
+                                        <div
+                                            className="rounded-xl border px-4 py-4"
+                                            style={{
+                                                borderColor: hexToRgba(accent, 0.14),
+                                                background: `linear-gradient(to bottom right, ${hexToRgba(accent, 0.08)}, #ffffff)`,
+                                            }}
+                                        >
+                                            <p
+                                                className="text-[10px] font-semibold uppercase tracking-wide"
+                                                style={{ color: accent }}
+                                            >
                                                 {headline.kicker}
                                             </p>
                                             <p className="mt-1 break-words text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
@@ -202,7 +214,7 @@ export default function InsightAiSuggestionReviewModal({
                                         </p>
                                         <button
                                             type="button"
-                                            className="relative mx-auto flex max-h-[min(48vh,440px)] w-full max-w-lg items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+                                            className="relative mx-auto flex max-h-[min(48vh,440px)] w-full max-w-lg items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/45 focus-visible:ring-offset-2"
                                             aria-label="Enlarged thumbnail"
                                         >
                                             {current.thumbnail_url ? (
@@ -226,7 +238,8 @@ export default function InsightAiSuggestionReviewModal({
                                             ) : null}
                                             <Link
                                                 href={`/app/assets?q=${encodeURIComponent(current.asset_id)}&asset=${encodeURIComponent(current.asset_id)}`}
-                                                className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-800"
+                                                className="ml-auto inline-flex items-center gap-1 text-xs font-medium hover:opacity-90"
+                                                style={{ color: accent }}
                                                 onClick={() => onClose()}
                                             >
                                                 Open in grid
@@ -284,8 +297,8 @@ export default function InsightAiSuggestionReviewModal({
                                         type="button"
                                         disabled={busy || !current}
                                         onClick={() => current && void onApprove(current)}
-                                        className="inline-flex min-w-[7rem] flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
-                                        style={{ backgroundColor: accentHex }}
+                                        className="inline-flex min-w-[7rem] flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition hover:brightness-[0.94] disabled:cursor-not-allowed disabled:opacity-50 sm:flex-initial"
+                                        style={{ backgroundColor: accent, color: onAccent }}
                                     >
                                         <CheckIcon className="h-5 w-5" />
                                         Accept

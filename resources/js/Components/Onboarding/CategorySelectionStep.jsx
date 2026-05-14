@@ -127,7 +127,7 @@ export default function CategorySelectionStep({
             </h2>
             <p className="mt-2 text-sm text-white/40 leading-relaxed max-w-xl">
                 Pick which asset and execution folders are relevant. Folders organize your library; you can turn hidden
-                folders back on anytime from Manage → Folders &amp; fields.
+                folders back on anytime from Manage → Folders &amp; filters.
             </p>
 
             <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
@@ -199,7 +199,7 @@ export default function CategorySelectionStep({
                     )}
                 </div>
                 <p className="mt-3 text-xs text-white/20">
-                    You can create, rename, and manage folders and their fields from Manage → Folders & fields.
+                    You can create, rename, and manage folders and their filters from Manage → Folders & filters.
                 </p>
             </div>
 

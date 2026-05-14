@@ -196,7 +196,7 @@ test('GLB with real preview_3d_poster_url counts as server raster thumbnail', ()
     assert.equal(vs.kind, 'ready')
 })
 
-test('GLB with stub poster does not count as server raster; grid uses 3D placeholder state', () => {
+test('GLB with stub poster does not count as server raster; grid shows failed (no neutral stub tile)', () => {
     syncDamFileTypesFromPage({
         props: {
             dam_file_types: {
@@ -218,7 +218,7 @@ test('GLB with stub poster does not count as server raster; grid uses 3D placeho
     }
     assert.equal(hasServerRasterThumbnail(asset), false)
     const vs = getAssetCardVisualState(asset, { ephemeralLocalPreviewUrl: null })
-    assert.equal(vs.kind, 'model_3d_stub_raster')
+    assert.equal(vs.kind, 'failed')
     assert.equal(vs.showFileTypeCard, true)
-    assert.equal(vs.badgeShort, '3D')
+    assert.equal(vs.badgeShort, '')
 })

@@ -1613,6 +1613,7 @@ export default function AssetsIndex({
 
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkActionsModal
+                    placement="brand"
                     assetIds={bulkSelectedAssetIds}
                     selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
                         const a = safeAssetsList.find((x) => x.id === id)
@@ -1711,7 +1712,7 @@ export default function AssetsIndex({
                 />
             )}
 
-            {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on category change */}
+            {/* Selection + Create Download: SelectionActionBar only (no duplicate app-level bucket bar). */}
         </div>
     )
 }

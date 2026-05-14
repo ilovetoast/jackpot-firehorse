@@ -27,6 +27,8 @@ import {
 import axios from 'axios'
 import { usePermission } from '../hooks/usePermission'
 import ProcessingActionCard from './ProcessingActionCard'
+import PlacementNotice, { PlacementNoticeAckRow } from './placement/PlacementNotice'
+import { placementPrimaryQuietButtonClasses } from './placement/surfaces'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
@@ -461,6 +463,8 @@ export default function BulkActionsModal({
     bulkCategoriesByAssetType = null,
     /** Default tab for "Assign category" when typed categories are available ('asset' | 'deliverable' | 'ai_generated'). Executions grid should pass "deliverable". */
     defaultAssignAssetType = 'asset',
+    /** Library / brand surfaces vs company (tenant) vs platform admin — keeps confirm panels on-brand. */
+    placement = 'brand',
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
@@ -971,12 +975,19 @@ export default function BulkActionsModal({
                                 )}
 
                                 {showPermissionWarning && (
-                                    <div className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 p-2.5">
-                                        <ExclamationTriangleIcon className="h-4 w-4 shrink-0 text-amber-600" />
-                                        <span className="text-xs text-amber-800">
-                                            Some selected assets cannot be modified and will be skipped.
-                                        </span>
-                                    </div>
+                                    <PlacementNotice
+                                        placement={placement}
+                                        tone="warning"
+                                        className="!p-2.5"
+                                        contentClassName="!space-y-0"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <ExclamationTriangleIcon className="h-4 w-4 shrink-0 text-amber-600" />
+                                            <span className="text-xs text-amber-900/90">
+                                                Some selected assets cannot be modified and will be skipped.
+                                            </span>
+                                        </div>
+                                    </PlacementNotice>
                                 )}
                             </div>
                         </div>
@@ -1127,56 +1138,51 @@ export default function BulkActionsModal({
 
                             {(isLifecycle || isBackgroundQueueBulk || isSitePipelineSyncDelete) && (
                                 <div
-                                    className={`rounded-xl border p-4 mb-6 shadow-sm transition-all duration-[140ms] ease-out ${
-                                        isSitePipelineSyncDelete
-                                            ? 'border-amber-200 bg-amber-50/60'
-                                            : isBackgroundQueueBulk
-                                              ? 'border-indigo-200 bg-indigo-50/60'
-                                              : 'border-gray-200 bg-gray-50/50'
-                                    }`}
+                                    className="mb-6 transition-all duration-[140ms] ease-out"
                                     style={{
                                         opacity: confirmPanelEntered ? 1 : 0,
                                         transform: confirmPanelEntered ? 'translateY(0)' : 'translateY(4px)',
                                     }}
                                 >
-                                    <h3 className="text-sm font-semibold text-gray-900 mb-2">
-                                        {isSitePipeline
-                                            ? 'Confirm site pipeline action'
-                                            : selectedAction === GENERATE_VIDEO_INSIGHTS
-                                              ? 'Confirm video analysis'
-                                              : 'Confirm Bulk Action'}
-                                    </h3>
-                                    <p className="text-sm text-gray-700 mb-3">
-                                        {getConfirmSummaryText(selectedAction, n)}
-                                    </p>
-                                    <p className="text-xs text-gray-500">
-                                        {summaryLine}
-                                    </p>
-                                    {isBackgroundQueueBulk && (
-                                        <p className="text-xs text-yellow-700 mt-3">
-                                            These actions run in the background and may take several minutes.
-                                        </p>
-                                    )}
-                                    {isSitePipelineSyncDelete && (
-                                        <p className="text-xs text-amber-900/80 mt-3">
-                                            Runs immediately: preview files are removed from storage and paths cleared on each asset (no background job).
-                                        </p>
-                                    )}
+                                    <PlacementNotice
+                                        placement={placement}
+                                        tone={
+                                            isSitePipelineSyncDelete || isFullPipelineBulk ? 'warning' : 'default'
+                                        }
+                                        title={
+                                            isSitePipeline
+                                                ? 'Confirm site pipeline action'
+                                                : selectedAction === GENERATE_VIDEO_INSIGHTS
+                                                  ? 'Confirm video analysis'
+                                                  : 'Confirm Bulk Action'
+                                        }
+                                        footer={
+                                            isBackgroundQueueBulk && !isSitePipelineSyncDelete
+                                                ? 'These actions run in the background and may take several minutes.'
+                                                : null
+                                        }
+                                        contentClassName="!space-y-2"
+                                    >
+                                        <p>{getConfirmSummaryText(selectedAction, n)}</p>
+                                        <p className="text-xs text-gray-500">{summaryLine}</p>
+                                        {isSitePipelineSyncDelete ? (
+                                            <p className="text-xs text-amber-900/85">
+                                                Runs immediately: preview files are removed from storage and paths
+                                                cleared on each asset (no background job).
+                                            </p>
+                                        ) : null}
+                                    </PlacementNotice>
                                 </div>
                             )}
 
                             {isFullPipelineBulk && (
-                                <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm">
-                                    <input
-                                        type="checkbox"
-                                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                        checked={fullPipelineResourceAck}
-                                        onChange={(e) => setFullPipelineResourceAck(e.target.checked)}
-                                    />
-                                    <span className="text-sm text-gray-800">
-                                        I understand this is resource intensive.
-                                    </span>
-                                </label>
+                                <PlacementNoticeAckRow
+                                    placement={placement}
+                                    tone="warning"
+                                    checked={fullPipelineResourceAck}
+                                    onChange={(e) => setFullPipelineResourceAck(e.target.checked)}
+                                    label="I understand this is resource intensive."
+                                />
                             )}
 
                             {error && (
@@ -1209,7 +1215,7 @@ export default function BulkActionsModal({
                                             ? 'text-white bg-red-600 hover:bg-red-700'
                                             : isSitePipelineSyncDelete
                                               ? 'text-white bg-amber-700 hover:bg-amber-800'
-                                              : 'text-white bg-indigo-600 hover:bg-indigo-700'
+                                              : placementPrimaryQuietButtonClasses(placement)
                                     }`}
                                 >
                                     {submitting

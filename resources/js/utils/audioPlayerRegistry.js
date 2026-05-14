@@ -17,7 +17,7 @@
  *   reg.pause(token)                          // releases ownership if held
  *   reg.subscribe(callback)                   // notified on owner change
  *   reg.getCurrentToken()                     // null when nothing plays
- *   reg.getAnalyserData()                     // Uint8Array | null (frequency)
+ *   reg.getAnalyserData()                     // Uint8Array | null (frequency; null unless the playing element is wired to the analyser)
  *
  * `token` is any unique value; we use the asset id but anything works.
  */
@@ -172,6 +172,12 @@ function createRegistry() {
 
     function getAnalyserData() {
         if (!analyser || !frequencyBuffer) return null
+        // Only read the FFT tap when this element is actually wired through
+        // createMediaElementSource → analyser. Otherwise we would paint flat
+        // bars from an empty graph while the <audio> plays via its default path
+        // (live_analyser off, or createMediaElementSource threw, or CORS path
+        // not used for this element yet).
+        if (!currentEl || !sourceCache.has(currentEl)) return null
         analyser.getByteFrequencyData(frequencyBuffer)
         return frequencyBuffer
     }

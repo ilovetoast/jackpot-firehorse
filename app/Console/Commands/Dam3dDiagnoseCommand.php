@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\FileTypeService;
 use App\Services\Models\BlenderModelPreviewService;
 use Illuminate\Console\Command;
 use Symfony\Component\Process\Process;
@@ -63,8 +64,24 @@ class Dam3dDiagnoseCommand extends Command
         $this->line('max_server_render_bytes: '.(int) config('dam_3d.max_server_render_bytes', 0));
         $this->line('max_render_seconds: '.(float) config('dam_3d.max_render_seconds', 0));
         $this->line('max_conversion_seconds: '.(float) config('dam_3d.max_conversion_seconds', 0));
+        $this->line('blender_headless_mode: software_gl (LIBGL_ALWAYS_SOFTWARE + llvmpipe)');
+        $this->line('writable_home_for_blender: '.(config('dam_3d.writable_home_for_blender', true) ? 'yes' : 'no'));
         $this->line('real_render_enabled: '.(config('dam_3d.real_render_enabled', true) ? 'yes' : 'no'));
         $this->line('conversion_enabled: '.((bool) config('dam_3d.conversion_enabled', false) ? 'yes' : 'no'));
+
+        $fileTypeService = app(FileTypeService::class);
+        $req = $fileTypeService->checkRequirements('model_glb');
+        $this->line('model_glb tool requirements met: '.(($req['met'] ?? false) ? 'yes' : 'no'));
+        if (empty($req['met']) && ! empty($req['missing'])) {
+            foreach ($req['missing'] as $line) {
+                $this->line('  requirement gap: '.$line);
+            }
+        }
+        $glbPipeline = $fileTypeService->registryTypeSupportsThumbnailPipeline('model_glb');
+        $this->line('GLB thumbnail/poster pipeline on THIS host: '.($glbPipeline ? 'yes' : 'no'));
+        if (! $glbPipeline) {
+            $this->line('  (Needs DAM_3D=true, handler present, and checkRequirements met — same checks as GenerateThumbnailsJob.)');
+        }
 
         $script = resource_path('blender/render_model_preview.py');
         $this->line('Bundled Blender script: '.(is_file($script) ? 'present' : 'missing'));
@@ -74,7 +91,12 @@ class Dam3dDiagnoseCommand extends Command
         $this->line('  • The interactive viewer loads the GLB from the CDN via a short-lived signed URL (or cookies for same-origin).');
         $this->line('  • Grid thumbnails are rendered by Blender on the **queue worker** host (headless).');
         $this->line('  • If Blender is missing, misconfigured, or fails import/render, the pipeline uploads a branded stub PNG instead — the GLB is unchanged.');
+        $this->line('  • Headless workers use software GL (llvmpipe) for Blender posters so Docker/WSL2 is not dependent on GPU/EGL.');
         $this->line('  • Fix: install Blender where `php artisan queue:work` runs, set DAM_3D_BLENDER_BINARY, run `dam:3d:diagnose` there, then regenerate thumbnails.');
+        $this->newLine();
+        $this->line('Why `sail artisan tinker` can succeed while production shows stubs:');
+        $this->line('  • Tinker often runs inside Sail with DAM_3D=true and Blender installed; production Horizon workers may use a different image, cached config, or DAM_3D=false.');
+        $this->line('  • Run `php artisan dam:3d:diagnose` on each worker host and compare "GLB thumbnail/poster pipeline on THIS host" to Sail.');
 
         return self::SUCCESS;
     }

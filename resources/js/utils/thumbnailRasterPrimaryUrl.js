@@ -26,6 +26,10 @@ export function resolveRasterPrimaryThumbnailUrl(
     if (!asset) {
         return null
     }
+    const ts = String(asset.thumbnail_status?.value || asset.thumbnail_status || '').toLowerCase()
+    if (ts === 'failed') {
+        return null
+    }
     const poster = getRegistryModel3dPosterDisplayUrl(asset, failedThumbnailUrls, damFileTypes)
     if (poster) {
         return poster
@@ -49,7 +53,6 @@ export function resolveRasterPrimaryThumbnailUrl(
     if (asset.final_thumbnail_url) {
         return asset.final_thumbnail_url
     }
-    const ts = String(asset.thumbnail_status?.value || asset.thumbnail_status || '').toLowerCase()
     if (asset.thumbnail_url && ts === 'completed') {
         return asset.thumbnail_url
     }

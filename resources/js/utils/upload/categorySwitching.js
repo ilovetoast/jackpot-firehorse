@@ -138,8 +138,8 @@ function generateCategoryChangeWarnings(oldCategoryId, newCategoryId, removedFie
         warnings.push({
             type: 'category_change',
             message: newCategoryId 
-                ? `Folder changed. Metadata fields have been updated.`
-                : `Folder cleared. Metadata fields have been reset.`,
+                ? `Folder changed. Metadata filters have been updated.`
+                : `Folder cleared. Metadata filters have been reset.`,
             severity: 'info'
         });
     }

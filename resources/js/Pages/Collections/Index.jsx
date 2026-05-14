@@ -825,7 +825,7 @@ export default function CollectionsIndex({
                         </div>
                     </div>
 
-                    {/* Download bucket bar is mounted at app level (DownloadBucketBarGlobal) so it doesn't flash on collection change */}
+                    {/* Selection + Create Download: SelectionActionBar only (no duplicate app-level bucket bar). */}
 
                     {/* Asset Drawer — single instance, portals to document.body */}
                     {activeAssetId && (
@@ -883,6 +883,7 @@ export default function CollectionsIndex({
 
             {showBulkActionsModal && bulkSelectedAssetIds.length > 0 && (
                 <BulkActionsModal
+                    placement="brand"
                     assetIds={bulkSelectedAssetIds}
                     selectedAssetSummary={bulkSelectedAssetIds.map((id) => {
                         const a = safeAssetsList.find((x) => x.id === id)

@@ -10,8 +10,10 @@ import { useSelection } from '../contexts/SelectionContext'
 import { usePermission } from '../hooks/usePermission'
 import { useBucketOptional } from '../contexts/BucketContext'
 import CreateDownloadPanel from './CreateDownloadPanel'
+import { emitDownloadProcessingStarted } from '../utils/downloadReadyToastEvents'
 import ConfirmDialog from './ConfirmDialog'
 import SelectedItemsDrawer from './SelectedItemsDrawer'
+import { useDownloadsPanelOptional } from '../contexts/DownloadsPanelContext'
 
 export default function SelectionActionBar({
     currentPageIds = [],
@@ -28,6 +30,7 @@ export default function SelectionActionBar({
     const canEditMetadata = auth?.permissions?.can_edit_metadata === true || can('metadata.edit_post_upload') || can('metadata.bulk_edit')
     const selection = useSelection()
     const bucket = useBucketOptional()
+    const downloadsPanel = useDownloadsPanelOptional()
 
     const {
         selectedItems,
@@ -76,19 +79,30 @@ export default function SelectionActionBar({
     }, [currentPageIds, currentPageItems, allPageSelected, deselectItem, selectMultiple, isSelected])
 
     const handleCreateDownload = useCallback(async () => {
-        if (!bucket) return
         const ids = getSelectedIds().map((id) => String(id))
-        await bucket.bucketClear()
-        if (ids.length > 0) {
-            await bucket.bucketAddBatch(ids)
+        try {
+            if (bucket?.bucketClear && bucket?.bucketAddBatch) {
+                await bucket.bucketClear()
+                if (ids.length > 0) {
+                    await bucket.bucketAddBatch(ids)
+                }
+            }
+        } catch (e) {
+            console.warn('[SelectionActionBar] Download bucket sync failed', e)
+        } finally {
+            setShowCreatePanel(true)
         }
-        setShowCreatePanel(true)
     }, [bucket, getSelectedIds])
 
-    const handleCreateSuccess = useCallback(() => {
-        setShowCreatePanel(false)
-        clearSelection()
-    }, [clearSelection])
+    const handleDownloadCreatedFromGrid = useCallback(
+        (payload) => {
+            if (!payload?.id) return
+            emitDownloadProcessingStarted(payload.id)
+            downloadsPanel?.openPanel({ openDownloadId: payload.id })
+            clearSelection()
+        },
+        [clearSelection, downloadsPanel]
+    )
 
     const handleOpenBulkActionsModal = useCallback(() => {
         const ids = pageSelected.map((item) => item.id)
@@ -237,7 +251,8 @@ export default function SelectionActionBar({
                 onClose={() => setShowCreatePanel(false)}
                 bucketCount={selectedCount}
                 previewItems={items}
-                onSuccess={handleCreateSuccess}
+                submitTransport="xhr"
+                onCreated={handleDownloadCreatedFromGrid}
                 createDownloadSource={createDownloadSource}
                 collectionId={collectionId}
             />

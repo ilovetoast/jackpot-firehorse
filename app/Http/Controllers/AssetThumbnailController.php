@@ -926,7 +926,7 @@ class AssetThumbnailController extends Controller
      * - Does not modify existing GenerateThumbnailsJob
      * - Does not mutate Asset.status (status represents visibility only)
      * - Uses existing job and pipeline without changes
-     * - Idempotent: safe to call if thumbnail already exists
+     * - Idempotent: safe to call if thumbnail already exists (unless 3D poster is still a stub; then we force-regenerate)
      */
     public function generate(Request $request, Asset $asset): \Illuminate\Http\JsonResponse
     {
@@ -935,24 +935,31 @@ class AssetThumbnailController extends Controller
 
         $user = $request->user();
 
-        // Safety check: If thumbnail already exists and is completed, return no-op
-        // This prevents unnecessary job dispatch and respects idempotency
-        if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::COMPLETED) {
-            Log::info('[AssetThumbnailController] Thumbnail generation skipped - already completed', [
-                'asset_id' => $asset->id,
-                'user_id' => $user->id,
-            ]);
+        $forceRegenerate = false;
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Thumbnail already exists',
-                'thumbnail_status' => 'completed',
-            ], 200);
+        // Safety check: If thumbnail already exists and is completed, return no-op
+        // Exception: 3D pipeline can mark thumbnails complete while the poster is still a stub
+        // (no Blender on worker). In that case we must dispatch with force so the job does not skip.
+        if ($asset->thumbnail_status === ThumbnailStatus::COMPLETED) {
+            if (Preview3dMetadata::assetOrVersionHasPosterStub($asset)) {
+                $forceRegenerate = true;
+            } else {
+                Log::info('[AssetThumbnailController] Thumbnail generation skipped - already completed', [
+                    'asset_id' => $asset->id,
+                    'user_id' => $user->id,
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Thumbnail already exists',
+                    'thumbnail_status' => 'completed',
+                ], 200);
+            }
         }
 
         // Safety check: If thumbnail is currently processing, return conflict
         // This prevents duplicate job dispatch and respects existing job execution
-        if ($asset->thumbnail_status === \App\Enums\ThumbnailStatus::PROCESSING) {
+        if ($asset->thumbnail_status === ThumbnailStatus::PROCESSING) {
             Log::warning('[AssetThumbnailController] Thumbnail generation already in progress', [
                 'asset_id' => $asset->id,
                 'user_id' => $user->id,
@@ -1006,7 +1013,7 @@ class AssetThumbnailController extends Controller
         // This is safe because we're explicitly triggering generation
         // IMPORTANT: We do NOT mutate Asset.status (status represents visibility only)
         $asset->update([
-            'thumbnail_status' => \App\Enums\ThumbnailStatus::PENDING,
+            'thumbnail_status' => ThumbnailStatus::PENDING,
             'thumbnail_error' => null,
             'thumbnail_started_at' => null,
         ]);
@@ -1016,7 +1023,9 @@ class AssetThumbnailController extends Controller
         // Note: Job ID is not available immediately after dispatch
         // The job ID will be available inside the job execution via $this->job->getJobId()
         $asset->loadMissing('currentVersion');
-        \App\Jobs\GenerateThumbnailsJob::dispatch($asset->id)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
+        $version = $asset->currentVersion;
+        $payloadId = $version ? (string) $version->id : (string) $asset->id;
+        \App\Jobs\GenerateThumbnailsJob::dispatch($payloadId, $forceRegenerate)->onQueue(PipelineQueueResolver::imagesQueueForAsset($asset));
 
         app(AssetProcessingGuardService::class)->markDispatched($user, $asset, AssetProcessingGuardService::ACTION_THUMBNAILS);
 
@@ -1024,6 +1033,7 @@ class AssetThumbnailController extends Controller
             'asset_id' => $asset->id,
             'user_id' => $user->id,
             'file_type' => $supportReason,
+            'force' => $forceRegenerate,
         ]);
 
         // Log activity event for timeline

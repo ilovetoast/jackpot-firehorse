@@ -78,98 +78,159 @@ final class BlenderModelPreviewService
             ]);
         }
 
-        $work = sys_get_temp_dir().'/dam3d_w_'.uniqid('', true);
-        if (! @mkdir($work, 0700, true) && ! is_dir($work)) {
-            return array_replace($empty, [
-                'failure_message' => 'Could not create temp work directory.',
-            ]);
-        }
-
-        $baseTmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
-        $posterPath = tempnam($baseTmp, 'dam3d_p_');
-        if ($posterPath === false) {
-            $this->cleanupDir($work);
-
-            return array_replace($empty, [
-                'failure_message' => 'Could not allocate temp poster path.',
-            ]);
-        }
-        @unlink($posterPath);
-        $posterPath .= '.png';
-
         $exportPath = ($exportGlb && is_string($exportGlbAbsolutePath) && $exportGlbAbsolutePath !== '')
             ? $exportGlbAbsolutePath
             : '';
 
-        $cmd = array_merge(
-            [
-                $binary,
-                '-b',
-                '--python',
-                $script,
-                '--',
-                $sourceAbsolutePath,
-                $posterPath,
-                (string) max(32, min(4096, $posterSizePx)),
-                ltrim($backgroundHexNoHash, '#'),
-            ],
-            $exportPath !== '' ? [$exportPath] : [''],
-        );
-
-        $timeout = max(5.0, (float) config('dam_3d.max_render_seconds', 90));
+        $timeout = max(5.0, (float) config('dam_3d.max_render_seconds', 180));
         if ($exportPath !== '') {
             $timeout = max($timeout, (float) config('dam_3d.max_conversion_seconds', 180));
         }
 
-        $t0 = microtime(true);
-        try {
-            $run = $this->runProcess($cmd, $work, $timeout);
-        } catch (\Throwable $e) {
-            @unlink($posterPath);
+        $sequences = $this->blenderRenderEnvSequences();
+        $attemptsLog = [];
+        $lastFailure = $empty;
 
-            return array_replace($empty, [
-                'failure_message' => 'Blender process error.',
-                'debug' => ['exception_class' => $e::class],
-            ]);
-        } finally {
+        foreach ($sequences as $seq) {
+            $label = (string) ($seq['label'] ?? 'default');
+            $env = is_array($seq['env'] ?? null) ? $seq['env'] : [];
+
+            $work = sys_get_temp_dir().'/dam3d_w_'.uniqid('', true);
+            if (! @mkdir($work, 0700, true) && ! is_dir($work)) {
+                return array_replace($empty, [
+                    'failure_message' => 'Could not create temp work directory.',
+                    'debug' => ['attempts' => $attemptsLog],
+                ]);
+            }
+
+            $baseTmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR);
+            $posterPath = tempnam($baseTmp, 'dam3d_p_');
+            if ($posterPath === false) {
+                $this->cleanupDir($work);
+
+                return array_replace($empty, [
+                    'failure_message' => 'Could not allocate temp poster path.',
+                    'debug' => ['attempts' => $attemptsLog],
+                ]);
+            }
+            @unlink($posterPath);
+            $posterPath .= '.png';
+
+            $cmd = array_merge(
+                [
+                    $binary,
+                    '-b',
+                    '--python',
+                    $script,
+                    '--',
+                    $sourceAbsolutePath,
+                    $posterPath,
+                    (string) max(32, min(4096, $posterSizePx)),
+                    ltrim($backgroundHexNoHash, '#'),
+                ],
+                $exportPath !== '' ? [$exportPath] : [''],
+            );
+
+            $t0 = microtime(true);
+            try {
+                $run = $this->runProcess($cmd, $work, $timeout, $env);
+            } catch (\Throwable $e) {
+                @unlink($posterPath);
+                $this->cleanupDir($work);
+                $attemptsLog[] = [
+                    'attempt' => $label,
+                    'exception_class' => $e::class,
+                    'message' => $e->getMessage(),
+                    'env_keys' => array_keys($env),
+                ];
+                $lastFailure = array_replace($empty, [
+                    'failure_message' => 'Blender process error.',
+                    'debug' => ['attempts' => $attemptsLog],
+                ]);
+
+                continue;
+            }
             $this->cleanupDir($work);
-        }
-        $wall = microtime(true) - $t0;
+            $wall = microtime(true) - $t0;
 
-        $stderr = $run['stderr'] ?? '';
-        $stdout = $run['stdout'] ?? '';
-        $code = (int) ($run['exit_code'] ?? 1);
-
-        if ($code !== 0 || ! is_file($posterPath) || filesize($posterPath) < 32) {
-            @unlink($posterPath);
+            $stderr = $run['stderr'] ?? '';
+            $stdout = $run['stdout'] ?? '';
+            $code = (int) ($run['exit_code'] ?? 1);
             $hint = self::summarizeProcessOutput($stderr, $stdout);
+            $attemptsLog[] = [
+                'attempt' => $label,
+                'exit_code' => $code,
+                'summary' => $hint,
+                'render_seconds' => round($wall, 3),
+                'env_keys' => array_keys($env),
+            ];
 
-            return array_replace($empty, [
+            if ($code === 0 && is_file($posterPath) && filesize($posterPath) >= 32) {
+                $bv = $this->detectBlenderVersion($binary);
+                $glbLocal = ($exportPath !== '' && is_file($exportPath) && filesize($exportPath) > 32) ? $exportPath : null;
+
+                return [
+                    'success' => true,
+                    'poster_path' => $posterPath,
+                    'viewer_glb_local_path' => $glbLocal,
+                    'render_seconds' => round($wall, 3),
+                    'conversion_seconds' => $glbLocal !== null ? round($wall, 3) : null,
+                    'failure_message' => null,
+                    'blender_version' => $bv,
+                    'debug' => [
+                        'exit_code' => $code,
+                        'summary' => self::summarizeProcessOutput($stderr, $stdout),
+                        'attempts' => $attemptsLog,
+                    ],
+                ];
+            }
+
+            @unlink($posterPath);
+            $lastFailure = array_replace($empty, [
                 'failure_message' => 'Blender render failed.',
                 'render_seconds' => round($wall, 3),
                 'debug' => [
                     'exit_code' => $code,
                     'summary' => $hint,
+                    'attempts' => $attemptsLog,
                 ],
             ]);
         }
 
-        $bv = $this->detectBlenderVersion($binary);
+        return $lastFailure;
+    }
 
-        $glbLocal = ($exportPath !== '' && is_file($exportPath) && filesize($exportPath) > 32) ? $exportPath : null;
+    /**
+     * @return list<array{label: string, env: array<string, string>}>
+     */
+    private function blenderRenderEnvSequences(): array
+    {
+        $base = [];
+        if ((bool) config('dam_3d.writable_home_for_blender', true)) {
+            $home = storage_path('framework/cache/dam3d-blender-home');
+            if (! is_dir($home)) {
+                @mkdir($home, 0775, true);
+            }
+            if (is_dir($home) && is_writable($home)) {
+                $base['HOME'] = $home;
+                $xdg = $home.DIRECTORY_SEPARATOR.'xdg-config';
+                @mkdir($xdg, 0775, true);
+                if (is_dir($xdg) && is_writable($xdg)) {
+                    $base['XDG_CONFIG_HOME'] = $xdg;
+                }
+            }
+        }
+
+        // Always use software rasterization for headless workers. EGL/GPU-first runs are flaky on Docker/WSL2
+        // and produced stub posters even when Blender was installed; llvmpipe is slower but consistent.
+        $software = [
+            'LIBGL_ALWAYS_SOFTWARE' => '1',
+            'GALLIUM_DRIVER' => 'llvmpipe',
+            'MESA_LOADER_DRIVER_OVERRIDE' => 'llvmpipe',
+        ];
 
         return [
-            'success' => true,
-            'poster_path' => $posterPath,
-            'viewer_glb_local_path' => $glbLocal,
-            'render_seconds' => round($wall, 3),
-            'conversion_seconds' => $glbLocal !== null ? round($wall, 3) : null,
-            'failure_message' => null,
-            'blender_version' => $bv,
-            'debug' => [
-                'exit_code' => $code,
-                'summary' => self::summarizeProcessOutput($stderr, $stdout),
-            ],
+            ['label' => 'software_gl', 'env' => array_merge($base, $software)],
         ];
     }
 
@@ -186,15 +247,16 @@ final class BlenderModelPreviewService
     }
 
     /**
+     * @param  array<string, string>  $env  Merged with inherited OS env (Symfony Process: non-null third arg adds/overrides).
      * @return array{exit_code: int, stdout: string, stderr: string}
      */
-    private function runProcess(array $command, string $cwd, float $timeout): array
+    private function runProcess(array $command, string $cwd, float $timeout, array $env = []): array
     {
         if (self::$processRunnerOverride !== null) {
             return (self::$processRunnerOverride)($command, $cwd, $timeout);
         }
 
-        $process = new Process($command, $cwd, null, null, $timeout);
+        $process = new Process($command, $cwd, $env === [] ? null : $env, null, $timeout);
         $process->run();
 
         return [

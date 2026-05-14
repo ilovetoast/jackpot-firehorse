@@ -23,7 +23,8 @@ function cn(...parts) {
  * @param {string|null} [props.countLine] — Secondary summary, e.g. "5 ready · 2 processing"
  * @param {TrayVisualPhase} [props.phase='uploading'] — Drives subtle accent / aria
  * @param {number|null} [props.aggregateProgress] — 0–100; null = indeterminate bar
- * @param {string} [props.brandPrimary='#6366f1']
+ * @param {string} [props.brandPrimary='#6366f1'] — Solid fill for progress + Finalize (use workspace primary button resting fill to match Add Asset).
+ * @param {string|null} [props.brandPrimaryHover] — Hover fill; defaults to brandPrimary when omitted.
  * @param {boolean} [props.listExpanded=false]
  * @param {() => void} [props.onToggleList]
  * @param {boolean} [props.listShowAll=false]
@@ -45,6 +46,7 @@ export function FloatingUploadProgressTray({
     phase = 'uploading',
     aggregateProgress = null,
     brandPrimary = '#6366f1',
+    brandPrimaryHover = null,
     listExpanded = false,
     onToggleList,
     listShowAll = false,
@@ -61,7 +63,12 @@ export function FloatingUploadProgressTray({
     onRetryFile,
 }) {
     const totalFiles = fileRows.length
+    const brandPrimaryHoverResolved = brandPrimaryHover ?? brandPrimary
     const finalizeBtnFg = useMemo(() => getSolidFillButtonForegroundHex(brandPrimary), [brandPrimary])
+    const finalizeBtnFgHover = useMemo(
+        () => getSolidFillButtonForegroundHex(brandPrimaryHoverResolved),
+        [brandPrimaryHoverResolved],
+    )
     const visibleCap = listShowAll ? fileRows.length : Math.min(listCap, fileRows.length)
     const visibleRows = listExpanded ? fileRows.slice(0, visibleCap) : []
     const hasMoreRows = listExpanded && totalFiles > listCap && !listShowAll
@@ -233,8 +240,16 @@ export function FloatingUploadProgressTray({
                         <button
                             type="button"
                             onClick={onFinalize}
-                            className="rounded-md px-2.5 py-1 text-[11px] font-semibold shadow-sm"
+                            className="rounded-md px-2.5 py-1 text-[11px] font-semibold shadow-sm transition-colors"
                             style={{ backgroundColor: brandPrimary, color: finalizeBtnFg }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = brandPrimaryHoverResolved
+                                e.currentTarget.style.color = finalizeBtnFgHover
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = brandPrimary
+                                e.currentTarget.style.color = finalizeBtnFg
+                            }}
                         >
                             Finalize
                         </button>

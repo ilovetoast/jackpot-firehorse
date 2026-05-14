@@ -54,13 +54,17 @@ function assetViewHref(assetId) {
 export default function CreatorInsights({ insights }) {
     if (!insights?.has_activity) {
         return (
-            <section className="animate-fadeInUp-d1">
-                <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-700">
-                    Creator Performance
+            <section className="animate-fadeInUp-d1" aria-labelledby="insights-creator-heading">
+                <h2
+                    id="insights-creator-heading"
+                    className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                >
+                    <UserGroupIcon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                    Creator performance
                 </h2>
-                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-6 py-12 text-center">
-                    <p className="text-sm font-medium text-gray-600">No creator activity yet</p>
-                    <p className="mt-1 text-xs text-gray-500">
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-5 py-8 text-center sm:px-6">
+                    <p className="text-sm font-medium text-slate-600">No creator activity yet</p>
+                    <p className="mt-1 text-xs text-slate-500">
                         Creator uploads and targets will appear here once the program is in use.
                     </p>
                 </div>
@@ -76,9 +80,13 @@ export default function CreatorInsights({ insights }) {
     const topRated = insights.highest_rated_asset
 
     return (
-        <section className="animate-fadeInUp-d1">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-700">
-                Creator Performance
+        <section className="animate-fadeInUp-d1" aria-labelledby="insights-creator-heading">
+            <h2
+                id="insights-creator-heading"
+                className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"
+            >
+                <UserGroupIcon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                Creator performance
             </h2>
 
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">

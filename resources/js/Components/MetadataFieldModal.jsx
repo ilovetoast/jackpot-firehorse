@@ -948,7 +948,7 @@ export default function MetadataFieldModal({
                         <div className="flex items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
                                 <h2 id="modal-title" className="truncate text-lg font-semibold tracking-tight text-slate-900">
-                                    {isEditing ? 'Edit field' : 'Create field'}
+                                    {isEditing ? 'Edit filter' : 'Create filter'}
                                 </h2>
                                 {!isEditing && customFieldsLimit && customFieldsLimit.max > 0 && (
                                     <span

@@ -176,8 +176,29 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
         }
     }
 
-    // Check thumbnail status from backend
     const thumbnailStatus = asset?.thumbnail_status?.value || asset?.thumbnail_status
+
+    // Legacy or mis-merged metadata: synthetic 3D poster — never advertise as a real thumbnail.
+    if (isRegistryModel3dAsset(asset, damFileTypes) && isRegistryModel3dPosterStub(asset)) {
+        return {
+            state: 'FAILED',
+            thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
+            canRetry: true,
+        }
+    }
+
+    // Terminal failure must win over stale final/preview URLs left on the row after a regen error.
+    if (thumbnailStatus === 'failed') {
+        return {
+            state: 'FAILED',
+            thumbnailUrl: null,
+            previewThumbnailUrl: null,
+            finalThumbnailUrl: null,
+            canRetry: retryCount < 2,
+        }
+    }
 
     const suppressStub3dDerivedRaster =
         isRegistryModel3dAsset(asset, damFileTypes) && isRegistryModel3dPosterStub(asset)
@@ -243,21 +264,7 @@ export function getThumbnailState(asset, retryCount = 0, damFileTypes) {
     // ============================================================================
     // STATE CONTRACTS (only apply when thumbnail_url does NOT exist)
     // ============================================================================
-    
-    // Phase 3.1E: State C) FAILED - thumbnail_status === 'failed'
-    // Only applies when no thumbnail URLs exist
-    // Never render <img>, show FileTypeIcon with error message
-    if (thumbnailStatus === 'failed') {
-        // Allow retry if retryCount < 2 (UI-only, max 2 retries)
-        return {
-            state: 'FAILED',
-            thumbnailUrl: null,
-            previewThumbnailUrl: null,
-            finalThumbnailUrl: null,
-            canRetry: retryCount < 2,
-        }
-    }
-    
+
     // Phase 3.1E: State D) SKIPPED - thumbnail_status === 'skipped'
     // Only applies when no thumbnail URLs exist
     // Never render <img>, show FileTypeIcon only

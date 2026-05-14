@@ -60,7 +60,7 @@ const CATALOG_HELP =
     'Catalog: platform templates you add to this brand become real folders (some start hidden until you show them). Hidden folders above are different—folders you already have, turned off from the library and uploader.'
 const CATALOG_HELP_VIEW_ONLY = ' View only — adding folders requires folder management permission.'
 const HIDDEN_SECTION_HELP =
-    'Hidden folders already belong to this brand but are not shown in the library sidebar, uploader, or default grid. Use the control here to show one again. To hide a folder from those places, use the eye next to the folder in Manage → Folders & fields. This is not the catalog—catalog entries are templates you can add.'
+    'Hidden folders already belong to this brand but are not shown in the library sidebar, uploader, or default grid. Use the control here to show one again. To hide a folder from those places, use the eye next to the folder in Manage → Folders & filters. This is not the catalog—catalog entries are templates you can add.'
 /** One line under “From catalog”; details stay on the (i) tooltip. */
 const CATALOG_INLINE_SUMMARY = 'Add a platform template as a folder on this brand.'
 

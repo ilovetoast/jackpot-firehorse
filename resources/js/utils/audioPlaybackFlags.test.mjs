@@ -8,11 +8,13 @@ import assert from 'node:assert/strict'
  * gates every source on CORS-correct responses, and CloudFront in front
  * of S3 strips CORS headers without an explicit response-headers policy.
  *
- * Resolution: live analyser is now opt-in via config/assets.php
- * `audio.live_analyser_enabled`, surfaced to the frontend as
- * `pageProps.audioPlayback.live_analyser_enabled`. When the flag is
- * absent / false / non-true we MUST treat it as disabled so playback
- * always works.
+ * Resolution: `audio.live_analyser_enabled` (default true in config) is
+ * surfaced to the frontend as `pageProps.audioPlayback.live_analyser_enabled`.
+ * When the flag is absent / false / non-true we MUST treat it as disabled so
+ * playback skips crossOrigin (reliable with cookie CDN URLs). When true,
+ * the registry only exposes FFT data when the playing `<audio>` is wired
+ * to the analyser; otherwise the card uses synthetic motion (see
+ * audioPlayerRegistry.getAnalyserData + AudioCardVisual).
  */
 
 function withWindow(setup, fn) {

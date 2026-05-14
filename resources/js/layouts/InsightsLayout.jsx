@@ -54,7 +54,10 @@ function InsightsWorkbenchNav({ activeSection, sidebarItems }) {
                 activeId={activeSection}
                 ariaLabel="Insights sections"
             />
-            <aside className={`hidden shrink-0 ${WORKBENCH_ASIDE_WIDTH} lg:block`}>
+            <aside
+                className={`hidden shrink-0 ${WORKBENCH_ASIDE_WIDTH} lg:block lg:border-r lg:border-slate-200/70 lg:pr-5`}
+            >
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Sections</p>
                 <WorkbenchLocalNav items={navItems} activeId={activeSection} ariaLabel="Insights sections" />
             </aside>
         </>

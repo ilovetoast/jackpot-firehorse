@@ -531,7 +531,7 @@ export default function AssetTimeline({
                                                             e.stopPropagation()
                                                             onThumbnailRetry()
                                                         }}
-                                                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                                        className="inline-flex items-center gap-1.5 rounded-md bg-[var(--wb-accent)] px-2.5 py-1 text-xs font-medium text-[var(--wb-on-accent)] shadow-sm hover:brightness-[0.94] focus:outline-none focus:ring-2 focus:ring-[var(--wb-ring)] focus:ring-offset-2"
                                                     >
                                                         <ArrowPathIcon className="h-3.5 w-3.5" />
                                                         Retry thumbnail generation

@@ -60,6 +60,9 @@ export default function CreateDownloadPanel({
   bucketCount = 0,
   previewItems: initialPreviewItems = [],
   onSuccess,
+  /** When `'xhr'`, POST as JSON (stay on page) and call `onCreated` with `{ id, public_url, asset_count }` instead of Inertia redirect. */
+  submitTransport = 'inertia',
+  onCreated = null,
   createDownloadSource = 'grid',
   collectionId = null,
 }) {
@@ -210,6 +213,39 @@ export default function CreateDownloadPanel({
       payload.landing_copy = {}
       if (landingHeadline.trim()) payload.landing_copy.headline = landingHeadline.trim()
       if (landingSubtext.trim()) payload.landing_copy.subtext = landingSubtext.trim()
+    }
+
+    if (submitTransport === 'xhr') {
+      window.axios
+        .post(route('downloads.store'), payload, {
+          headers: { Accept: 'application/json' },
+        })
+        .then((res) => {
+          setSubmitting(false)
+          onClose()
+          const body = res.data || {}
+          onCreated?.({
+            id: body.download_id,
+            public_url: body.public_url,
+            asset_count: body.asset_count ?? null,
+          })
+        })
+        .catch((err) => {
+          setSubmitting(false)
+          const data = err.response?.data
+          const msg =
+            (typeof data?.message === 'string' && data.message) ||
+            (Array.isArray(data?.message) && data.message[0]) ||
+            (typeof data?.errors?.message === 'string' && data.errors.message) ||
+            (Array.isArray(data?.errors?.message) && data.errors.message[0]) ||
+            (Array.isArray(data?.errors?.expires_at) && data.errors.expires_at[0]) ||
+            (Array.isArray(data?.errors?.name) && data.errors.name[0]) ||
+            (Array.isArray(data?.errors?.password) && data.errors.password[0]) ||
+            (Array.isArray(data?.errors?.access_mode) && data.errors.access_mode[0]) ||
+            'Could not create download.'
+          setError(msg)
+        })
+      return
     }
 
     router.post(route('downloads.store'), payload, {

@@ -569,7 +569,7 @@ class PlanService
     {
         $limits = $this->getPlanLimits($tenant);
 
-        return $limits['max_tags_per_asset'] ?? 1; // Default to 1 if not set
+        return $limits['max_tags_per_asset'] ?? (int) config('plans.free.limits.max_tags_per_asset', 4);
     }
 
     /**

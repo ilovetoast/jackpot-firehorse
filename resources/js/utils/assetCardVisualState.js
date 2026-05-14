@@ -99,7 +99,7 @@ function hasVideoPoster(asset) {
 }
 
 /**
- * @typedef {'ready'|'local_preview'|'generating_preview'|'raw_processing'|'document_processing'|'video_processing'|'preview_unavailable'|'model_3d_stub_raster'|'failed'|'unknown_processing'} AssetCardVisualKind
+ * @typedef {'ready'|'local_preview'|'generating_preview'|'raw_processing'|'document_processing'|'video_processing'|'preview_unavailable'|'failed'|'unknown_processing'} AssetCardVisualKind
  * @typedef {'neutral'|'processing'|'warning'|'danger'} AssetCardBadgeTone
  * @returns {{
  *   kind: AssetCardVisualKind,
@@ -172,22 +172,16 @@ export function getAssetCardVisualState(asset, options = {}) {
         }
     }
 
-    if (
-        isRegistryModel3dAsset(asset) &&
-        typeof asset.preview_3d_poster_url === 'string' &&
-        asset.preview_3d_poster_url.trim().length > 0 &&
-        isRegistryModel3dPosterStub(asset)
-    ) {
+    if (isRegistryModel3dAsset(asset) && isRegistryModel3dPosterStub(asset)) {
         return {
-            kind: 'model_3d_stub_raster',
-            label: '3D model',
-            description:
-                'No raster grid preview for this file yet. Open the asset for an interactive 3D preview.',
+            kind: 'failed',
+            label: '',
+            description: '',
             showThumbnail: false,
             showLocalPreview: false,
             showFileTypeCard: true,
             badgeTone: 'neutral',
-            badgeShort: '3D',
+            badgeShort: '',
             extensionLabel: extUpper,
         }
     }
@@ -215,16 +209,13 @@ export function getAssetCardVisualState(asset, options = {}) {
     ) {
         return {
             kind: 'preview_unavailable',
-            label: 'No grid preview',
-            description:
-                meta.thumbnail_skip_message ||
-                meta.preview_skipped_reason ||
-                'Thumbnail step was skipped after the pipeline finalized.',
+            label: '',
+            description: '',
             showThumbnail: false,
             showLocalPreview: false,
             showFileTypeCard: true,
-            badgeTone: 'warning',
-            badgeShort: 'Unavailable',
+            badgeTone: 'neutral',
+            badgeShort: '',
             extensionLabel: extUpper,
         }
     }
@@ -232,15 +223,13 @@ export function getAssetCardVisualState(asset, options = {}) {
     if (previewMsg || (timedOut && !hasServerRasterThumbnail(asset))) {
         return {
             kind: 'preview_unavailable',
-            label: 'Preview unavailable',
-            description: previewMsg
-                ? String(previewMsg).slice(0, 160) + (String(previewMsg).length > 160 ? '…' : '')
-                : 'Original file is saved. This type may not get a grid thumbnail.',
+            label: '',
+            description: 'Original file is saved. A grid preview may not be available yet.',
             showThumbnail: false,
             showLocalPreview: false,
             showFileTypeCard: true,
-            badgeTone: 'warning',
-            badgeShort: 'Unavailable',
+            badgeTone: 'neutral',
+            badgeShort: '',
             extensionLabel: extUpper,
         }
     }
@@ -250,7 +239,7 @@ export function getAssetCardVisualState(asset, options = {}) {
     if ((!thumbSupported && !asset.pending_finalize_client_tile) || ts === 'skipped') {
         return {
             kind: 'preview_unavailable',
-            label: 'No grid preview',
+            label: '',
             description: 'This file type does not get an automatic library thumbnail.',
             showThumbnail: false,
             showLocalPreview: false,
@@ -356,13 +345,13 @@ export function assetThumbnailPollEligible(asset) {
         return false
     }
     const { state } = getThumbnailState(asset)
-    if (state === 'NOT_SUPPORTED') return false
+    if (state === 'NOT_SUPPORTED' && !isRegistryModel3dAsset(asset)) return false
     if (asset.thumbnail_error) return false
     const ts = normalizeThumbStatus(asset)
     if (ts === 'failed' || ts === 'skipped') return false
     const pendingish = ts === 'pending' || ts === 'processing' || ts === ''
     if (!pendingish) return false
     const ext = extensionOf(asset)
-    if (!supportsThumbnail(asset.mime_type, ext)) return false
+    if (!supportsThumbnail(asset.mime_type, ext) && !isRegistryModel3dAsset(asset)) return false
     return true
 }

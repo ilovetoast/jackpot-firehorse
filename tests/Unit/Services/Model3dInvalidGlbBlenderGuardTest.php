@@ -36,22 +36,24 @@ class Model3dInvalidGlbBlenderGuardTest extends TestCase
         file_put_contents($tmp, "<!DOCTYPE html><html><body>not a glb</body></html>");
 
         try {
-            $attempt->invoke($svc, $tmp, 'model_glb', 128, 'fake.glb');
+            try {
+                $attempt->invoke($svc, $tmp, 'model_glb', 128, 'fake.glb');
+                $this->fail('Expected RuntimeException for invalid GLB bytes');
+            } catch (\RuntimeException $e) {
+                $this->assertNotSame('', $e->getMessage());
+            }
             $rp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dPreviewReport');
             $rp->setAccessible(true);
             /** @var array<string, mixed> $r */
             $r = $rp->getValue($svc);
             $this->assertTrue($r['invalid_glb_source'] ?? false);
-            $this->assertTrue($r['poster_stub'] ?? false);
+            $this->assertFalse($r['poster_stub'] ?? true);
             $this->assertFalse($r['blender_used'] ?? true);
             $this->assertNotEmpty($r['failure_message'] ?? null);
 
             $mp = new ReflectionProperty(ThumbnailGenerationService::class, 'model3dMasterPngPath');
             $mp->setAccessible(true);
-            $p = $mp->getValue($svc);
-            $this->assertIsString($p);
-            $this->assertFileExists($p);
-            @unlink($p);
+            $this->assertNull($mp->getValue($svc));
         } finally {
             @unlink($tmp);
         }

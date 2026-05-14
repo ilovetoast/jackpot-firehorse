@@ -10,14 +10,14 @@ const MANAGE_CATEGORIES_WORKBENCH =
 export default function ManageCategories(props) {
     return (
         <ManageLayout
-            title="Folders & fields — Manage"
+            title="Folders & filters — Manage"
             activeSection="categories"
             workbenchChromeClassName={MANAGE_CATEGORIES_WORKBENCH}
         >
             <div>
                 <WorkbenchPageIntro
-                    title="Folders & fields"
-                    description="Choose a folder. Manage the fields used for assets in that folder."
+                    title="Folders & filters"
+                    description="Choose a folder. Manage the filters used for assets in that folder."
                 />
 
                 <div className="mt-4 sm:mt-5">

@@ -389,14 +389,14 @@ export default function MetadataRegistryIndex({
                             <div>
                                 <h1 className="text-3xl font-bold tracking-tight text-gray-900">System Metadata Registry</h1>
                                 <p className="mt-2 text-sm text-gray-700">
-                                    Secondary, field-centric view of all system metadata fields. Prefer{' '}
+                                    Secondary, filter-centric view of all system metadata filters. Prefer{' '}
                                     <Link
                                         href={ADMIN_SYSTEM_CATEGORIES_URL}
                                         className="font-medium text-indigo-600 hover:text-indigo-800"
                                     >
                                         System categories
                                     </Link>{' '}
-                                    to edit default field bundles per template.
+                                    to edit default filter bundles per template.
                                 </p>
                             </div>
                             {canManageFields && (
@@ -406,7 +406,7 @@ export default function MetadataRegistryIndex({
                                     className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
                                 >
                                     <PlusIcon className="h-5 w-5" />
-                                    Add metadata field
+                                    Add metadata filter
                                 </button>
                             )}
                         </div>
@@ -563,7 +563,7 @@ export default function MetadataRegistryIndex({
                                     className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:w-auto"
                                 >
                                     <PlusIcon className="h-5 w-5 shrink-0" />
-                                    Add metadata field
+                                    Add metadata filter
                                 </button>
                             </div>
                         )}

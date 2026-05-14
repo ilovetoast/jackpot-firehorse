@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
 import AppFooter from '../../Components/AppFooter'
+import SettingsInPageNavLabel from '../../Components/settings/SettingsInPageNavLabel'
 import ColorPickerControl from '../../Components/BrandGuidelines/controls/ColorPickerControl'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
 import { SparklesIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
@@ -366,7 +367,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                         {/* Left sticky nav */}
                         <div className="hidden lg:block w-40 shrink-0">
                             <div className="sticky top-8">
-                                <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-3">On this page</p>
+                                <SettingsInPageNavLabel />
                                 <nav className="space-y-1">
                                     {NAV_SECTIONS.map((s) => (
                                         <button

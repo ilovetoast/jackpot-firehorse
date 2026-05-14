@@ -14,6 +14,7 @@ use App\Models\Asset;
 use App\Models\Collection;
 use App\Models\Brand;
 use App\Models\Download;
+use App\Models\DownloadShareEmailRecipientHistory;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\ActivityRecorder;
@@ -59,7 +60,7 @@ class DownloadController extends Controller
      * Show the downloads page.
      * Returns downloads for the current tenant with scope (mine/all), status, access, user, sort filters.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|JsonResponse
     {
         $user = Auth::user();
         $tenant = app('tenant');
@@ -229,11 +230,17 @@ class DownloadController extends Controller
             $downloadBrands = [];
         }
 
-        // JSON poll: return only downloads + pagination so the frontend can refresh list without an Inertia visit (avoids full page reload).
+        // JSON: same payload shape as Inertia (for slide-over panel + XHR list navigation without full page visit).
         if ($request->wantsJson()) {
             return response()->json([
                 'downloads' => $downloads,
                 'pagination' => $paginationMeta,
+                'bucket_count' => $bucketCount,
+                'can_manage' => $isTenantDownloadsAdmin,
+                'can_view_all_brand_downloads' => $canViewAllBrandDownloads,
+                'filters' => $filters,
+                'download_users' => $downloadUsers,
+                'download_brands' => $downloadBrands ?? [],
             ]);
         }
 
@@ -406,6 +413,7 @@ class DownloadController extends Controller
             $state = $download->getState();
             $patch = [
                 'id' => $download->id,
+                'title' => $download->title,
                 'state' => $state,
                 'zip_total_chunks' => $download->zip_total_chunks !== null ? (int) $download->zip_total_chunks : null,
                 'zip_chunk_index' => (int) ($download->zip_build_chunk_index ?? 0),
@@ -1057,6 +1065,102 @@ class DownloadController extends Controller
     }
 
     /**
+     * Autocomplete recipients for "email download link" (tray + downloads page).
+     * — Always: current user's prior share recipients in this tenant (history only).
+     * — Additionally: tenant directory search only when {@see canViewAllBrandDownloads} is true
+     *   (tenant admin/owner/agency_admin, agency_partner, or brand admin/brand_manager on any brand).
+     * Collection-only / external collection guests: empty (aligned with companyUsers).
+     */
+    public function suggestShareEmailRecipients(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        $tenant = app()->bound('tenant') ? app('tenant') : null;
+        if (! $user || ! $tenant) {
+            return response()->json([
+                'history' => [],
+                'directory' => [],
+                'directory_available' => false,
+            ]);
+        }
+
+        if ((app()->bound('collection_only') && app('collection_only')) || $user->isExternalCollectionAccessOnlyForTenant($tenant)) {
+            return response()->json([
+                'history' => [],
+                'directory' => [],
+                'directory_available' => false,
+            ]);
+        }
+
+        $validated = $request->validate([
+            'q' => 'nullable|string|max:100',
+        ]);
+        $q = trim((string) ($validated['q'] ?? ''));
+
+        $directoryAvailable = $this->canViewAllBrandDownloads($user, $tenant);
+
+        if ($q === '') {
+            $historyPayload = DownloadShareEmailRecipientHistory::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('user_id', $user->id)
+                ->orderByDesc('last_sent_at')
+                ->limit(12)
+                ->get()
+                ->map(fn ($row) => [
+                    'email' => $row->recipient_email,
+                    'source' => 'history',
+                ])
+                ->all();
+        } else {
+            $like = '%'.addcslashes($q, '%\\_').'%';
+            $historyPayload = DownloadShareEmailRecipientHistory::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('user_id', $user->id)
+                ->where('recipient_email', 'like', $like)
+                ->orderByDesc('last_sent_at')
+                ->limit(12)
+                ->get()
+                ->map(fn ($row) => [
+                    'email' => $row->recipient_email,
+                    'source' => 'history',
+                ])
+                ->all();
+        }
+
+        $directoryPayload = [];
+        if ($directoryAvailable && strlen($q) >= 2) {
+            $like = '%'.addcslashes($q, '%\\_').'%';
+            $directoryPayload = $tenant->users()
+                ->select('users.id', 'users.first_name', 'users.last_name', 'users.email')
+                ->where('users.id', '!=', $user->id)
+                ->where(function ($w) use ($like) {
+                    $w->where('users.email', 'like', $like)
+                        ->orWhere('users.first_name', 'like', $like)
+                        ->orWhere('users.last_name', 'like', $like);
+                })
+                ->orderBy('users.first_name')
+                ->orderBy('users.last_name')
+                ->limit(12)
+                ->get()
+                ->map(function (User $u) {
+                    $name = trim(($u->first_name ?? '').' '.($u->last_name ?? '')) ?: $u->email;
+
+                    return [
+                        'email' => strtolower((string) $u->email),
+                        'name' => $name,
+                        'source' => 'directory',
+                    ];
+                })
+                ->all();
+        }
+
+        return response()->json([
+            'history' => $historyPayload,
+            'directory' => $directoryPayload,
+            'directory_available' => $directoryAvailable,
+        ]);
+    }
+
+    /**
      * Tenant-level roles that see and manage all downloads for the whole tenant.
      */
     protected function isTenantDownloadsAdmin(User $user, Tenant $tenant): bool
@@ -1496,6 +1600,10 @@ class DownloadController extends Controller
             'download_id' => $download->id,
             'sent_at' => now()->toIso8601String(),
         ]);
+
+        if (Auth::check()) {
+            DownloadShareEmailRecipientHistory::recordSend(Auth::user(), (int) $download->tenant_id, $to);
+        }
 
         if ($request->expectsJson()) {
             return response()->json(['message' => 'Email sent.']);

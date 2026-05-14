@@ -75,6 +75,11 @@ return [
     */
     'tenant_ai_tag_defaults' => [
         'enable_ai_tag_auto_apply' => (bool) env('AI_TAGS_DEFAULT_AUTO_APPLY', true),
+        /**
+         * Cap for "Max tags per asset" (best-practices mode) when seeding new tenants.
+         * Stored value = min(plan max_tags_per_asset, this cap). Server still clamps 1–10.
+         */
+        'initial_best_practices_auto_apply_cap' => (int) env('AI_TAGS_INITIAL_BEST_PRACTICES_CAP', 5),
     ],
 
     /*

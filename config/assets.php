@@ -675,19 +675,18 @@ return [
         |
         | Without that the browser rejects every <audio> source with
         | `NotSupportedError: the element has no supported sources` — and
-        | the user can't play anything. Keeping this opt-in (default off)
-        | guarantees playback works the moment a tenant's bucket is
-        | provisioned, even before the CORS round-trip on CloudFront has
-        | been verified end-to-end. Flip to true once `curl -I -H
-        | 'Origin: https://app.example' <signed-url>` returns
-        | `Access-Control-Allow-Origin: *` (or matching origin) on the
-        | environment.
+        | the user can't play anything. Default **on** so environments with
+        | CORS-correct media get real frequency-driven bars; set
+        | `ASSET_AUDIO_LIVE_ANALYSER=false` if CloudFront/S3 responses omit
+        | `Access-Control-Allow-Origin` until headers are fixed. The UI
+        | always falls back to the synthetic bounce animation when the
+        | analyser is off or not wired (see `audioPlayerRegistry.getAnalyserData`
+        | + `AudioCardVisual` sampleAnalyser).
         |
-        | When false: bars react to play-head progress (opacity wipe) and
-        | the synthetic envelope animation — no live frequency-data drive,
-        | which is a minor visual regression but reliable playback.
+        | When false: no `crossOrigin` on `<audio>`, no Web Audio tap — playback
+        | uses cookie/session CDN URLs; waveform uses synthetic motion only.
         */
-        'live_analyser_enabled' => (bool) env('ASSET_AUDIO_LIVE_ANALYSER', false),
+        'live_analyser_enabled' => (bool) env('ASSET_AUDIO_LIVE_ANALYSER', true),
 
         // Source bytes >= this triggers generation of the 128 kbps MP3 derivative
         // even when the source codec would otherwise stream fine.

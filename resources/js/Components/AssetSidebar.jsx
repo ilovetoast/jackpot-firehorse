@@ -24,6 +24,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { CategoryIcon } from '../Helpers/categoryIcons'
 import FolderSchemaHelp from './Metadata/FolderSchemaHelp'
+import FolderQuickFilters from './Sidebar/FolderQuickFilters'
 import OnlineUsersIndicator from './OnlineUsersIndicator'
 import {
     getWorkspaceContextualTone,
@@ -267,8 +268,8 @@ export default function AssetSidebar({
                                     const rowCountColor = rowHighlighted ? activeTextColor : unselectedCountColor
 
                                     return (
+                                        <div key={category.id} className="min-w-0">
                                         <div
-                                            key={category.id}
                                             className="group flex min-w-0 w-full items-stretch rounded-md focus-within:outline-none"
                                             style={{ backgroundColor: rowBg }}
                                             onMouseEnter={() => {
@@ -374,6 +375,25 @@ export default function AssetSidebar({
                                                     ) : null}
                                                 </div>
                                             ) : null}
+                                        </div>
+                                        {/* Phase 3 — Folder Quick Filters: nested contextual list. Renders
+                                            only under the active folder; respects feature flag, desktop_only,
+                                            and max_visible_per_folder from the Inertia payload. */}
+                                        <FolderQuickFilters
+                                            quickFilters={category.quick_filters || []}
+                                            categoryId={category.id}
+                                            isActiveFolder={isSelected}
+                                            textColor={rowFg}
+                                            activeAccentColor={activeTextColor}
+                                            // Phase 4.4 — pass the actual sidebar
+                                            // surface + brand-darkened active bg
+                                            // so the quick-filter tone is brand-
+                                            // aware (flyout reads as same family
+                                            // as the sidebar instead of generic
+                                            // dark slate).
+                                            sidebarColor={sidebarColor}
+                                            sidebarActiveBgColor={activeBgColor}
+                                        />
                                         </div>
                                     )
                                 })}

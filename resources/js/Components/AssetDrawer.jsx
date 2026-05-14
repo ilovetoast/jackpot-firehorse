@@ -99,7 +99,10 @@ import {
 } from '../utils/thumbnailModes'
 import { getPipelineStageLabel, getPipelineStageIndex, PIPELINE_STAGES } from '../utils/pipelineStatusUtils'
 import { getAssetCategoryId, parseAssetQualityRating } from '../utils/assetUtils'
-import { shouldShowRealtimeGlbModelViewer } from '../utils/resolveAsset3dPreviewImage'
+import {
+    isRegistryModel3dPosterStub,
+    shouldShowRealtimeGlbModelViewer,
+} from '../utils/resolveAsset3dPreviewImage'
 
 const BrandDebugOverlay = lazy(() => import('./BrandDebugOverlay'))
 import { filterActiveCategories } from '../utils/categoryUtils'
@@ -3454,6 +3457,13 @@ export default function AssetDrawer({
         if (thumbnailStatus === 'processing') {
             return false
         }
+
+        // 3D: pipeline can mark thumbnails "completed" while the poster is still a stub (no Blender render).
+        if (thumbnailStatus === 'completed' && isRegistryModel3dPosterStub(displayAsset)) {
+            const mimeType = (displayAsset.mime_type || '').toLowerCase()
+            const extension = (displayAsset.original_filename?.split('.').pop() || '').toLowerCase()
+            return supportsThumbnail(mimeType, extension)
+        }
         
         // Show for PENDING (e.g. after Remove Preview), SKIPPED (pipeline skipped), or FAILED (retry)
         if (thumbnailStatus !== 'skipped' && thumbnailStatus !== 'pending' && thumbnailStatus !== 'failed') {
@@ -3961,6 +3971,15 @@ export default function AssetDrawer({
             setToastType('success')
             setTimeout(() => setToastMessage(null), 5000)
             router.reload({ only: ['assets'], preserveState: true, preserveScroll: true })
+        } catch (e) {
+            const msg =
+                e?.response?.data?.error ||
+                e?.response?.data?.message ||
+                e?.message ||
+                'Could not start preview refresh.'
+            setToastMessage(msg)
+            setToastType('error')
+            setTimeout(() => setToastMessage(null), 6000)
         } finally {
             setRegeneratingThumbnailsStylesDrawer(false)
         }

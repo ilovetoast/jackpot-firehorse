@@ -80,6 +80,10 @@ class CompanyAiSettingsTest extends TestCase
                 'enable_ai_tag_auto_apply',
                 'ai_auto_tag_limit_mode',
                 'ai_auto_tag_limit_value',
+                'ai_best_practices_limit',
+                'max_tags_per_asset',
+                'plan_limits_display_name',
+                'recommended_ai_tag_auto_apply_limit',
                 'ai_insights_enabled',
                 'last_insights_run_at',
                 'insights_pending_suggestions_count',
@@ -95,6 +99,10 @@ class CompanyAiSettingsTest extends TestCase
         $this->assertTrue($settings['enable_ai_tag_suggestions']);
         $this->assertTrue($settings['enable_ai_tag_auto_apply']);
         $this->assertEquals('best_practices', $settings['ai_auto_tag_limit_mode']);
+        $this->assertSame(4, $settings['max_tags_per_asset']);
+        $this->assertSame('Free', $settings['plan_limits_display_name']);
+        $this->assertSame(4, $settings['recommended_ai_tag_auto_apply_limit']);
+        $this->assertSame(4, $settings['ai_best_practices_limit']);
     }
 
     /**

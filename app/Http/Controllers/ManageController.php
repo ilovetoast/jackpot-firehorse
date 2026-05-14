@@ -10,7 +10,6 @@ use App\Services\CategoryVisibilityLimitService;
 use App\Services\MetadataAnalyticsService;
 use App\Services\PlanService;
 use App\Services\TenantMetadataRegistryService;
-use App\Services\TenantMetadataVisibilityService;
 use App\Support\Metadata\CategoryTypeResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -205,96 +204,11 @@ class ManageController extends Controller
     }
 
     /**
-     * Manage → Fields: custom fields with options and category visibility; system fields collapsed.
+     * @deprecated Field definitions and folder visibility live on manage.categories. Redirect for bookmarks.
      */
-    public function fields(
-        TenantMetadataRegistryService $registryService,
-        TenantMetadataVisibilityService $visibilityService
-    ): Response {
-        $tenant = app('tenant');
-        $user = Auth::user();
-
-        if (! $tenant) {
-            abort(404, 'Tenant not found');
-        }
-
-        $canView = $user->hasPermissionForTenant($tenant, 'metadata.registry.view')
-            || $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage');
-
-        if (! $canView) {
-            abort(403, 'You do not have permission to view fields.');
-        }
-
-        $brand = app()->bound('brand') ? app('brand') : null;
-
-        if (! $brand || $brand->tenant_id !== $tenant->id) {
-            abort(404, 'No active brand selected.');
-        }
-
-        $categories = $this->categoriesPayloadForBrand($brand);
-        $categoryIds = $categories->pluck('id')->all();
-
-        $registry = $registryService->getRegistry($tenant);
-        $tenantFields = $registry['tenant_fields'] ?? [];
-        $systemFields = $registry['system_fields'] ?? [];
-
-        $fieldIds = array_values(array_unique(array_filter(array_merge(
-            array_column($tenantFields, 'id'),
-            array_column($systemFields, 'id')
-        ))));
-
-        $suppressedByField = $visibilityService->getSuppressedCategoryIdsByFieldIds($tenant, $fieldIds, $brand->id);
-
-        $visibleCategoryIdsForField = static function (int $fieldId) use ($categoryIds, $suppressedByField): array {
-            $suppressed = $suppressedByField[$fieldId] ?? [];
-
-            return array_values(array_diff($categoryIds, $suppressed));
-        };
-
-        $customFields = [];
-        foreach ($tenantFields as $f) {
-            $id = (int) ($f['id'] ?? 0);
-            if ($id === 0) {
-                continue;
-            }
-            $customFields[] = [
-                'id' => $id,
-                'key' => $f['key'] ?? '',
-                'label' => $f['system_label'] ?? $f['key'] ?? '',
-                'field_type' => $f['type'] ?? 'text',
-                'applies_to' => $f['applies_to'] ?? 'all',
-                'options' => $f['options'] ?? [],
-                'visible_category_ids' => $visibleCategoryIdsForField($id),
-            ];
-        }
-
-        $systemFieldsPayload = [];
-        foreach ($systemFields as $f) {
-            $id = (int) ($f['id'] ?? 0);
-            if ($id === 0) {
-                continue;
-            }
-            $systemFieldsPayload[] = [
-                'id' => $id,
-                'key' => $f['key'] ?? '',
-                'label' => $f['label'] ?? $f['system_label'] ?? $f['key'] ?? '',
-                'field_type' => $f['field_type'] ?? 'text',
-                'applies_to' => $f['applies_to'] ?? 'all',
-                'population_mode' => $f['population_mode'] ?? 'manual',
-                'readonly' => (bool) ($f['readonly'] ?? true),
-                'visible_category_ids' => $visibleCategoryIdsForField($id),
-            ];
-        }
-
-        return Inertia::render('Manage/Fields', [
-            'brand' => [
-                'id' => $brand->id,
-                'name' => $brand->name,
-            ],
-            'categories' => $categories,
-            'custom_fields' => $customFields,
-            'system_fields' => $systemFieldsPayload,
-        ]);
+    public function fields(Request $request): RedirectResponse
+    {
+        return redirect()->route('manage.categories', $request->query());
     }
 
     public function tags(Request $request): Response

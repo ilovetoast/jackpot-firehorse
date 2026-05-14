@@ -2,7 +2,6 @@
 
 namespace App\Services\Insights;
 
-use App\Enums\AssetType;
 use App\Enums\DownloadStatus;
 use App\Enums\EventType;
 use App\Enums\MetricType;
@@ -122,7 +121,7 @@ final class BrandAssetEngagementInsightsService
             ->where('brand_id', $brandId)
             ->whereIn('id', $assetIds)
             ->whereNull('deleted_at')
-            ->get(['id', 'title', 'original_filename', 'type'])
+            ->get(['id', 'title', 'original_filename', 'type', 'mime_type', 'metadata', 'storage_root_path', 'storage_bucket_id'])
             ->keyBy('id');
 
         $out = [];
@@ -139,7 +138,7 @@ final class BrandAssetEngagementInsightsService
                 continue;
             }
             $title = (string) ($asset->title ?: $asset->original_filename ?: 'Asset');
-            $thumb = in_array($asset->type, [AssetType::ASSET, AssetType::DELIVERABLE], true)
+            $thumb = $asset->hasRenderableApiThumbnail()
                 ? url('/app/api/assets/'.$aid.'/thumbnail?style=medium')
                 : null;
 

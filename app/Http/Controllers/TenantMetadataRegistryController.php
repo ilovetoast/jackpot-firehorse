@@ -21,6 +21,7 @@ use App\Services\MetadataOptionEditGuard;
 use App\Services\SystemCategoryService;
 use App\Services\SystemMetadataOptionProvisioningService;
 use App\Services\TenantMetadataFieldService;
+use App\Services\Filters\FolderQuickFilterEligibilityService;
 use App\Services\TenantMetadataRegistryService;
 use App\Services\TenantMetadataVisibilityService;
 use App\Support\Metadata\CategoryTypeResolver;
@@ -471,11 +472,51 @@ class TenantMetadataRegistryController extends Controller
 
         $categoryId = (int) $categoryModel->id;
 
+        // Phase 2 — Folder Quick Filters: pre-load per-(category, field) quick
+        // filter rows so buildPayload runs in O(1) per field. Eligibility is
+        // evaluated per-row from the field's existing payload — no extra DB
+        // query needed for that.
+        $quickFilterRowsByField = [];
+        $quickFiltersEnabledFeature = (bool) config('categories.folder_quick_filters.enabled', false);
+        if ($quickFiltersEnabledFeature && $fieldIds !== []) {
+            $quickFilterQuery = DB::table('metadata_field_visibility')
+                ->where('tenant_id', $tenant->id)
+                ->where('category_id', $categoryId)
+                ->whereIn('metadata_field_id', $fieldIds)
+                ->select([
+                    'metadata_field_id',
+                    'show_in_folder_quick_filters',
+                    'folder_quick_filter_order',
+                    'folder_quick_filter_weight',
+                    'folder_quick_filter_source',
+                    'brand_id',
+                ]);
+            if ($categoryModel->brand_id) {
+                $quickFilterQuery->where(function ($q) use ($categoryModel) {
+                    $q->where('brand_id', $categoryModel->brand_id)->orWhereNull('brand_id');
+                });
+            } else {
+                $quickFilterQuery->whereNull('brand_id');
+            }
+            // Brand-specific row wins over a tenant-wide row when both exist.
+            $rowsForCategory = $quickFilterQuery->orderByDesc('brand_id')->get();
+            foreach ($rowsForCategory as $r) {
+                $fid = (int) $r->metadata_field_id;
+                if (! array_key_exists($fid, $quickFilterRowsByField)) {
+                    $quickFilterRowsByField[$fid] = $r;
+                }
+            }
+        }
+        $quickFilterEligibility = app(FolderQuickFilterEligibilityService::class);
+
         $buildPayload = function (array $row) use (
             $categoryId,
             $suppressedByField,
             $primaryTypeKey,
-            $systemOptionsLabels
+            $systemOptionsLabels,
+            $quickFilterRowsByField,
+            $quickFiltersEnabledFeature,
+            $quickFilterEligibility
         ): array {
             $f = $row['field'];
             $fid = (int) ($f['id'] ?? 0);
@@ -517,6 +558,34 @@ class TenantMetadataRegistryController extends Controller
 
             $hasOptions = in_array($fieldType, ['select', 'multiselect'], true);
 
+            // Phase 2 — Folder Quick Filters: enrich the row with quick-filter
+            // status. Strictly additive: never overrides existing keys, and
+            // every nested key is null-safe so older clients that ignore the
+            // sub-payload behave identically.
+            $qfRow = $quickFilterRowsByField[$fid] ?? null;
+            $eligibilityInput = ['type' => $fieldType] + $f; // adapter: $f uses field_type
+            $isEligibleForQuickFilter = $quickFiltersEnabledFeature
+                && $quickFilterEligibility->isEligible($eligibilityInput);
+            $ineligibleReason = null;
+            if ($quickFiltersEnabledFeature && ! $isEligibleForQuickFilter) {
+                $ineligibleReason = $quickFilterEligibility->explainReason(
+                    $quickFilterEligibility->reasonIneligible($eligibilityInput)
+                );
+            }
+            $quickFilter = [
+                'feature_enabled' => $quickFiltersEnabledFeature,
+                'supported' => $isEligibleForQuickFilter,
+                'enabled' => $qfRow !== null && (bool) ($qfRow->show_in_folder_quick_filters ?? false),
+                'order' => $qfRow !== null && $qfRow->folder_quick_filter_order !== null
+                    ? (int) $qfRow->folder_quick_filter_order
+                    : null,
+                'weight' => $qfRow !== null && $qfRow->folder_quick_filter_weight !== null
+                    ? (int) $qfRow->folder_quick_filter_weight
+                    : null,
+                'source' => $qfRow?->folder_quick_filter_source ?? null,
+                'ineligible_reason' => $ineligibleReason,
+            ];
+
             return [
                 'id' => $fid,
                 'key' => $key,
@@ -529,6 +598,7 @@ class TenantMetadataRegistryController extends Controller
                 'options_total' => $hasOptions ? $total : 0,
                 'values_expandable' => $hasOptions && $total > 0,
                 'option_editing_restricted' => $optionEditingRestricted,
+                'quick_filter' => $quickFilter,
             ];
         };
 

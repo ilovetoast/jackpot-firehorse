@@ -10,6 +10,7 @@ import {
 } from '../utils/colorUtils'
 import { JACKPOT_VIOLET } from '../components/brand-workspace/brandWorkspaceTokens'
 import { showWorkspaceSwitchingOverlay } from '../utils/workspaceSwitchOverlay'
+import { useDownloadsPanelOptional } from '../contexts/DownloadsPanelContext'
 import AppBrandLogo from './AppBrandLogo'
 import JackpotLogo from './JackpotLogo'
 import GlobalUserControls from './Layout/GlobalUserControls'
@@ -99,7 +100,8 @@ export default function AppNav({
     const [navHovered, setNavHovered] = useState(false)
     const [overviewNavHover, setOverviewNavHover] = useState(false)
     const overviewNavCloseTimerRef = useRef(null)
-    
+    const downloadsPanel = useDownloadsPanelOptional()
+
     // Get current URL for active link detection (use Inertia page.url so it's correct on first render and client nav)
     const currentUrl = (typeof window !== 'undefined' ? window.location.pathname : null) ?? (page.url ? new URL(page.url, 'http://localhost').pathname : '')
 
@@ -1365,8 +1367,14 @@ export default function AppNav({
                         )}
                         {isAppPage && !suppressWorkspaceChrome && (
                             <>
-                                <Link
+                                <a
                                     href="/app/downloads"
+                                    onClick={(e) => {
+                                        if (downloadsPanel && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                                            e.preventDefault()
+                                            downloadsPanel.openPanel()
+                                        }
+                                    }}
                                     className={`inline-flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium rounded-md border border-transparent ${isCinematicNav ? 'hover:bg-white/10' : 'hover:bg-gray-100'} focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
                                     style={{
                                         color: currentUrl.startsWith('/app/downloads')
@@ -1378,7 +1386,7 @@ export default function AppNav({
                                 >
                                     <ArrowDownTrayIcon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                                     <span className="hidden lg:inline">Downloads</span>
-                                </Link>
+                                </a>
                                 {showBrandGuidelinesNav && (
                                     <Link
                                         href="/app/brand-guidelines"

@@ -431,8 +431,9 @@ class HandleInertiaRequests extends Middleware
             ],
             /*
             | Audio playback feature flags shared with the React audio components.
-            | live_analyser is opt-in because it requires CORS-correct CloudFront —
-            | see config/assets.php audio.live_analyser_enabled for the toggle rationale.
+            | Live analyser defaults on (see config/assets.php); requires CORS on
+            | audio URLs when crossOrigin=anonymous is set. Set ASSET_AUDIO_LIVE_ANALYSER=false
+            | if CDN responses omit Access-Control-Allow-Origin until headers are fixed.
             */
             'audioPlayback' => [
                 'live_analyser_enabled' => (bool) config('assets.audio.live_analyser_enabled', false),

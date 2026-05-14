@@ -35,7 +35,7 @@ export default function MosaicProcessingPlaceholder({
         if (visualState.kind === 'failed' || placeholderHint === 'failed') {
             return 'failed'
         }
-        if (visualState.kind === 'preview_unavailable' || visualState.kind === 'model_3d_stub_raster') {
+        if (visualState.kind === 'preview_unavailable') {
             return 'unavailable'
         }
         if (copy.animate) {
@@ -57,7 +57,7 @@ export default function MosaicProcessingPlaceholder({
     const fileType = useMemo(() => inferAssetPlaceholderFileType(asset), [asset])
 
     const extensionLabel = useMemo(() => {
-        if (status !== 'unavailable') {
+        if (status !== 'unavailable' && status !== 'failed') {
             return undefined
         }
         const raw = asset?.file_extension || asset?.original_filename?.split?.('.')?.pop() || ''
@@ -81,6 +81,7 @@ export default function MosaicProcessingPlaceholder({
             centerSlot={copy.videoPlaySlot ? videoPlayGlyph : undefined}
             extensionLabel={extensionLabel}
             pill={pill}
+            showTextFooter={copy.showTextFooter !== false}
         />
     )
 }

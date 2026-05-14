@@ -255,6 +255,9 @@ class AiTagPolicyService
         } else {
             // Insert new record: merge with app defaults so DB row matches new-tenant policy (not migration NULLs).
             $merged = array_merge($this->getDefaultSettings(), $settingsToUpdate);
+            $planMax = app(PlanService::class)->getMaxTagsPerAsset($tenant);
+            $tagUiMax = min($planMax, 10);
+            $merged['ai_best_practices_limit'] = max(1, min((int) ($merged['ai_best_practices_limit'] ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT), $tagUiMax));
             $row = array_intersect_key($merged, array_flip($allowedKeys));
             DB::table('tenant_ai_tag_settings')
                 ->insert(array_merge($row, [
@@ -287,21 +290,27 @@ class AiTagPolicyService
                 ->first();
 
             if (! $settings) {
-                return $this->getDefaultSettings();
+                $merged = $this->getDefaultSettings();
+            } else {
+                $merged = [
+                    'disable_ai_tagging' => (bool) $settings->disable_ai_tagging,
+                    // Force-on: the user-facing "Show tag suggestions on assets" toggle was
+                    // removed (product direction), so we uniformly treat this as true at
+                    // read time — even for tenants who previously stored `false`. Avoids a
+                    // migration while ensuring the UI that relies on this flag renders.
+                    'enable_ai_tag_suggestions' => true,
+                    'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
+                    'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
+                    'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
+                    'ai_best_practices_limit' => $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT,
+                ];
             }
 
-            return [
-                'disable_ai_tagging' => (bool) $settings->disable_ai_tagging,
-                // Force-on: the user-facing "Show tag suggestions on assets" toggle was
-                // removed (product direction), so we uniformly treat this as true at
-                // read time — even for tenants who previously stored `false`. Avoids a
-                // migration while ensuring the UI that relies on this flag renders.
-                'enable_ai_tag_suggestions' => true,
-                'enable_ai_tag_auto_apply' => (bool) $settings->enable_ai_tag_auto_apply,
-                'ai_auto_tag_limit_mode' => $settings->ai_auto_tag_limit_mode,
-                'ai_auto_tag_limit_value' => $settings->ai_auto_tag_limit_value,
-                'ai_best_practices_limit' => $settings->ai_best_practices_limit ?? self::BEST_PRACTICES_AUTO_TAG_LIMIT,
-            ];
+            $planMax = app(PlanService::class)->getMaxTagsPerAsset($tenant);
+            $tagUiMax = min($planMax, 10);
+            $merged['ai_best_practices_limit'] = max(1, min((int) $merged['ai_best_practices_limit'], $tagUiMax));
+
+            return $merged;
         });
     }
 
@@ -329,7 +338,13 @@ class AiTagPolicyService
             'enable_ai_tag_auto_apply' => (bool) config('ai.tenant_ai_tag_defaults.enable_ai_tag_auto_apply', true),
             'ai_auto_tag_limit_mode' => 'best_practices',
             'ai_auto_tag_limit_value' => null,
-            'ai_best_practices_limit' => self::BEST_PRACTICES_AUTO_TAG_LIMIT,
+            'ai_best_practices_limit' => max(
+                1,
+                min(
+                    self::BEST_PRACTICES_AUTO_TAG_LIMIT,
+                    (int) config('ai.tenant_ai_tag_defaults.initial_best_practices_auto_apply_cap', self::BEST_PRACTICES_AUTO_TAG_LIMIT)
+                )
+            ),
         ];
     }
 

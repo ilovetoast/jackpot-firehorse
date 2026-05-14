@@ -57,6 +57,8 @@ export type AssetPlaceholderProps = {
     extensionLabel?: string
     /** Top-right pill (short badge). */
     pill?: { short: string; tone: 'danger' | 'warning' | 'processing' | 'neutral' }
+    /** When false, hide the bottom headline/helper strip (grid: failed / no preview). */
+    showTextFooter?: boolean
     className?: string
 }
 
@@ -263,6 +265,7 @@ export const AssetPlaceholder = memo(function AssetPlaceholder({
     centerSlot,
     extensionLabel,
     pill,
+    showTextFooter = true,
     className = '',
 }: AssetPlaceholderProps) {
     if (status === 'ready') {
@@ -290,6 +293,14 @@ export const AssetPlaceholder = memo(function AssetPlaceholder({
         label?.trim() ||
         (processing ? 'Creating preview…' : unavailable ? 'Preview unavailable' : 'Failed to generate preview')
 
+    const ariaLabel = !showTextFooter
+        ? extensionLabel
+            ? `${extensionLabel} file — no grid thumbnail yet`
+            : failed
+              ? 'No grid thumbnail'
+              : 'No grid thumbnail yet'
+        : `${primaryFooter}${footerSubtext ? `. ${footerSubtext}` : ''}`
+
     const gradientStyle = useMemo(
         () =>
             ({
@@ -305,7 +316,7 @@ export const AssetPlaceholder = memo(function AssetPlaceholder({
             } ${className}`.trim()}
             style={gradientStyle}
             role="img"
-            aria-label={`${primaryFooter}${footerSubtext ? `. ${footerSubtext}` : ''}`}
+            aria-label={ariaLabel}
         >
             {failed ? (
                 <div
@@ -372,25 +383,38 @@ export const AssetPlaceholder = memo(function AssetPlaceholder({
                 </span>
             ) : null}
 
-            <div className="relative z-[2] flex min-h-0 flex-1 flex-col items-center justify-center px-2 pb-10 pt-2">
+            <div
+                className={`relative z-[2] flex min-h-0 flex-1 flex-col items-center justify-center px-2 pt-2 ${showTextFooter ? 'pb-10' : 'pb-4'}`}
+            >
                 {centerSlot ? (
                     <div className="flex flex-col items-center gap-2">{centerSlot}</div>
                 ) : (
-                    <CenterGlyph fileType={fileType} />
+                    <>
+                        <CenterGlyph fileType={fileType} />
+                        {!showTextFooter && extensionLabel ? (
+                            <span className="mt-2 font-mono text-[10px] font-semibold uppercase tracking-wider text-white/75">
+                                {extensionLabel}
+                            </span>
+                        ) : null}
+                    </>
                 )}
             </div>
 
-            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[3] flex min-h-[2.25rem] flex-col justify-center border-t border-white/[0.08] bg-black/55 px-2 py-1.5 text-center backdrop-blur-md">
-                <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95">{primaryFooter}</p>
-                {footerSubtext ? (
-                    <p className="mt-0.5 line-clamp-2 text-[9px] font-medium leading-snug text-white/65">{footerSubtext}</p>
-                ) : null}
-                {unavailable && extensionLabel ? (
-                    <p className="mt-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white/75">
-                        {extensionLabel}
+            {showTextFooter ? (
+                <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[3] flex min-h-[2.25rem] flex-col justify-center border-t border-white/[0.08] bg-black/55 px-2 py-1.5 text-center backdrop-blur-md">
+                    <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-white/95">
+                        {primaryFooter}
                     </p>
-                ) : null}
-            </div>
+                    {footerSubtext ? (
+                        <p className="mt-0.5 line-clamp-2 text-[9px] font-medium leading-snug text-white/65">{footerSubtext}</p>
+                    ) : null}
+                    {unavailable && extensionLabel ? (
+                        <p className="mt-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white/75">
+                            {extensionLabel}
+                        </p>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     )
 })

@@ -11,11 +11,17 @@
  *   DAM_3D                        When true, 3D raster thumbnail/poster pipeline may run.
  *   DAM_3D_BLENDER_BINARY         Optional path to the Blender executable. **Workers:** use the official **Blender 4.5.3 LTS** linux-x64 tarball, install to **`/usr/local/bin/blender`**, and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** (see `docs/environments/BLENDER_DAM_3D_INSTALL.md`). Never required on web-only PHP nodes.
  *   DAM_3D_REAL_RENDER_ENABLED    Default true. Set false to always use stub posters (workers without Blender).
+ *
+ * Headless reliability (no extra .env): Blender poster renders always run with software
+ * rasterization (LIBGL_ALWAYS_SOFTWARE + llvmpipe) and a writable HOME under storage — avoids flaky GPU/EGL in Docker/WSL2.
  */
 return [
     'enabled' => (bool) env('DAM_3D', false),
 
     'blender_binary' => env('DAM_3D_BLENDER_BINARY', '/usr/local/bin/blender'),
+
+    /** Point HOME (and XDG_CONFIG_HOME) at storage/framework/cache/dam3d-blender-home for Blender caches. */
+    'writable_home_for_blender' => true,
 
     /**
      * When true and DAM_3D is enabled, workers attempt a real Blender render when the binary is present.
@@ -45,7 +51,8 @@ return [
     'max_server_render_bytes' => 104_857_600, // 100 MiB
 
     'max_conversion_seconds' => 180,
-    'max_render_seconds' => 90,
+    /** Headless Blender (EEVEE); allow headroom for software-GL retry / cold cache (job has its own timeout). */
+    'max_render_seconds' => 180.0,
     'max_texture_dimension' => 4096,
     'max_triangles_soft' => 500_000,
     'max_triangles_hard' => 1_500_000,

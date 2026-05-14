@@ -54,7 +54,7 @@ test('video processing headline', () => {
     assert.equal(c.videoPlaySlot, true)
 })
 
-test('failed preview does not animate', () => {
+test('failed preview does not animate; grid hides footer copy and pills', () => {
     const asset = { id: 4, file_extension: 'jpg', mime_type: 'image/jpeg', thumbnail_status: 'failed' }
     const vs = {
         kind: 'failed',
@@ -64,4 +64,19 @@ test('failed preview does not animate', () => {
     }
     const c = getAssetProcessingPlaceholderCopy(asset, vs, null)
     assert.equal(c.animate, false)
+    assert.equal(c.showTextFooter, false)
+    assert.equal(c.badgeShort, '')
+    assert.equal(c.headline, '')
+})
+
+test('failed with UUID-only thumbnail_error gets generic badge title', () => {
+    const asset = {
+        id: 5,
+        file_extension: 'glb',
+        mime_type: 'model/gltf-binary',
+        thumbnail_error: 'no preview 019e2739-1b98-702f-b8d3-a8e8e071d550',
+    }
+    const vs = { kind: 'failed', label: '', description: '', badgeShort: '' }
+    const c = getAssetProcessingPlaceholderCopy(asset, vs, null)
+    assert.match(c.badgeTitle, /No grid thumbnail/i)
 })

@@ -7,17 +7,13 @@ import { BrandWorkbenchChrome } from '../contexts/BrandWorkbenchChromeContext'
 import WorkbenchLocalNav from '../components/brand-workspace/WorkbenchLocalNav'
 import { BRAND_WORKBENCH_CONTENT, WORKBENCH_ASIDE_WIDTH, workbenchPageColumnsClass } from '../components/brand-workspace/brandWorkspaceTokens'
 import WorkbenchSegmentedNav from '../components/brand-workspace/WorkbenchSegmentedNav'
-import { Squares2X2Icon, TagIcon, ListBulletIcon, RectangleStackIcon } from '@heroicons/react/24/outline'
+import { Squares2X2Icon, TagIcon, ListBulletIcon } from '@heroicons/react/24/outline'
 
 const MANAGE_CATEGORIES_HREF =
     typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'
 
-const MANAGE_FIELDS_HREF =
-    typeof route === 'function' ? route('manage.fields') : '/app/manage/fields'
-
 const SIDEBAR_ITEMS = [
-    { id: 'categories', label: 'Folders & fields', href: MANAGE_CATEGORIES_HREF, icon: Squares2X2Icon },
-    { id: 'fields', label: 'Fields', href: MANAGE_FIELDS_HREF, icon: RectangleStackIcon },
+    { id: 'categories', label: 'Folders & filters', href: MANAGE_CATEGORIES_HREF, icon: Squares2X2Icon },
     { id: 'tags', label: 'Tags', href: '/app/manage/tags', icon: TagIcon },
     { id: 'values', label: 'Values', href: '/app/manage/values', icon: ListBulletIcon },
 ]
@@ -26,7 +22,7 @@ export default function ManageLayout({
     children,
     title = 'Manage',
     activeSection = 'categories',
-    /** Override default `BRAND_WORKBENCH_CONTENT` when a page needs more horizontal room (e.g. Folders & fields). */
+    /** Override default `BRAND_WORKBENCH_CONTENT` when a page needs more horizontal room (e.g. Folders & filters). */
     workbenchChromeClassName = BRAND_WORKBENCH_CONTENT,
 }) {
     const { auth, tenant } = usePage().props
@@ -49,7 +45,7 @@ export default function ManageLayout({
                         canLinkCompany={canLinkCompany}
                         companyHref={typeof route === 'function' ? route('companies.settings') : '/app/companies/settings'}
                         title="Manage"
-                        description="Configure folders, fields, tags, and controlled values for this brand’s library."
+                        description="Configure folders and filters, tags, and picklist field values in use on assets for this brand’s library."
                         brandColor={brandColor}
                     />
 

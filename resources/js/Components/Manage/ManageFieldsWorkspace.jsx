@@ -134,7 +134,7 @@ function ManageFieldsQuickGuide() {
             title: 'Folder first',
             body: (
                 <>
-                    Fields belong to one folder. Add or rename folders in{' '}
+                    Filters belong to one folder. Add or rename folders in{' '}
                     <Link
                         href={MANAGE_CATEGORIES_URL}
                         className="font-medium text-[var(--wb-link)] underline decoration-[color:color-mix(in_srgb,var(--wb-accent)_45%,transparent)] underline-offset-2 hover:opacity-90"
@@ -148,11 +148,11 @@ function ManageFieldsQuickGuide() {
         {
             n: 2,
             Icon: PhotoIcon,
-            title: 'Create fields',
+            title: 'Create filters',
             body: (
                 <>
-                    <span className="font-medium text-slate-800">Create field</span> or{' '}
-                    <span className="font-medium text-slate-800">Add field</span>, then pick types in the editor (text,
+                    <span className="font-medium text-slate-800">Create filter</span> or{' '}
+                    <span className="font-medium text-slate-800">Add filter</span>, then pick types in the editor (text,
                     lists, dates, yes/no, …). Metadata describes assets; thumbnails come from the file.
                 </>
             ),
@@ -325,11 +325,11 @@ function QuickFieldStarter({
     return (
         <div className={shellClass}>
             {showLabel && !embedded ? (
-                <p className="text-sm font-semibold text-slate-900">New field</p>
+                <p className="text-sm font-semibold text-slate-900">New filter</p>
             ) : null}
             <p className={`text-xs text-slate-600 ${showLabel && !embedded ? 'mt-0.5' : ''}`}>
                 {embedded
-                    ? 'Choose list type, name the field, then Create — example starters are below.'
+                    ? 'Choose list type, name the filter, then Create — example starters are below.'
                     : compact
                       ? 'Pick list type, then name — we’ll jump you to answer choices when it’s a list.'
                       : 'Choose single- or multi-select for lists; we’ll highlight where to add options.'}
@@ -419,13 +419,13 @@ function ManageFieldsNewFieldSection({ expanded, onToggle, children }) {
             >
                 <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--wb-accent)]">
-                        New field
+                        New filter
                     </p>
-                    <p className="text-sm font-semibold text-slate-900">Create a custom field</p>
+                    <p className="text-sm font-semibold text-slate-900">Create a custom filter</p>
                     <p className="mt-0.5 text-xs leading-snug text-slate-600">
                         {expanded
-                            ? 'Name, list type, Create field, and example starters below — collapse when finished.'
-                            : 'Expand for quick create and illustrated example starters (or use Add field in the header).'}
+                            ? 'Name, list type, Create filter, and example starters below — collapse when finished.'
+                            : 'Expand for quick create and illustrated example starters (or use Add filter in the header).'}
                     </p>
                 </div>
                 <ChevronDownIcon
@@ -1453,8 +1453,8 @@ export default function ManageFieldsWorkspace({
                             </h3>
                             <p className="mt-2 text-sm leading-relaxed text-slate-600">
                                 {categories.length === 0
-                                    ? 'Create or add folders for this brand, then open one here to manage fields.'
-                                    : 'Manage the fields used for assets in that folder.'}
+                                    ? 'Create or add folders for this brand, then open one here to manage filters.'
+                                    : 'Manage the filters used for assets in that folder.'}
                             </p>
                         </div>
                     </div>
@@ -1472,11 +1472,11 @@ export default function ManageFieldsWorkspace({
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                                 <div className="min-w-0 flex-1">
                                     <h3 className="text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
-                                        {selectedCategory ? `Fields for ${selectedCategory.name}` : 'Folders & fields'}
+                                        {selectedCategory ? `Filters for ${selectedCategory.name}` : 'Folders & filters'}
                                     </h3>
                                     {selectedCategory ? (
                                         <p className="mt-0.5 max-w-xl text-sm text-slate-600">
-                                            Manage the fields used for assets in this folder.
+                                            Manage the filters used for assets in this folder.
                                         </p>
                                     ) : null}
                                 </div>
@@ -1485,12 +1485,12 @@ export default function ManageFieldsWorkspace({
                                         type="button"
                                         onClick={openBlankCreateModal}
                                         disabled={customFieldsLimit && !customFieldsLimit.can_create}
-                                        title="Add field"
-                                        aria-label={`Add field to ${selectedCategory.name}`}
+                                        title="Add filter"
+                                        aria-label={`Add filter to ${selectedCategory.name}`}
                                         className={`inline-flex max-w-full shrink-0 items-center gap-2 ${productButtonPrimary} px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50`}
                                     >
                                         <PlusIcon className="h-4 w-4 shrink-0" aria-hidden />
-                                        Add field
+                                        Add filter
                                     </button>
                                 ) : null}
                             </div>
@@ -1677,7 +1677,7 @@ export default function ManageFieldsWorkspace({
                                             subtle={false}
                                         >
                                             {onRows.length > 0 ? (
-                                                <ul className="space-y-2" aria-label="Fields enabled for this folder">
+                                                <ul className="space-y-2" aria-label="Filters enabled for this folder">
                                                     {onRows.map((row) => (
                                                         <li key={row.key} id={`manage-field-row-${row.key}`}>
                                                             <FieldListRow

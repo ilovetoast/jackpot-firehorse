@@ -4,7 +4,6 @@ import { motion } from 'framer-motion'
 import { SparklesIcon, EnvelopeIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
 import OnboardingCard from '../../Components/Onboarding/OnboardingCard'
 import AppHead from '../../Components/AppHead'
-import DashboardLinksRow from '../../Components/DashboardLinksRow'
 import AppNav from '../../Components/AppNav'
 import ManagedCompaniesTeaser from '../../Components/dashboard/ManagedCompaniesTeaser'
 import PrimaryActions from '../../Components/dashboard/PrimaryActions'
@@ -129,7 +128,6 @@ export default function Overview() {
     const permissions = stats?.permissions ?? {}
     const is_manager = stats?.is_manager ?? false
     const pending_ai_suggestions = stats?.pending_ai_suggestions
-    const dashboard_links = stats?.dashboard_links ?? {}
 
     const brandSignalsState = insights?.brand_signals ?? []
     const momentumDataState = insights?.momentum_data ?? {}
@@ -185,12 +183,6 @@ export default function Overview() {
         : 'pt-[calc(5.75rem+env(safe-area-inset-top))] lg:pt-[calc(6rem+env(safe-area-inset-top))]'
 
     const isAgencyAccount = authFromPage?.activeCompany?.is_agency === true
-    const dashLinksRaw = dashboard_links && typeof dashboard_links === 'object' ? dashboard_links : {}
-    const dashLinks = {
-        company: dashLinksRaw.company,
-        company_label: dashLinksRaw.company_label,
-    }
-    const hasDashboardLinks = Boolean(dashLinks.company)
 
     const collageAssets = Array.isArray(hero?.collage_assets) ? hero.collage_assets : []
 
@@ -529,30 +521,21 @@ export default function Overview() {
                             >
                             <div className="space-y-3 sm:space-y-5 lg:space-y-5">
                                 <div className="animate-fadeInUp space-y-2 sm:space-y-3">
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                                        <div className="min-w-0">
-                                            {!stats ? (
-                                                <SkeletonPlanBadge />
-                                            ) : (
-                                                plan?.show_badge &&
-                                                plan?.name && (
-                                                    <span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm">
-                                                        <span>
-                                                            {plan.name} Plan
-                                                            {isAgencyAccount && (
-                                                                <span className="text-white/45"> · Agency account</span>
-                                                            )}
-                                                        </span>
+                                    <div className="min-w-0">
+                                        {!stats ? (
+                                            <SkeletonPlanBadge />
+                                        ) : (
+                                            plan?.show_badge &&
+                                            plan?.name && (
+                                                <span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm">
+                                                    <span>
+                                                        {plan.name} Plan
+                                                        {isAgencyAccount && (
+                                                            <span className="text-white/45"> · Agency account</span>
+                                                        )}
                                                     </span>
-                                                )
-                                            )}
-                                        </div>
-                                        {hasDashboardLinks && (
-                                            <DashboardLinksRow
-                                                links={dashLinks}
-                                                variant="dark"
-                                                className="shrink-0 sm:pt-0.5 sm:text-right"
-                                            />
+                                                </span>
+                                            )
                                         )}
                                     </div>
 

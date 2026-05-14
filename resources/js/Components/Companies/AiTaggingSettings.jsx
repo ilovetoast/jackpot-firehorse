@@ -3,7 +3,7 @@
  * API keys unchanged (disable_ai_tagging, ai_insights_enabled, etc.).
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { ExclamationTriangleIcon, CheckCircleIcon, InformationCircleIcon, SparklesIcon } from '@heroicons/react/24/outline'
 import { debounce } from 'lodash-es'
 
@@ -54,10 +54,9 @@ function Toggle({ checked, onChange, disabled = false, className = "" }) {
     )
 }
 
-export default function AiTaggingSettings({ 
-    canEdit = false, 
-    currentPlan = 'free',
-    className = "" 
+export default function AiTaggingSettings({
+    canEdit = false,
+    className = ""
 }) {
     const [settings, setSettings] = useState(null)
     const [loading, setLoading] = useState(true)
@@ -72,16 +71,23 @@ export default function AiTaggingSettings({
         return () => window.clearInterval(id)
     }, [])
 
-    // Get plan tag limits
-    const planLimits = {
-        free: { max: 1, name: 'Free' },
-        starter: { max: 5, name: 'Starter' },
-        pro: { max: 10, name: 'Pro' },
-        premium: { max: 15, name: 'Premium' },
-        enterprise: { max: 50, name: 'Enterprise' }
-    }
-    const planLimit = planLimits[currentPlan] || planLimits.free
-    const maxTagsPerAsset = planLimit.max
+    // Plan max total tags per asset (from config/plans.php via API); AI auto-apply UI is also capped at 10 server-side.
+    const maxTagsPerAsset = useMemo(() => {
+        const n = Number(settings?.max_tags_per_asset)
+        return Number.isFinite(n) && n > 0 ? n : 4
+    }, [settings?.max_tags_per_asset])
+
+    const tagPolicyInputMax = useMemo(() => Math.min(maxTagsPerAsset, 10), [maxTagsPerAsset])
+
+    const planDisplayName = settings?.plan_limits_display_name || 'Your plan'
+
+    const recommendedAutoApply = useMemo(() => {
+        const n = Number(settings?.recommended_ai_tag_auto_apply_limit)
+        if (Number.isFinite(n) && n > 0) {
+            return Math.min(n, tagPolicyInputMax)
+        }
+        return Math.min(5, tagPolicyInputMax)
+    }, [settings?.recommended_ai_tag_auto_apply_limit, tagPolicyInputMax])
 
     // Local state for tag limit input (for immediate UI feedback)
     const [localTagLimit, setLocalTagLimit] = useState('')
@@ -95,12 +101,15 @@ export default function AiTaggingSettings({
     // Sync local tag limit with server settings
     useEffect(() => {
         if (settings) {
-            // Default to plan max or server setting, whichever is lower
-            const serverLimit = settings.ai_best_practices_limit || Math.min(5, maxTagsPerAsset)
-            const effectiveLimit = Math.min(serverLimit, maxTagsPerAsset)
+            const raw = settings.ai_best_practices_limit
+            const parsed = typeof raw === 'number' ? raw : parseInt(String(raw), 10)
+            const serverLimit = Number.isFinite(parsed)
+                ? parsed
+                : Math.min(recommendedAutoApply, tagPolicyInputMax)
+            const effectiveLimit = Math.min(Math.max(1, serverLimit), tagPolicyInputMax)
             setLocalTagLimit(String(effectiveLimit))
         }
-    }, [settings, maxTagsPerAsset])
+    }, [settings, tagPolicyInputMax, recommendedAutoApply, settings?.ai_best_practices_limit])
 
     const loadSettings = async () => {
         try {
@@ -169,7 +178,7 @@ export default function AiTaggingSettings({
         debounce((value) => {
             const numValue = parseInt(value)
             // Respect plan limit: 1 to maxTagsPerAsset
-            if (!isNaN(numValue) && numValue >= 1 && numValue <= maxTagsPerAsset) {
+            if (!isNaN(numValue) && numValue >= 1 && numValue <= tagPolicyInputMax) {
                 // Update both the limit value and ensure mode is set to best_practices
                 const newSettings = { 
                     ...settings, 
@@ -180,7 +189,7 @@ export default function AiTaggingSettings({
                 debouncedUpdateSettings(newSettings)
             }
         }, 800), // Slightly longer debounce for number input
-        [settings, debouncedUpdateSettings, maxTagsPerAsset]
+        [settings, debouncedUpdateSettings, tagPolicyInputMax]
     )
 
     const runInsightsNow = async () => {
@@ -397,17 +406,17 @@ export default function AiTaggingSettings({
                                     <input
                                         type="number"
                                         min="1"
-                                        max={maxTagsPerAsset}
+                                        max={tagPolicyInputMax}
                                         value={localTagLimit}
                                         onChange={handleTagLimitChange}
                                         disabled={!canEdit || isAiDisabled}
                                         className="block w-20 rounded-md border-gray-300 shadow-sm focus:border-violet-600 focus:ring-violet-600 text-sm disabled:bg-gray-50 disabled:text-gray-500"
-                                        placeholder={String(Math.min(5, maxTagsPerAsset))}
+                                        placeholder={String(recommendedAutoApply)}
                                     />
                                     <span className="text-sm text-gray-700">per asset</span>
                                 </div>
                                 <p className="mt-2 text-sm text-gray-500">
-                                    1–{maxTagsPerAsset} ({planLimit.name}). <strong>{Math.min(5, maxTagsPerAsset)} recommended.</strong>
+                                    1–{tagPolicyInputMax} ({planDisplayName}). <strong>{recommendedAutoApply} recommended.</strong>
                                 </p>
                             </div>
                         )}

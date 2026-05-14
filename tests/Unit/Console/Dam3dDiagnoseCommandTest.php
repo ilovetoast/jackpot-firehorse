@@ -20,5 +20,8 @@ class Dam3dDiagnoseCommandTest extends TestCase
         $this->assertStringContainsString('Blender exists:', $out);
         $this->assertStringContainsString('Bundled Blender script:', $out);
         $this->assertStringContainsString('interactive viewer', $out);
+        $this->assertStringContainsString('GLB thumbnail/poster pipeline on THIS host:', $out);
+        $this->assertStringContainsString('blender_headless_mode:', $out);
+        $this->assertStringContainsString('writable_home_for_blender:', $out);
     }
 }

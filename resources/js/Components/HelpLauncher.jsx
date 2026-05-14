@@ -38,7 +38,6 @@ const HELP_PAGE_LABEL_BY_ROUTE = {
     'insights.creator': 'Insights',
     'manage.categories': 'Manage',
     'manage.structure': 'Manage',
-    'manage.fields': 'Manage',
     'manage.tags': 'Manage',
     'manage.values': 'Manage',
     'profile.index': 'Account',

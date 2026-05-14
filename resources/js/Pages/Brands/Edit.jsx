@@ -45,6 +45,7 @@ import AgencyTemplates from '../../Components/portal/AgencyTemplates'
 import BrandCreatorsSettingsPanel from '../../Components/prostaff/BrandCreatorsSettingsPanel'
 import ColorPickerControl from '../../Components/BrandGuidelines/controls/ColorPickerControl'
 import ScopeBanner from '../../Components/Company/ScopeBanner'
+import SettingsInPageNavLabel from '../../Components/settings/SettingsInPageNavLabel'
 
 /** Normalize to #RRGGBB for <input type="color">, or null when unset / invalid */
 function hexForColorInput(value) {
@@ -1279,11 +1280,11 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         brandColor={brandWorkspaceAccent}
                     />
 
-                    <div className="mt-4 max-w-3xl">
+                    <div className="mt-3">
                         <ScopeBanner scope="brand" name={brand.name} />
                     </div>
 
-                    <div className="mt-6 -mx-1 min-w-0 sm:mx-0">
+                    <div className="mt-4 -mx-1 min-w-0 sm:mx-0">
                         <div className="-mb-px border-b border-gray-200" role="tablist" aria-label="Brand settings sections">
                             <nav className="flex gap-x-1 overflow-x-auto pb-px sm:gap-x-5 lg:gap-x-6 [scrollbar-width:thin]">
                                 {[
@@ -1323,45 +1324,50 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         </div>
                     </div>
 
-                <div className={`mt-8 flex flex-col gap-8 lg:flex-row`}>
+                <div className={`mt-6 flex flex-col gap-6 lg:flex-row`}>
                     {isDnaTab && (
                         <aside className="lg:w-56 flex-shrink-0">
-                            <nav
-                                className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:space-y-1 lg:overflow-visible lg:pb-0 lg:sticky lg:top-8 [scrollbar-width:thin]"
-                                aria-label="Brand DNA sections"
-                            >
-                                {[
-                                    { id: 'strategy', label: 'Strategy' },
-                                    { id: 'positioning', label: 'Positioning' },
-                                    { id: 'expression', label: 'Expression' },
-                                    { id: 'standards', label: 'Standards' },
-                                    { id: 'alignment', label: 'Alignment' },
-                                    { id: 'references', label: 'References' },
-                                    { id: 'presentation', label: 'Presentation' },
-                                    { id: 'research', label: 'Research' },
-                                ].map((item) => (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        onClick={() => { setActiveTab(item.id); updateTabInUrl(item.id) }}
-                                        className={`shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors whitespace-nowrap lg:w-full ${
-                                            activeTab === item.id
-                                                ? 'text-[var(--jp-bs-primary)]'
-                                                : 'text-gray-600 hover:bg-slate-100 hover:text-gray-900'
-                                        }`}
-                                        style={
-                                            activeTab === item.id
-                                                ? {
-                                                      backgroundColor: hexToRgba(brandWorkbenchChrome.linkHex, 0.1),
-                                                      boxShadow: `inset 3px 0 0 0 ${brandWorkbenchChrome.linkHex}`,
-                                                  }
-                                                : undefined
-                                        }
-                                    >
-                                        {item.label}
-                                    </button>
-                                ))}
-                            </nav>
+                            <div className="lg:sticky lg:top-8 space-y-1">
+                                <div className="hidden lg:block">
+                                    <SettingsInPageNavLabel />
+                                </div>
+                                <nav
+                                    className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:space-y-1 lg:overflow-visible lg:pb-0 [scrollbar-width:thin]"
+                                    aria-label="Brand DNA sections"
+                                >
+                                    {[
+                                        { id: 'strategy', label: 'Strategy' },
+                                        { id: 'positioning', label: 'Positioning' },
+                                        { id: 'expression', label: 'Expression' },
+                                        { id: 'standards', label: 'Standards' },
+                                        { id: 'alignment', label: 'Alignment' },
+                                        { id: 'references', label: 'References' },
+                                        { id: 'presentation', label: 'Presentation' },
+                                        { id: 'research', label: 'Research' },
+                                    ].map((item) => (
+                                        <button
+                                            key={item.id}
+                                            type="button"
+                                            onClick={() => { setActiveTab(item.id); updateTabInUrl(item.id) }}
+                                            className={`shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors whitespace-nowrap lg:w-full ${
+                                                activeTab === item.id
+                                                    ? 'text-[var(--jp-bs-primary)]'
+                                                    : 'text-gray-600 hover:bg-slate-100 hover:text-gray-900'
+                                            }`}
+                                            style={
+                                                activeTab === item.id
+                                                    ? {
+                                                          backgroundColor: hexToRgba(brandWorkbenchChrome.linkHex, 0.1),
+                                                          boxShadow: `inset 3px 0 0 0 ${brandWorkbenchChrome.linkHex}`,
+                                                      }
+                                                    : undefined
+                                            }
+                                        >
+                                            {item.label}
+                                        </button>
+                                    ))}
+                                </nav>
+                            </div>
                         </aside>
                     )}
 
@@ -1369,7 +1375,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
                     {/* Upgrade banner for free plan users */}
                     {isDnaTab && isFreePlan && (
-                        <div className="mb-6 rounded-xl border border-[var(--jp-bs-soft-border)] bg-gradient-to-r from-[var(--jp-bs-soft-bg)] to-slate-50 p-5">
+                        <div className="mb-6 rounded-xl border border-[var(--jp-bs-soft-border)] bg-[var(--jp-bs-soft-bg)] p-5 shadow-sm">
                             <div className="flex items-start gap-3">
                                 <div className="flex-shrink-0 mt-0.5 rounded-lg bg-[var(--jp-bs-soft-bg-strong)] p-2">
                                     <svg className="w-5 h-5 text-[var(--jp-bs-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1425,13 +1431,13 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                             <button
                                 type="button"
                                 onClick={() => setExecutionAlignmentOpen(!executionAlignmentOpen)}
-                                className="w-full flex items-center justify-between rounded-xl bg-gradient-to-br from-[var(--jp-bs-soft-bg)] to-slate-50/80 px-6 py-4 ring-1 ring-[var(--jp-bs-soft-border)] text-left hover:from-[var(--jp-bs-soft-bg)] hover:to-slate-50 transition-colors"
+                                className="w-full flex items-center justify-between rounded-xl bg-[var(--jp-bs-soft-bg)] px-6 py-4 ring-1 ring-[var(--jp-bs-soft-border)] text-left shadow-sm transition-colors hover:bg-slate-50/90"
                             >
                                 <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--jp-bs-primary)] opacity-90">Execution Alignment Overview</h2>
                                 <svg className={`h-5 w-5 text-[var(--jp-bs-primary)] opacity-60 transition-transform ${executionAlignmentOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                             </button>
                             {executionAlignmentOpen && (
-                                <div className="rounded-b-xl bg-gradient-to-br from-[var(--jp-bs-soft-bg)] to-slate-50/80 px-6 pb-6 ring-1 ring-[var(--jp-bs-soft-border)] -mt-1">
+                                <div className="rounded-b-xl bg-[var(--jp-bs-soft-bg)] px-6 pb-6 ring-1 ring-[var(--jp-bs-soft-border)] -mt-1 shadow-sm">
                                     <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
                                         <div className="rounded-lg bg-white/70 px-4 py-3 backdrop-blur-sm">
                                             <p className="text-xs font-medium text-slate-500">Average On-Brand Score</p>
@@ -2404,18 +2410,11 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                     {/* Tab: Identity */}
                     {activeTab === 'identity' && (
                     <>
-                    <div className="max-w-2xl mb-4 lg:ml-44">
-                        <SettingsSectionIntro
-                            title={SECTION_INTRO.identity.title}
-                            description={SECTION_INTRO.identity.description}
-                            affects={SECTION_INTRO.identity.affects}
-                        />
-                    </div>
-                    <div className="flex gap-8">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[11rem_minmax(0,1fr)_16rem] lg:items-start lg:gap-x-6">
                         {/* Left: Section navigation */}
-                        <nav className="hidden lg:block w-44 flex-shrink-0">
-                            <div className="sticky top-8 space-y-1">
-                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3 px-3">On this page</p>
+                        <nav className="hidden lg:block lg:sticky lg:top-8 lg:self-start" aria-label="On this page">
+                            <div className="space-y-1">
+                                <SettingsInPageNavLabel />
                                 {[
                                     { id: 'basic-information', label: 'Brand Identity' },
                                     { id: 'brand-images', label: 'Brand Images' },
@@ -2436,8 +2435,15 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                             </div>
                         </nav>
 
-                        {/* Center: Main content */}
-                        <div className="flex-1 min-w-0 space-y-8">
+                        {/* Center: intro + main content */}
+                        <div className="min-w-0 space-y-6">
+                        <div className="max-w-2xl">
+                            <SettingsSectionIntro
+                                title={SECTION_INTRO.identity.title}
+                                description={SECTION_INTRO.identity.description}
+                                affects={SECTION_INTRO.identity.affects}
+                            />
+                        </div>
 
                     {/* Resume onboarding — shown when setup was never completed */}
                     {onboardingStatus && !onboardingStatus.is_completed && !onboardingStatus.is_activated && (
@@ -2464,7 +2470,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
 
                     {/* Re-run guided setup — for users who already finished */}
                     {onboardingStatus && (onboardingStatus.is_completed || onboardingStatus.is_activated) && (
-                        <div className="flex items-center justify-end">
+                        <div className="flex max-w-2xl items-center justify-end">
                             <button
                                 type="button"
                                 onClick={() => {
@@ -2495,7 +2501,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                     {/* Section 1: Brand Identity */}
                     <div id="basic-information" className="scroll-mt-8">
                         <div className="rounded-xl bg-white shadow-sm ring-1 ring-gray-200/30 overflow-hidden">
-                            <div className="px-6 py-8 sm:px-8 sm:py-10">
+                            <div className="px-6 py-6 sm:px-8 sm:py-8">
                                 <div className="mb-2">
                                     <h2 className="text-lg font-semibold text-gray-900">Brand basics</h2>
                                     <p className="mt-1 text-sm text-gray-600">Official name and brand selector visibility.</p>
@@ -2943,8 +2949,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         </div>{/* end center column */}
 
                         {/* Right: Live Preview sidebar */}
-                        <div className="hidden lg:block w-64 flex-shrink-0">
-                            <div className="sticky top-8">
+                        <div className="hidden lg:block lg:sticky lg:top-8 lg:self-start">
+                            <div className="w-full max-w-[16rem]">
                                 <div className="rounded-2xl bg-gray-950 p-4 shadow-lg ring-1 ring-white/10">
                                     <div className="flex items-center gap-2 mb-4">
                                         <div className="flex gap-1">
@@ -3061,7 +3067,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                 </div>
                             </div>
                         </div>
-                    </div>{/* end 3-column flex */}
+                    </div>{/* end identity 3-column grid */}
                     </>
                     )}
 
@@ -3077,7 +3083,7 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                         </div>
                         {/* Quick Actions Bar */}
                         {portal_url && (
-                            <div className="rounded-xl bg-gradient-to-r from-[var(--jp-bs-soft-bg)] to-slate-50 border border-[var(--jp-bs-soft-border)] px-5 py-4 flex items-center justify-between">
+                            <div className="rounded-xl bg-[var(--jp-bs-soft-bg)] border border-[var(--jp-bs-soft-border)] px-5 py-4 flex items-center justify-between shadow-sm">
                                 <div className="min-w-0">
                                     <p className="text-sm font-medium text-gray-800">Public Portal</p>
                                     <a

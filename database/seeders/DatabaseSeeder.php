@@ -30,6 +30,9 @@ class DatabaseSeeder extends Seeder
             EbiCategoryDefaultSettingsSeeder::class,
             MetadataFieldPermissionSeeder::class, // Seed metadata field permissions (owner/admin can edit all fields)
             MetadataFieldsSeeder::class, // Create and configure all metadata fields with category-specific settings
+            // Phase 2 — Folder Quick Filters: seed default quick-filter assignments.
+            // Idempotent and defensive: never overwrites existing manual / AI-suggested rows.
+            FolderQuickFilterDefaultsSeeder::class,
         ]);
 
         Log::info('DatabaseSeeder executed during deploy');

@@ -26,6 +26,12 @@ class MetadataFieldVisibility extends Model
         'is_edit_hidden',
         'is_primary',
         'is_required',
+        // Phase 2: folder quick filter assignment columns.
+        // See migration 2026_05_14_140000_add_folder_quick_filter_columns_*.
+        'show_in_folder_quick_filters',
+        'folder_quick_filter_order',
+        'folder_quick_filter_weight',
+        'folder_quick_filter_source',
     ];
 
     protected $casts = [
@@ -35,6 +41,9 @@ class MetadataFieldVisibility extends Model
         'is_edit_hidden' => 'boolean',
         'is_primary' => 'boolean',
         'is_required' => 'boolean',
+        'show_in_folder_quick_filters' => 'boolean',
+        'folder_quick_filter_order' => 'integer',
+        'folder_quick_filter_weight' => 'integer',
     ];
 
     public function metadataField(): BelongsTo

@@ -5,6 +5,7 @@
 
 /** Mutable fields that polling is allowed to update (state, progress, etc.) */
 const MUTABLE_POLL_FIELDS = [
+  'title',
   'state',
   'zip_total_chunks',
   'zip_chunk_index',

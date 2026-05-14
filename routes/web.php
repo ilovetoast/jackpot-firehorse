@@ -326,6 +326,10 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::post('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'setVisibility'])->name('tenant.metadata.visibility.set');
         Route::delete('/api/tenant/metadata/fields/{field}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'removeVisibility'])->name('tenant.metadata.visibility.remove');
         Route::patch('/api/tenant/metadata/fields/{field}/categories/{category}/visibility', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'patchCategoryFieldVisibility'])->name('tenant.metadata.category.field.visibility');
+        // Phase 2 — Folder Quick Filters: per-folder, per-filter quick-filter assignment.
+        Route::patch('/api/tenant/metadata/fields/{field}/categories/{category}/folder-quick-filter', [\App\Http\Controllers\Filters\FolderQuickFilterController::class, 'update'])->name('tenant.metadata.category.field.folder-quick-filter');
+        // Phase 4 — Folder Quick Filters: lazy value picker for the sidebar flyout.
+        Route::get('/api/tenant/folders/{category}/quick-filters/{field}/values', [\App\Http\Controllers\Filters\FolderQuickFilterValueController::class, 'show'])->name('tenant.folders.quick-filter.values');
         Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
         Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
         Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
@@ -1004,6 +1008,9 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
                 Route::post('/downloads', [\App\Http\Controllers\DownloadController::class, 'store'])->name('downloads.store');
             });
             Route::get('/downloads/company-users', [\App\Http\Controllers\DownloadController::class, 'companyUsers'])->name('downloads.company-users');
+            Route::get('/downloads/share-email/recipient-suggestions', [\App\Http\Controllers\DownloadController::class, 'suggestShareEmailRecipients'])
+                ->middleware('throttle:45,1')
+                ->name('downloads.share-email-recipient-suggestions');
 
             // Metric endpoints
             Route::post('/assets/{asset}/metrics/track', [\App\Http\Controllers\AssetMetricController::class, 'track'])->name('assets.metrics.track');

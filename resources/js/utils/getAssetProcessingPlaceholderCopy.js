@@ -3,6 +3,8 @@
  * Does not replace {@link getAssetCardVisualState} — only presentation strings.
  */
 
+import { sanitizeGridPreviewUserMessage } from './sanitizeGridPreviewUserMessage.js'
+
 function extLower(asset) {
     return (asset?.file_extension || asset?.original_filename?.split?.('.')?.pop() || '')
         .toLowerCase()
@@ -63,45 +65,35 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
               : ''
 
     if (visualState.kind === 'failed') {
-        const headline = placeholderHint === 'failed' ? 'Preview failed' : visualState.label
+        const safeErr = sanitizeGridPreviewUserMessage(errMsg)
+        const titleTail =
+            safeErr.length >= 12 ? safeErr.slice(0, 200) + (safeErr.length > 200 ? '…' : '') : ''
         return {
-            headline,
-            helper: errMsg ? errMsg.slice(0, 120) + (errMsg.length > 120 ? '…' : '') : visualState.description,
-            badgeShort: 'Failed',
-            badgeTitle: errMsg ? errMsg.slice(0, 200) : `${visualState.label}. ${visualState.description}`,
+            headline: '',
+            helper: '',
+            badgeShort: '',
+            badgeTitle: titleTail || 'No grid thumbnail. Open the asset for details or retry.',
             badgeTone: 'danger',
             animate: false,
             typeMark: '',
             showFaintTypeWatermark: false,
             videoPlaySlot: false,
-        }
-    }
-
-    if (visualState.kind === 'model_3d_stub_raster') {
-        return {
-            headline: visualState.label,
-            helper: visualState.description,
-            badgeShort: visualState.badgeShort || '3D',
-            badgeTitle: `${visualState.label}. ${visualState.description}`,
-            badgeTone: visualState.badgeTone === 'warning' ? 'warning' : 'neutral',
-            animate: false,
-            typeMark: extUp,
-            showFaintTypeWatermark: true,
-            videoPlaySlot: false,
+            showTextFooter: false,
         }
     }
 
     if (visualState.kind === 'preview_unavailable') {
         return {
-            headline: visualState.label,
-            helper: visualState.description,
-            badgeShort: visualState.badgeShort || 'Unavailable',
-            badgeTitle: `${visualState.label}. ${visualState.description}`,
+            headline: '',
+            helper: '',
+            badgeShort: '',
+            badgeTitle: 'No grid thumbnail. Open the asset for details.',
             badgeTone: visualState.badgeTone === 'warning' ? 'warning' : 'neutral',
             animate: false,
             typeMark: extUp,
             showFaintTypeWatermark: true,
             videoPlaySlot: false,
+            showTextFooter: false,
         }
     }
 
@@ -116,6 +108,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
             typeMark: extUp,
             showFaintTypeWatermark: true,
             videoPlaySlot: false,
+            showTextFooter: true,
         }
     }
 
@@ -123,7 +116,6 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
         return {
             headline: 'RAW preview processing',
             helper: 'RAW files may take longer',
-            // Grid cards already show a bottom status chip from getAssetCardVisualState — avoid duplicate corner pill.
             badgeShort: '',
             badgeTitle: 'RAW file — preview is still generating',
             badgeTone: 'processing',
@@ -131,6 +123,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
             typeMark: extUp,
             showFaintTypeWatermark: true,
             videoPlaySlot: false,
+            showTextFooter: true,
         }
     }
 
@@ -146,6 +139,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
                 typeMark: 'PDF',
                 showFaintTypeWatermark: true,
                 videoPlaySlot: false,
+                showTextFooter: true,
             }
         }
         const designLabel = ['psb', 'ai', 'eps'].includes(ext) ? extUp : 'PSD'
@@ -159,6 +153,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
             typeMark: designLabel,
             showFaintTypeWatermark: true,
             videoPlaySlot: false,
+            showTextFooter: true,
         }
     }
 
@@ -173,6 +168,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
             typeMark: '',
             showFaintTypeWatermark: false,
             videoPlaySlot: true,
+            showTextFooter: true,
         }
     }
 
@@ -187,6 +183,7 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
             typeMark: extUp,
             showFaintTypeWatermark: true,
             videoPlaySlot: false,
+            showTextFooter: true,
         }
     }
 
@@ -200,5 +197,6 @@ export function getAssetProcessingPlaceholderCopy(asset, visualState, placeholde
         typeMark: extUp,
         showFaintTypeWatermark: true,
         videoPlaySlot: false,
+        showTextFooter: true,
     }
 }

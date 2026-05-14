@@ -29,6 +29,7 @@ use App\Services\Assets\AssetProcessingGuardService;
 use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\Assets\StagedFiledAssetAiService;
+use App\Services\Filters\FolderQuickFilterAssignmentService;
 use App\Services\BrandDNA\GoogleFontLibraryEntriesService;
 use App\Services\BrandLibraryCategoryCountService;
 use App\Services\FeatureGate;
@@ -331,6 +332,56 @@ class AssetController extends Controller
 
             return $category;
         });
+
+        // Phase 3 — Folder Quick Filters: attach a tiny `quick_filters` array
+        // to each persisted category. This is read-only metadata for the
+        // sidebar — no counts, no value lists, no flyouts. Resolved in ONE
+        // batched DB query via FolderQuickFilterAssignmentService.
+        //
+        // System-template-only rows in $allCategories (id=null) are skipped:
+        // they can't have visibility rows because there's no Category model
+        // backing them yet.
+        $folderQuickFilterSettings = (array) config('categories.folder_quick_filters', []);
+        $folderQuickFiltersEnabled = (bool) ($folderQuickFilterSettings['enabled'] ?? false);
+        if ($folderQuickFiltersEnabled && $categories->isNotEmpty()) {
+            /** @var FolderQuickFilterAssignmentService $quickFilterAssignment */
+            $quickFilterAssignment = app(FolderQuickFilterAssignmentService::class);
+            $quickFilterRowsByCategoryId = $quickFilterAssignment->getQuickFiltersForFolders($categories);
+
+            $allCategories = $allCategories->map(function ($category) use ($quickFilterRowsByCategoryId) {
+                $id = isset($category['id']) ? (int) $category['id'] : 0;
+                $rows = $id > 0 ? ($quickFilterRowsByCategoryId[$id] ?? []) : [];
+
+                $category['quick_filters'] = array_map(static function ($row) {
+                    $field = $row->metadataField;
+
+                    return [
+                        'metadata_field_id' => (int) $row->metadata_field_id,
+                        'field_key' => (string) ($field?->key ?? ''),
+                        'label' => (string) ($field?->system_label ?? ($field?->key ?? '')),
+                        'field_type' => (string) ($field?->type ?? ''),
+                        'order' => $row->folder_quick_filter_order !== null
+                            ? (int) $row->folder_quick_filter_order
+                            : null,
+                        'weight' => $row->folder_quick_filter_weight !== null
+                            ? (int) $row->folder_quick_filter_weight
+                            : null,
+                        'source' => $row->folder_quick_filter_source,
+                    ];
+                }, $rows);
+
+                return $category;
+            });
+        } else {
+            // Even when the feature is disabled, ship an explicit empty array
+            // per category so the frontend never has to defend against missing
+            // keys. Cheap and additive.
+            $allCategories = $allCategories->map(function ($category) {
+                $category['quick_filters'] = [];
+
+                return $category;
+            });
+        }
 
         // Phase B2: Trash count for sidebar (show "Trash" only when it has items or we're on trash view)
         $trashCount = 0;
@@ -1663,6 +1714,16 @@ class AssetController extends Controller
         return Inertia::render('Assets/Index', [
             'tenant' => $tenant ? ['id' => $tenant->id] : null, // For Tags filter autocomplete
             'categories' => $allCategories,
+            // Phase 3 — Folder Quick Filters settings consumed by the sidebar.
+            // Strictly read-only metadata: enabled flag, desktop-only flag,
+            // max_visible_per_folder. The frontend uses this to gate rendering
+            // and trim the visible list — without it the categories key would
+            // need to redundantly carry per-row settings.
+            'folder_quick_filter_settings' => [
+                'enabled' => $folderQuickFiltersEnabled,
+                'desktop_only' => (bool) ($folderQuickFilterSettings['desktop_only'] ?? true),
+                'max_visible_per_folder' => (int) ($folderQuickFilterSettings['max_visible_per_folder'] ?? 3),
+            ],
             'bulk_categories_by_asset_type' => $bulkCategoriesByAssetType,
             'categories_by_type' => [
                 'all' => $allCategories,
