@@ -99,10 +99,13 @@ test('resolveQuickFilterTone: rowHoverBg and valueHoverBg are identical (Phase 5
     assert.equal(light.rowHoverBg, light.valueHoverBg, 'light variant: hover tones must match')
 })
 
-test('resolveQuickFilterTone: countLabel is a distinct, secondary tone (Phase 5)', () => {
-    const dark = resolveQuickFilterTone('#ffffff', '#5b2d7e').countLabel
-    const light = resolveQuickFilterTone('#0f172a').countLabel
-    // Both must be rgba/hex strings, not undefined.
-    assert.match(dark, /^rgba\(|^#/)
-    assert.match(light, /^rgba\(|^#/)
+test('resolveQuickFilterTone: brandAccentHex tints valueSelectedBg and indicators (light)', () => {
+    const t = resolveQuickFilterTone('#0f172a', '#f5f5f5', '#e2e8f0', '#7c3aed')
+    assert.match(t.valueSelectedBg, /^rgba\(124,\s*58,\s*237/)
+    assert.match(t.indicatorActiveBg, /^rgba\(124,\s*58,\s*237/)
+})
+
+test('resolveQuickFilterTone: brandAccentHex tints valueSelectedBg (dark sidebar)', () => {
+    const t = resolveQuickFilterTone('#ffffff', '#5b2d7e', '#3a1d52', '#a78bfa')
+    assert.match(t.valueSelectedBg, /^rgba\(167,\s*139,\s*250/)
 })

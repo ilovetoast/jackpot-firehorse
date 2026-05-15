@@ -2,7 +2,7 @@
  * Funnel control for expanding secondary filters — shared by AssetGridToolbar (inline) and AssetGridSecondaryFilters (legacy bar).
  */
 import { ChevronDownIcon, ChevronUpIcon, FunnelIcon } from '@heroicons/react/24/outline'
-import { getContrastTextColor } from '../utils/colorUtils'
+import { getSolidFillButtonForegroundHex } from '../utils/colorUtils'
 
 export default function MoreFiltersTriggerButton({
     isExpanded,
@@ -17,6 +17,8 @@ export default function MoreFiltersTriggerButton({
     controlsId = undefined,
 }) {
     const hasExpandableFields = visibleSecondaryFiltersLength > 0 || inlinePrimaryFiltersCollapsed
+    /** Brand count disk on neutral chrome — white on saturated orange (same rule as solid primary buttons). */
+    const badgeFg = getSolidFillButtonForegroundHex(brandPrimary)
 
     return (
         <button
@@ -33,12 +35,15 @@ export default function MoreFiltersTriggerButton({
                       : 'Expand filters'
             }
         >
-            <FunnelIcon className="h-4 w-4 text-slate-500 flex-shrink-0" aria-hidden />
-            <span className="text-xs sm:text-sm font-medium text-slate-700 truncate">Filters</span>
+            <FunnelIcon className="h-4 w-4 flex-shrink-0 text-slate-500" aria-hidden />
+            <span className="truncate text-xs font-medium text-slate-700 sm:text-sm">Filters</span>
             {activeFilterCount > 0 && (
                 <span
-                    className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold sm:text-xs"
-                    style={{ backgroundColor: brandPrimary, color: getContrastTextColor(brandPrimary) }}
+                    className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums sm:text-xs"
+                    style={{
+                        backgroundColor: brandPrimary,
+                        color: badgeFg,
+                    }}
                 >
                     {activeFilterCount}
                 </span>

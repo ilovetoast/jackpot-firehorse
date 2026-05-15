@@ -41,8 +41,29 @@ class AuthenticatedCrossOriginDeliveryPolicyTest extends TestCase
         $this->assertTrue(
             AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::VIDEO_PREVIEW, $asset)
         );
+        $this->assertTrue(
+            AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::AUDIO_WEB, $asset)
+        );
         $this->assertFalse(
             AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::THUMB_SMALL, $asset)
+        );
+    }
+
+    public function test_original_audio_requires_signed_cloudfront_url(): void
+    {
+        $mp3 = Asset::make(['mime_type' => 'audio/mpeg', 'original_filename' => 'a.mp3', 'storage_root_path' => '']);
+        $this->assertTrue(
+            AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::ORIGINAL, $mp3)
+        );
+
+        $extOnly = Asset::make(['mime_type' => 'application/octet-stream', 'original_filename' => 'b.WAV', 'storage_root_path' => '']);
+        $this->assertTrue(
+            AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::ORIGINAL, $extOnly)
+        );
+
+        $video = Asset::make(['mime_type' => 'video/mp4', 'original_filename' => 'c.mp4', 'storage_root_path' => '']);
+        $this->assertFalse(
+            AuthenticatedCrossOriginDeliveryPolicy::requiresSignedCloudFrontUrl(AssetVariant::ORIGINAL, $video)
         );
     }
 }

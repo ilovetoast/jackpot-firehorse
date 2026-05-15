@@ -3,7 +3,7 @@
  * segmented toggles when option count is small, Collections-style native select when larger.
  */
 import { useId } from 'react'
-import { getContrastTextColor, hexToRgba, ensureAccentContrastOnWhite } from '../utils/colorUtils'
+import { hexToRgba, ensureAccentContrastOnWhite, getSolidFillButtonForegroundHex } from '../utils/colorUtils'
 
 /** Max number of distinct option values to show as segmented buttons (excluding "Any"). */
 export const PRIMARY_FILTER_SEGMENT_MAX = 6
@@ -37,13 +37,13 @@ function valuesMatchOption(optionValue, current) {
 export function SegmentedPrimaryFilter({ label, accentColor, options, value, onChange, anyLabel = 'Any' }) {
     const accent = normalizeHex(accentColor)
     const safeAccent = ensureAccentContrastOnWhite(accent)
-    const mutedRing = hexToRgba(safeAccent, 0.35)
     const isAny = value === null || value === undefined || value === ''
 
+    const selectedSolidFg = getSolidFillButtonForegroundHex(safeAccent)
     const activeStyle = {
-        backgroundColor: '#fff',
-        color: safeAccent,
-        boxShadow: `0 0 0 1.5px ${mutedRing}, 0 1px 2px ${hexToRgba('#000000', 0.05)}`,
+        backgroundColor: safeAccent,
+        color: selectedSolidFg,
+        boxShadow: `0 1px 2px ${hexToRgba('#000000', 0.06)}`,
     }
 
     return (

@@ -393,6 +393,7 @@ export default function AssetSidebar({
                                             // dark slate).
                                             sidebarColor={sidebarColor}
                                             sidebarActiveBgColor={activeBgColor}
+                                            brandAccentHex={workspaceAccentColor}
                                         />
                                         </div>
                                     )

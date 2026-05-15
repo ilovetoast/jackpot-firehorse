@@ -5,6 +5,7 @@
 import { useMemo, useCallback } from 'react'
 import { router, usePage } from '@inertiajs/react'
 import { XMarkIcon } from '@heroicons/react/20/solid'
+import { getWorkspaceButtonColor, hexToRgba } from '../utils/colorUtils'
 import {
     MULTI_VALUE_FILTER_KEYS,
     stripUrlParams,
@@ -52,6 +53,18 @@ export default function AssetFilterChipsBar({
 }) {
     const { url, props: pageProps } = usePage()
     const uploadedByUsers = pageProps?.uploaded_by_users || []
+    const chipAccent = useMemo(
+        () => getWorkspaceButtonColor(pageProps?.auth?.activeBrand) || '#6366f1',
+        [pageProps?.auth?.activeBrand],
+    )
+    const chipSurfaceStyle = useMemo(
+        () => ({
+            borderColor: hexToRgba(chipAccent, 0.22),
+            backgroundColor: hexToRgba(chipAccent, 0.1),
+            color: chipAccent,
+        }),
+        [chipAccent],
+    )
     const gridFileTypeLabelByKey = useMemo(() => {
         const m = new Map()
         const grouped = pageProps?.dam_file_types?.grid_file_type_filter_options?.grouped
@@ -176,6 +189,8 @@ export default function AssetFilterChipsBar({
 
     if (chips.length === 0) return null
 
+    const focusRing = `2px solid ${hexToRgba(chipAccent, 0.45)}`
+
     return (
         <div className="border-b border-gray-200 bg-white px-3 py-2 lg:hidden">
             <div className="flex flex-wrap items-center gap-2">
@@ -184,11 +199,30 @@ export default function AssetFilterChipsBar({
                         key={c.id}
                         type="button"
                         onClick={() => applyParams(c.apply())}
-                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-gray-200 bg-gray-50 py-1 pl-2.5 pr-1 text-left text-xs font-medium text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border py-1 pl-2.5 pr-1 text-left text-xs font-medium hover:brightness-[0.97] focus:outline-none"
+                        style={{
+                            ...chipSurfaceStyle,
+                            boxShadow: 'none',
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = hexToRgba(chipAccent, 0.14)
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = hexToRgba(chipAccent, 0.1)
+                        }}
+                        onFocus={(e) => {
+                            e.currentTarget.style.boxShadow = `0 0 0 ${focusRing}`
+                        }}
+                        onBlur={(e) => {
+                            e.currentTarget.style.boxShadow = 'none'
+                        }}
                         title="Remove filter"
                     >
                         <span className="min-w-0 truncate">{c.label}</span>
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-gray-500 hover:bg-gray-200 hover:text-gray-800">
+                        <span
+                            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full opacity-90 hover:opacity-100"
+                            style={{ color: chipAccent }}
+                        >
                             <XMarkIcon className="h-3.5 w-3.5" aria-hidden />
                             <span className="sr-only">Remove</span>
                         </span>

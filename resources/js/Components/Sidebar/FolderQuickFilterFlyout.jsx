@@ -37,6 +37,8 @@ export default function FolderQuickFilterFlyout({
     categoryId,
     /** Optional pre-derived tone from the row. If omitted, we derive from textColor on the page. */
     tone: incomingTone,
+    /** Other quick-filter dimensions on this folder — removed from URL when this dimension changes. */
+    exclusiveQuickFilterKeys = [],
     inertiaOnly = [
         'assets',
         'next_page_url',
@@ -183,10 +185,19 @@ export default function FolderQuickFilterFlyout({
         [filterableSchema]
     )
 
-    const filterKeys = useMemo(
-        () => buildFilterKeysForQuickFilter(schemaKeys, field.key),
-        [schemaKeys, field.key]
-    )
+    // Union every folder quick-filter dimension key into `filterKeys`, not
+    // only schema + the active field. `buildUrlParamsWithFlatFilters` strips
+    // every key in this list from the URL before re-serializing `draft`; keys
+    // missing here survive the round-trip even when `draft` deletes them
+    // (the classic hidden-from-schema sibling quick filter bug).
+    const filterKeys = useMemo(() => {
+        const base = buildFilterKeysForQuickFilter(schemaKeys, field.key)
+        const set = new Set(base)
+        for (const k of exclusiveQuickFilterKeys || []) {
+            if (k) set.add(k)
+        }
+        return [...set]
+    }, [schemaKeys, field.key, exclusiveQuickFilterKeys])
 
     const selectedFromUrl = useMemo(() => {
         if (typeof window === 'undefined') return []
@@ -200,12 +211,21 @@ export default function FolderQuickFilterFlyout({
 
     const applyMutation = useCallback(
         (mutator, kind) => {
+            const stripKeys = exclusiveQuickFilterKeys || []
+            const wrappedMutator = (draft, key) => {
+                for (const ex of stripKeys) {
+                    if (ex && ex !== key) {
+                        delete draft[ex]
+                    }
+                }
+                mutator(draft, key)
+            }
             const before =
                 typeof window !== 'undefined' ? window.location.search : ''
             const params = buildNextParamsForQuickFilter(
                 before,
                 field.key,
-                (draft) => mutator(draft, field.key),
+                wrappedMutator,
                 filterKeys
             )
             if (debugEnabled) {
@@ -224,7 +244,7 @@ export default function FolderQuickFilterFlyout({
                 only: inertiaOnly,
             })
         },
-        [field.key, field.type, filterKeys, inertiaOnly, debugEnabled]
+        [field.key, field.type, filterKeys, inertiaOnly, debugEnabled, exclusiveQuickFilterKeys]
     )
 
     const onToggleMulti = useCallback(
@@ -424,7 +444,11 @@ export default function FolderQuickFilterFlyout({
                     }}
                 >
                     <a
-                        href={`/app/admin/metadata/fields/${field.id}`}
+                        href={
+                            typeof route === 'function'
+                                ? route('tenant.metadata.fields.show', field.id)
+                                : `/app/tenant/metadata/fields/${field.id}`
+                        }
                         className="text-[11px] underline-offset-2 hover:underline"
                         style={{ color: tone.labelWeak }}
                         onClick={(e) => {

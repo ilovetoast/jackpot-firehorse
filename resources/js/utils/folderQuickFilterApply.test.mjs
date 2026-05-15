@@ -224,6 +224,38 @@ test('buildNextParamsForQuickFilter: hidden-from-schema field still applies (Pha
     assert.equal(params.photo_type, 'studio')
 })
 
+test('buildNextParamsForQuickFilter: sibling quick-filter param drops when key is in filterKeys union', () => {
+    const before = '?photo_type=action&environment_type=indoor'
+    const filterKeys = ['environment_type', 'photo_type']
+    const params = buildNextParamsForQuickFilter(
+        before,
+        'environment_type',
+        (draft, key) => {
+            delete draft.photo_type
+            applySingleSelect(draft, key, 'studio')
+        },
+        filterKeys
+    )
+    assert.equal(params.photo_type, undefined)
+    assert.equal(params.environment_type, 'studio')
+})
+
+test('buildNextParamsForQuickFilter: sibling survives rebuild when omitted from filterKeys (regression guard)', () => {
+    const before = '?photo_type=action&environment_type=indoor'
+    const filterKeys = ['environment_type']
+    const params = buildNextParamsForQuickFilter(
+        before,
+        'environment_type',
+        (draft, key) => {
+            delete draft.photo_type
+            applySingleSelect(draft, key, 'studio')
+        },
+        filterKeys
+    )
+    assert.equal(params.photo_type, 'action')
+    assert.equal(params.environment_type, 'studio')
+})
+
 test('buildNextParamsForQuickFilter: no duplicate query params after toggle round-trip', () => {
     // Apply multiselect, then again — should never end up with both
     // `subject_type=people` and `subject_type[0]=people` simultaneously.

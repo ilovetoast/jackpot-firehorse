@@ -14,8 +14,10 @@
  * @param {string|undefined|null} textColor          Sidebar foreground color hex (e.g. '#ffffff' or '#0f172a').
  * @param {string|undefined|null} sidebarColor       Sidebar background color hex (e.g. '#5B2D7E').
  * @param {string|undefined|null} sidebarActiveBg    Brand-darkened active-row background hex (Sidebar `activeBgColor`).
+ * @param {string|undefined|null} brandAccentHex     Workspace / brand primary (e.g. button color). When set, selected
+ *                                                    flyout rows + multiselect indicators tint from this instead of slate.
  */
-export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg) {
+export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg, brandAccentHex = null) {
     const tc = (textColor || '').toString().trim().toLowerCase()
     const isDark = tc === '#ffffff' || tc === '#fff' || tc === 'white'
 
@@ -29,19 +31,21 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg)
     // the flyout's selected row matches the sidebar's active folder row).
     // Otherwise compute a small darken on the surface — selection is always
     // a *darken*, never a saturate, to match the brand visual language.
-    const selectedHex =
+    const anchorHex =
         normalizeHex(sidebarActiveBg) || darkenOrLighten(surfaceHex, isDark ? -0.20 : -0.08)
-    // Hover is a softer darken than selected.
-    const hoverHex = darkenOrLighten(surfaceHex, isDark ? -0.10 : -0.04)
-    // Open-row background lives on the SIDEBAR (not the flyout). It should
-    // visually merge into the flyout surface, so we use the same selected
-    // hex with slight translucency so the sidebar tone bleeds through.
-    const rowOpenBg = withAlpha(selectedHex, 0.85)
+    const brandHex = normalizeHex(brandAccentHex)
+    const valueSelectedBg = brandHex
+        ? isDark
+            ? withAlpha(brandHex, 0.44)
+            : withAlpha(brandHex, 0.14)
+        : anchorHex
+    const rowOpenBg = withAlpha(anchorHex, 0.85)
     // Phase 5 — unified hover intensity across the row + flyout values.
     // 0.55 alpha puts the hover squarely between idle and selected, and
     // renders identically on both the opaque sidebar surface and the
     // translucent flyout surface (which is the same brand color at 96-98%
     // opacity, so a 0.55 darken composes the same way).
+    const hoverHex = anchorHex
     const sharedHoverBg = withAlpha(hoverHex, 0.55)
 
     if (isDark) {
@@ -54,7 +58,7 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg)
             rowOpenBg,
             rowHoverBg: sharedHoverBg,
             valueHoverBg: sharedHoverBg,
-            valueSelectedBg: selectedHex,
+            valueSelectedBg,
             labelStrong: 'rgba(255, 255, 255, 0.96)',
             labelWeak: 'rgba(255, 255, 255, 0.65)',
             // Phase 5 — count text color is exposed explicitly so tests can
@@ -62,8 +66,8 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg)
             // the opacity stack.
             countLabel: 'rgba(255, 255, 255, 0.62)',
             indicatorBorder: 'rgba(255, 255, 255, 0.32)',
-            indicatorActiveBg: 'rgba(255, 255, 255, 0.92)',
-            indicatorActiveFg: 'rgba(20, 22, 28, 1)',
+            indicatorActiveBg: brandHex ? withAlpha(brandHex, 0.75) : 'rgba(255, 255, 255, 0.92)',
+            indicatorActiveFg: brandHex ? '#ffffff' : 'rgba(20, 22, 28, 1)',
             leftGuide: 'rgba(255, 255, 255, 0.10)',
             // Layered ambient shadow tuned for darker brand surfaces.
             shadow:
@@ -81,13 +85,13 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg)
         rowOpenBg,
         rowHoverBg: sharedHoverBg,
         valueHoverBg: sharedHoverBg,
-        valueSelectedBg: selectedHex,
+        valueSelectedBg,
         labelStrong: 'rgba(15, 23, 42, 0.92)',
         labelWeak: 'rgba(71, 85, 105, 0.85)',
         countLabel: 'rgba(71, 85, 105, 0.78)',
         indicatorBorder: 'rgba(71, 85, 105, 0.45)',
-        indicatorActiveBg: 'rgba(30, 41, 59, 0.95)',
-        indicatorActiveFg: 'rgba(255, 255, 255, 1)',
+        indicatorActiveBg: brandHex ? withAlpha(brandHex, 0.88) : 'rgba(30, 41, 59, 0.95)',
+        indicatorActiveFg: brandHex ? '#ffffff' : 'rgba(255, 255, 255, 1)',
         leftGuide: 'rgba(15, 23, 42, 0.08)',
         shadow:
             '0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 18px -6px rgba(15, 23, 42, 0.12), 0 24px 60px -24px rgba(15, 23, 42, 0.18)',

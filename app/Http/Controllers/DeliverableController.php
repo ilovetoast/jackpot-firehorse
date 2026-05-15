@@ -12,6 +12,8 @@ use App\Services\AssetSearchService;
 use App\Services\AssetSortService;
 use App\Services\BrandLibraryCategoryCountService;
 use App\Services\FileTypeService;
+use App\Services\Filters\FolderQuickFilterAssignmentService;
+use App\Services\Filters\FolderQuickFilterQualityService;
 use App\Services\Lifecycle\LifecycleResolver;
 use App\Services\MetadataFilterService;
 use App\Services\MetadataSchemaResolver;
@@ -60,6 +62,9 @@ class DeliverableController extends Controller
         $user = $request->user();
 
         if (! $tenant || ! $brand) {
+            $folderQuickFilterSettings = (array) config('categories.folder_quick_filters', []);
+            $folderQuickFiltersEnabled = (bool) ($folderQuickFilterSettings['enabled'] ?? false);
+
             return Inertia::render('Deliverables/Index', [
                 'categories' => [],
                 'bulk_categories_by_asset_type' => [
@@ -78,6 +83,12 @@ class DeliverableController extends Controller
                 'compliance_filter' => '',
                 'show_compliance_filter' => false,
                 'q' => '',
+                'folder_quick_filter_settings' => [
+                    'enabled' => $folderQuickFiltersEnabled,
+                    'desktop_only' => (bool) ($folderQuickFilterSettings['desktop_only'] ?? true),
+                    'max_visible_per_folder' => (int) ($folderQuickFilterSettings['max_visible_per_folder'] ?? 3),
+                    'can_manage_filters' => false,
+                ],
             ]);
         }
 
@@ -225,6 +236,71 @@ class DeliverableController extends Controller
 
             return $category;
         });
+
+        // Phase 3 — Folder Quick Filters: mirror AssetController::index() so the
+        // shared AssetSidebar + FolderQuickFilters work on /app/executions.
+        $folderQuickFilterSettings = (array) config('categories.folder_quick_filters', []);
+        $folderQuickFiltersEnabled = (bool) ($folderQuickFilterSettings['enabled'] ?? false);
+        if ($folderQuickFiltersEnabled && $categories->isNotEmpty()) {
+            /** @var FolderQuickFilterAssignmentService $quickFilterAssignment */
+            $quickFilterAssignment = app(FolderQuickFilterAssignmentService::class);
+            /** @var FolderQuickFilterQualityService $quickFilterQuality */
+            $quickFilterQuality = app(FolderQuickFilterQualityService::class);
+            $quickFilterRowsByCategoryId = $quickFilterAssignment->getQuickFiltersForFolders($categories);
+
+            $allCategories = $allCategories->map(function ($category) use ($quickFilterRowsByCategoryId, $quickFilterQuality, $tenant) {
+                $id = isset($category['id']) ? (int) $category['id'] : 0;
+                $rows = $id > 0 ? ($quickFilterRowsByCategoryId[$id] ?? []) : [];
+
+                $category['quick_filters'] = array_map(static function ($row) use ($quickFilterQuality, $tenant) {
+                    $field = $row->metadataField;
+
+                    $quality = $field
+                        ? $quickFilterQuality->evaluate($field, $tenant)
+                        : [
+                            'estimated_distinct_value_count' => null,
+                            'last_facet_usage_at' => null,
+                            'facet_usage_count' => 0,
+                            'is_high_cardinality' => false,
+                            'is_low_quality_candidate' => false,
+                            'alias_count' => 0,
+                            'duplicate_candidate_count' => 0,
+                            'warnings' => [],
+                        ];
+
+                    return [
+                        'metadata_field_id' => (int) $row->metadata_field_id,
+                        'field_key' => (string) ($field?->key ?? ''),
+                        'label' => (string) ($field?->system_label ?? ($field?->key ?? '')),
+                        'field_type' => (string) ($field?->type ?? ''),
+                        'order' => $row->folder_quick_filter_order !== null
+                            ? (int) $row->folder_quick_filter_order
+                            : null,
+                        'weight' => $row->folder_quick_filter_weight !== null
+                            ? (int) $row->folder_quick_filter_weight
+                            : null,
+                        'source' => $row->folder_quick_filter_source,
+                        'pinned' => (bool) $row->is_pinned_folder_quick_filter,
+                        'quality' => [
+                            'is_high_cardinality' => (bool) $quality['is_high_cardinality'],
+                            'is_low_quality_candidate' => (bool) $quality['is_low_quality_candidate'],
+                            'estimated_distinct_value_count' => $quality['estimated_distinct_value_count'],
+                            'alias_count' => (int) ($quality['alias_count'] ?? 0),
+                            'duplicate_candidate_count' => (int) ($quality['duplicate_candidate_count'] ?? 0),
+                            'warnings' => $quality['warnings'],
+                        ],
+                    ];
+                }, $rows);
+
+                return $category;
+            });
+        } else {
+            $allCategories = $allCategories->map(function ($category) {
+                $category['quick_filters'] = [];
+
+                return $category;
+            });
+        }
 
         // Phase B2: Trash count for sidebar (show "Trash" only when it has items or we're on trash view)
         $trashCount = 0;
@@ -1161,6 +1237,14 @@ class DeliverableController extends Controller
 
         return Inertia::render('Deliverables/Index', [
             'categories' => $allCategories,
+            'folder_quick_filter_settings' => [
+                'enabled' => $folderQuickFiltersEnabled,
+                'desktop_only' => (bool) ($folderQuickFilterSettings['desktop_only'] ?? true),
+                'max_visible_per_folder' => (int) ($folderQuickFilterSettings['max_visible_per_folder'] ?? 3),
+                'can_manage_filters' => (bool) ($user
+                    && $tenant
+                    && $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')),
+            ],
             'bulk_categories_by_asset_type' => $bulkCategoriesByAssetType,
             'total_asset_count' => $totalDeliverableCount, // Total count for "All" and sidebar parity with Assets
             'selected_category' => $categoryId ? (int) $categoryId : null, // Category ID for frontend state

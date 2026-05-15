@@ -60,6 +60,7 @@ import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 import Avatar from './Avatar'
 import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
+import { getWorkspaceButtonColor, hexToRgba } from '../utils/colorUtils'
 
 const GRID_PARTIAL_RELOAD_KEYS = [
     'assets',
@@ -183,7 +184,21 @@ export default function AssetGridSecondaryFilters({
         }
         return m
     }, [gridFileTypeGroups])
-    const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
+    const brandPrimary =
+        primaryColor ||
+        getWorkspaceButtonColor(auth?.activeBrand) ||
+        auth?.activeBrand?.primary_color ||
+        '#6366f1'
+
+    /** Ghost chip: brand tint fill + brand primary copy (never slate/black) — matches workspace filter badge contract. */
+    const appliedMetadataPillStyle = useMemo(
+        () => ({
+            backgroundColor: hexToRgba(brandPrimary, 0.1),
+            color: brandPrimary,
+            border: `1px solid ${hexToRgba(brandPrimary, 0.22)}`,
+        }),
+        [brandPrimary],
+    )
 
     const partialReloadKeys = useMemo(
         () =>
@@ -731,14 +746,29 @@ export default function AssetGridSecondaryFilters({
                                     }
                                 }
                                 return (
-                                    <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                    <span
+                                        key={fieldKey}
+                                        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
+                                        style={appliedMetadataPillStyle}
+                                    >
                                         {getFieldLabel(fieldKey)}: {optionColor ? (
                                             <span className="inline-flex items-center gap-1">
-                                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: optionColor }} />
+                                                <span
+                                                    className="h-2 w-2 flex-shrink-0 rounded-full ring-1 ring-slate-400/35"
+                                                    style={{ backgroundColor: optionColor }}
+                                                />
                                                 {valueLabel}
                                             </span>
                                         ) : valueLabel}
-                                        <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveFilter(fieldKey)}
+                                            className="opacity-90 hover:opacity-100"
+                                            style={{ color: appliedMetadataPillStyle.color }}
+                                            aria-label={`Remove ${fieldKey} filter`}
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
                                     </span>
                                 )
                             })}
@@ -770,7 +800,10 @@ export default function AssetGridSecondaryFilters({
                                 const u = findUploadedByUser(pageProps.uploaded_by_users, userFilter)
                                 const label = u ? (u.name || u.email || 'User') : 'Unknown'
                                 return (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                    <span
+                                        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
+                                        style={appliedMetadataPillStyle}
+                                    >
                                         {u ? (
                                             <Avatar
                                                 avatarUrl={u.avatar_url}
@@ -782,7 +815,15 @@ export default function AssetGridSecondaryFilters({
                                             />
                                         ) : null}
                                         <span>Uploaded by: {label}</span>
-                                        <button type="button" onClick={() => handleUserFilterChange(null)} className="text-indigo-600 hover:text-indigo-800" aria-label="Remove filter"><XMarkIcon className="h-3 w-3" /></button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleUserFilterChange(null)}
+                                            className="opacity-90 hover:opacity-100"
+                                            style={{ color: appliedMetadataPillStyle.color }}
+                                            aria-label="Remove filter"
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
                                     </span>
                                 )
                             })()}
@@ -806,14 +847,29 @@ export default function AssetGridSecondaryFilters({
                                     }
                                 }
                                 return (
-                                    <span key={fieldKey} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded">
+                                    <span
+                                        key={fieldKey}
+                                        className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
+                                        style={appliedMetadataPillStyle}
+                                    >
                                         {field.display_label || field.label}: {optionColor ? (
                                             <span className="inline-flex items-center gap-1">
-                                                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: optionColor }} />
+                                                <span
+                                                    className="h-2 w-2 flex-shrink-0 rounded-full ring-1 ring-slate-400/35"
+                                                    style={{ backgroundColor: optionColor }}
+                                                />
                                                 {valueLabel}
                                             </span>
                                         ) : valueLabel}
-                                        <button type="button" onClick={() => handleRemoveFilter(fieldKey)} className="text-indigo-600 hover:text-indigo-800" aria-label={`Remove ${fieldKey} filter`}><XMarkIcon className="h-3 w-3" /></button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveFilter(fieldKey)}
+                                            className="opacity-90 hover:opacity-100"
+                                            style={{ color: appliedMetadataPillStyle.color }}
+                                            aria-label={`Remove ${fieldKey} filter`}
+                                        >
+                                            <XMarkIcon className="h-3 w-3" />
+                                        </button>
                                     </span>
                                 )
                             })}

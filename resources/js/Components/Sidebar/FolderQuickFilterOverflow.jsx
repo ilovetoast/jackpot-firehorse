@@ -27,6 +27,8 @@ export default function FolderQuickFilterOverflow({
     categoryId,
     tone,
     activeCountByFieldKey = {},
+    /** All folder quick-filter field keys (visible + hidden) for URL exclusivity in the value flyout. */
+    allQuickFilterFieldKeys = [],
 }) {
     const [selectedField, setSelectedField] = useState(null)
     const reportedRef = useMemo(() => ({ current: false }), [])
@@ -99,6 +101,9 @@ export default function FolderQuickFilterOverflow({
                                     field={selectedField}
                                     categoryId={categoryId}
                                     tone={tone}
+                                    exclusiveQuickFilterKeys={allQuickFilterFieldKeys.filter(
+                                        (k) => k !== selectedField.key
+                                    )}
                                     onBack={() => setSelectedField(null)}
                                     onRequestClose={() => {
                                         setSelectedField(null)
@@ -208,7 +213,7 @@ function OverflowListView({ hiddenFilters, tone, activeCountByFieldKey, onPick }
  * "back" affordance so users can return to the overflow list without
  * dismissing the popover entirely.
  */
-function OverflowValueView({ field, categoryId, tone, onBack, onRequestClose }) {
+function OverflowValueView({ field, categoryId, tone, exclusiveQuickFilterKeys, onBack, onRequestClose }) {
     return (
         <div className="relative">
             <button
@@ -231,6 +236,7 @@ function OverflowValueView({ field, categoryId, tone, onBack, onRequestClose }) 
                 field={field}
                 categoryId={categoryId}
                 tone={tone}
+                exclusiveQuickFilterKeys={exclusiveQuickFilterKeys}
                 onRequestClose={onRequestClose}
             />
         </div>

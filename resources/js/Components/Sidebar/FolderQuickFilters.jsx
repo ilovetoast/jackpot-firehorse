@@ -41,6 +41,8 @@ export default function FolderQuickFilters({
     sidebarColor,
     /** Phase 4.4 — sidebar's brand-darkened active-row bg (mirrors active folder). */
     sidebarActiveBgColor,
+    /** Workspace brand primary (hex) — tints selected flyout rows toward brand, not slate blue. */
+    brandAccentHex,
 }) {
     const { props, url } = usePage()
     const settings = props?.folder_quick_filter_settings || {}
@@ -132,6 +134,11 @@ export default function FolderQuickFilters({
         return { visible: visibleOut, hidden: hiddenOut }
     }, [quickFilters, maxVisible])
 
+    const quickFilterFieldKeys = useMemo(
+        () => (quickFilters || []).map((r) => r?.field_key).filter(Boolean),
+        [quickFilters],
+    )
+
     // Empty / disabled / inactive: render nothing. NEVER an empty container.
     if (!isActiveFolder) return null
     if (!enabled) return null
@@ -139,7 +146,7 @@ export default function FolderQuickFilters({
 
     // Phase 4.4: brand-aware tonal palette tinted from the sidebar surface
     // and active-row tone.
-    const tone = resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBgColor)
+    const tone = resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBgColor, brandAccentHex)
 
     return (
         <ul
@@ -165,6 +172,7 @@ export default function FolderQuickFilters({
                                 label: row.label,
                                 type: row.field_type,
                             }}
+                            exclusiveQuickFilterKeys={quickFilterFieldKeys.filter((k) => k !== row.field_key)}
                             categoryId={categoryId}
                             // Phase 4.3 — binary active state. Count travels
                             // through for a11y only.
@@ -191,6 +199,7 @@ export default function FolderQuickFilters({
                         categoryId={categoryId}
                         tone={tone}
                         activeCountByFieldKey={activeCountByFieldKey}
+                        allQuickFilterFieldKeys={quickFilterFieldKeys}
                     />
                 </li>
             ) : null}

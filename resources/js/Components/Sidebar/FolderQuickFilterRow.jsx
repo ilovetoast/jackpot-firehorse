@@ -19,6 +19,8 @@ import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 export default function FolderQuickFilterRow({
     field,
     categoryId,
+    /** Other folder quick-filter field keys on this folder — cleared when this dimension applies (single-slot UX). */
+    exclusiveQuickFilterKeys = [],
     isActive = false,
     activeValueCount = 0,
     /** Phase 5.2 — pinned by admin; shows a subtle leading glyph. */
@@ -117,6 +119,7 @@ export default function FolderQuickFilterRow({
                                 field={field}
                                 categoryId={categoryId}
                                 tone={tone}
+                                exclusiveQuickFilterKeys={exclusiveQuickFilterKeys}
                                 onRequestClose={close}
                             />
                         </PopoverPanel>
