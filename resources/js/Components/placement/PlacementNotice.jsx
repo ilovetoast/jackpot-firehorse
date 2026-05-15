@@ -34,6 +34,14 @@ export default function PlacementNotice({
 
 /**
  * Checkbox acknowledgement row matching {@link PlacementNotice} surfaces.
+ *
+ * `accentColor` (optional, hex) — paints the native checkbox via CSS
+ * `accent-color`. Without it the placement's `text-*` class on a native
+ * checkbox is a no-op (the OS / UA accent wins, usually blue), which is
+ * why brand workspaces previously showed a system-blue checkbox even when
+ * `placement="brand"` was set.
+ *
+ * @param {string} [accentColor]
  */
 export function PlacementNoticeAckRow({
     placement = 'tenant',
@@ -43,6 +51,7 @@ export function PlacementNoticeAckRow({
     label,
     className = '',
     disabled = false,
+    accentColor = null,
 }) {
     const s = PLACEMENT_SURFACES[placement] ?? PLACEMENT_SURFACES.tenant
     const ring = PLACEMENT_TONE_RING[tone] ?? ''
@@ -56,6 +65,7 @@ export function PlacementNoticeAckRow({
             <input
                 type="checkbox"
                 className={`mt-0.5 h-4 w-4 rounded border-gray-300 ${s.checkbox}`}
+                style={accentColor ? { accentColor } : undefined}
                 checked={checked}
                 onChange={onChange}
                 disabled={disabled}

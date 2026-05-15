@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\DerivativeProcessor;
 use App\Enums\DerivativeType;
 use App\Enums\ThumbnailStatus;
+use App\Exceptions\Model3dPreviewFailedException;
 use App\Jobs\Concerns\QueuesOnImagesChannel;
 use App\Models\Asset;
 use App\Models\AssetEvent;
@@ -1622,6 +1623,47 @@ class GenerateThumbnailsJob implements ShouldQueue
                 return;
             }
 
+            // 3D preview failure (Blender process error, invalid GLB bytes, unsupported model, etc.):
+            // same shape as resource exhaustion — retrying the same broken model on the same Blender
+            // build never produces a different outcome. Mark SKIPPED, complete the job, and skip
+            // Sentry so a single user-uploaded broken model doesn't spam 32 error events.
+            if ($asset && ($model3dException = $this->extractModel3dPreviewFailure($e)) !== null) {
+                $this->applyModel3dPreviewSkip($asset, $version, $model3dException);
+                $asset->refresh();
+                $this->finalizeTerminalThumbnailFailureAndContinuePipeline($asset, $model3dException->getMessage());
+                \App\Services\UploadDiagnosticLogger::jobFail('GenerateThumbnailsJob', $asset->id, $model3dException->getMessage(), [
+                    'model3d_preview_failed' => true,
+                    'invalid_source' => $model3dException->invalidSource,
+                    'blender_attempted' => $model3dException->blenderAttempted,
+                    'file_type' => $model3dException->fileType,
+                    'terminal_no_retry' => true,
+                ]);
+                try {
+                    \App\Services\ActivityRecorder::logAsset(
+                        $asset,
+                        \App\Enums\EventType::ASSET_THUMBNAIL_SKIPPED,
+                        [
+                            'reason' => $model3dException->invalidSource
+                                ? 'model3d_invalid_source'
+                                : 'model3d_preview_failed',
+                            'file_type' => $model3dException->fileType,
+                            'message' => $model3dException->userMessage,
+                        ]
+                    );
+                } catch (\Throwable $logEx) {
+                    Log::warning('[GenerateThumbnailsJob] Activity log failed (model3d skip)', ['error' => $logEx->getMessage()]);
+                }
+                Log::warning('[GenerateThumbnailsJob] Terminal skip — 3D preview failed (no retry)', [
+                    'asset_id' => $asset->id,
+                    'file_type' => $model3dException->fileType,
+                    'blender_attempted' => $model3dException->blenderAttempted,
+                    'invalid_source' => $model3dException->invalidSource,
+                    'message' => $model3dException->getMessage(),
+                ]);
+
+                return;
+            }
+
             if ($asset) {
                 Log::error('[GenerateThumbnailsJob] Thumbnail generation failed', [
                     'asset_id' => $asset->id,
@@ -2125,6 +2167,83 @@ class GenerateThumbnailsJob implements ShouldQueue
             || str_contains($msg, 'map cache')
             || (str_contains($msg, 'magick:')
                 && (str_contains($msg, 'memory') || str_contains($msg, 'resource') || str_contains($msg, 'limit')));
+    }
+
+    /**
+     * Walk the exception chain looking for a {@see Model3dPreviewFailedException}; returns null
+     * when the failure originated elsewhere. The 3D preview path can be wrapped by the queue
+     * (MaxAttemptsExceededException, etc.) once retries enter terminal handling.
+     */
+    protected function extractModel3dPreviewFailure(\Throwable $e): ?Model3dPreviewFailedException
+    {
+        $cursor = $e;
+        $depth = 0;
+        while ($cursor instanceof \Throwable && $depth < 8) {
+            if ($cursor instanceof Model3dPreviewFailedException) {
+                return $cursor;
+            }
+            $cursor = $cursor->getPrevious();
+            $depth++;
+        }
+
+        return null;
+    }
+
+    /**
+     * Terminal SKIPPED after a 3D preview failure (Blender crash / invalid model / unsupported
+     * geometry). Mirrors {@see applyResourceExhaustionSkip} but persists the structured
+     * {@see ThumbnailGenerationService::$model3dPreviewReport}-shaped diagnostics under
+     * `metadata.model_3d_preview` so the asset card and support tooling can surface a real
+     * reason instead of a generic "thumbnail failed".
+     */
+    protected function applyModel3dPreviewSkip(
+        Asset $asset,
+        ?AssetVersion $version,
+        Model3dPreviewFailedException $e,
+    ): void {
+        $userMsg = $e->userMessage !== ''
+            ? $e->userMessage
+            : 'We couldn\'t generate a 3D preview for this file. You can still download the original.';
+
+        $previewReport = [
+            'failure_message' => $e->getMessage(),
+            'invalid_glb_source' => $e->invalidSource,
+            'blender_used' => false,
+            'blender_attempted' => $e->blenderAttempted,
+            'poster_stub' => false,
+            'file_type' => $e->fileType,
+            'blender_render_debug' => $e->debug,
+            'failed_at' => now()->toIso8601String(),
+        ];
+
+        $metadata = array_merge($asset->metadata ?? [], [
+            'thumbnail_skip_reason' => $e->invalidSource ? 'model3d_invalid_source' : 'model3d_preview_failed',
+            'thumbnail_skip_message' => $userMsg,
+            'preview_unavailable_user_message' => $userMsg,
+            'thumbnails_generated' => false,
+            'pipeline_preview_last_error' => $this->sanitizeErrorMessage($e->getMessage()),
+            'model_3d_preview' => array_merge(
+                is_array($asset->metadata['model_3d_preview'] ?? null) ? $asset->metadata['model_3d_preview'] : [],
+                $previewReport,
+            ),
+        ]);
+
+        $asset->update([
+            'thumbnail_status' => ThumbnailStatus::SKIPPED,
+            'thumbnail_error' => null,
+            'thumbnail_started_at' => null,
+            'metadata' => $metadata,
+        ]);
+        if ($version) {
+            $version->update([
+                'pipeline_status' => 'complete',
+                'metadata' => array_merge($version->metadata ?? [], [
+                    'thumbnail_skip_reason' => $e->invalidSource ? 'model3d_invalid_source' : 'model3d_preview_failed',
+                    'thumbnails_generated' => false,
+                    'model_3d_preview' => $previewReport,
+                ]),
+            ]);
+        }
     }
 
     /**

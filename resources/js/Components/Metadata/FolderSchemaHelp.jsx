@@ -10,6 +10,14 @@ import {
 import { useBrandWorkbenchChrome } from '../../contexts/BrandWorkbenchChromeContext'
 import { usePermission } from '../../hooks/usePermission'
 import { buildBrandWorkbenchChromePackage } from '../../utils/brandWorkbenchTheme'
+import {
+    RECOMMENDATION_HINT_LABEL,
+    RECOMMENDATION_INTENT,
+    formatRecommendationScore,
+    intentChipTone,
+    recommendationLabel,
+} from '../../utils/contextualNavigationRecommendations'
+import MetadataHygienePanel from './MetadataHygienePanel'
 
 const MANAGE_CATEGORIES_URL =
     typeof route === 'function' ? route('manage.categories') : '/app/manage/categories'
@@ -230,6 +238,17 @@ function QuickFilterControls({ field, categoryId, canToggle, onChanged }) {
     const ineligibleReason = qf.ineligible_reason || null
     const order = qf.order
     const weight = qf.weight
+    // Phase 5.2 — pinning + quality summary surfaced from the registry
+    // payload (see TenantMetadataRegistryController buildPayload).
+    const pinned = !!qf.pinned
+    const quality = qf.quality || {
+        is_high_cardinality: false,
+        is_low_quality_candidate: false,
+        warnings: [],
+        estimated_distinct_value_count: null,
+    }
+    const warnings = Array.isArray(quality.warnings) ? quality.warnings : []
+    const isHighCardinality = !!quality.is_high_cardinality
 
     const patch = async (body) => {
         if (!canToggle || busy) return
@@ -268,6 +287,9 @@ function QuickFilterControls({ field, categoryId, canToggle, onChanged }) {
         if (parsed !== null && (!Number.isInteger(parsed) || parsed < 0)) return
         patch({ weight: parsed })
     }
+    // Phase 5.2 — pin toggle uses the same PATCH endpoint; the controller
+    // accepts `pinned` as an independent axis from `enabled`.
+    const onPinToggle = (next) => patch({ pinned: !!next })
 
     const toggleClasses = `relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--wb-ring,#6366f180)] focus-visible:ring-offset-1 ${
         supported && enabled
@@ -359,6 +381,180 @@ function QuickFilterControls({ field, categoryId, canToggle, onChanged }) {
                     <span className="text-[10px] italic text-slate-400">
                         Higher = more important. Reserved for future ranking.
                     </span>
+                </div>
+            ) : null}
+
+            {/* Phase 5.2 — pin toggle. Independent axis from enabled. The
+                copy is intentionally short; the visible-vs-overflow preview
+                lives on the parent panel so admins see the consequence
+                immediately. */}
+            {supported && enabled ? (
+                <label className="mt-2 flex cursor-pointer items-center gap-2 text-[11px] text-slate-700">
+                    <input
+                        type="checkbox"
+                        checked={pinned}
+                        onChange={(e) => onPinToggle(e.target.checked)}
+                        disabled={!canToggle || busy}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-[var(--wb-accent,#6366f1)] focus:ring-1 focus:ring-[var(--wb-accent,#6366f1)] disabled:opacity-60"
+                    />
+                    <span>
+                        Pin in sidebar
+                        <span className="ml-1 text-[10px] italic text-slate-400">
+                            keeps this filter visible even when overflow exists
+                        </span>
+                    </span>
+                </label>
+            ) : null}
+
+            {/* Phase 5.2 — quality warnings. Subtle, informative, non-blocking.
+                Rendered for every flagged filter — even disabled ones — so
+                admins reviewing a folder can see "this is high-cardinality"
+                before they enable. */}
+            {warnings.length > 0 ? (
+                <div
+                    className="mt-2 rounded-md border px-2.5 py-1.5"
+                    style={{
+                        borderColor: isHighCardinality ? '#fcd34d' : '#e2e8f0',
+                        background: isHighCardinality ? '#fffbeb' : '#f8fafc',
+                    }}
+                    role="note"
+                    aria-label="Quick filter quality warnings"
+                >
+                    {warnings.map((msg, i) => (
+                        <p
+                            key={i}
+                            className="text-[10.5px] leading-snug text-slate-700"
+                        >
+                            <span aria-hidden className="mr-1">⚠</span>
+                            {msg}
+                        </p>
+                    ))}
+                </div>
+            ) : null}
+
+            {/* Phase 6 — Contextual Navigation Intelligence inline hints.
+                Up to 3 pending recommendations from the recommender for
+                this (folder, field). Read-only chips; admins approve/reject
+                from the Insights → Review page. */}
+            <ContextualNavHintsRow hints={field?.contextual_nav_hints} />
+        </div>
+    )
+}
+
+function ContextualNavHintsRow({ hints }) {
+    if (!Array.isArray(hints) || hints.length === 0) return null
+    return (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-slate-400">Suggested</span>
+            {hints.map((h) => {
+                const label = recommendationLabel(h.recommendation_type, RECOMMENDATION_HINT_LABEL)
+                const intent = RECOMMENDATION_INTENT[h.recommendation_type] || 'neutral'
+                const tone = intentChipTone(intent)
+                const scoreLabel = formatRecommendationScore(h.score)
+                const titleParts = [
+                    h.reason_summary,
+                    scoreLabel ? `Score ${scoreLabel}` : null,
+                    h.source && h.source !== 'statistical' ? `Source: ${h.source}` : null,
+                ].filter(Boolean)
+                return (
+                    <span
+                        key={h.id}
+                        title={titleParts.join(' · ')}
+                        className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium"
+                        style={{ background: tone.bg, color: tone.fg, borderColor: tone.border }}
+                    >
+                        {label}
+                    </span>
+                )
+            })}
+            <a
+                href="/app/insights/review?tab=contextual"
+                className="text-[10px] font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+            >
+                Review
+            </a>
+        </div>
+    )
+}
+
+/**
+ * Phase 5.2 — compact visibility preview shown at the top of the folder
+ * schema panel. Lets admins see which quick filters will appear in the
+ * sidebar vs. fall into overflow given current order/pin state, without
+ * having to open the asset sidebar to verify. Empty when no quick filters
+ * are enabled — keeps the schema panel quiet for folders that don't use
+ * the feature.
+ */
+function QuickFilterVisibilityPreview({ preview }) {
+    if (!preview || preview.total === 0) return null
+    const { visible, overflow } = preview
+    return (
+        <div className="mt-2 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                Sidebar preview
+            </p>
+            {visible.length > 0 ? (
+                <div className="mt-1">
+                    <p className="text-[9px] uppercase tracking-wide text-slate-400">
+                        Visible
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5">
+                        {visible.map((item) => (
+                            <li
+                                key={`v-${item.id}`}
+                                className="flex items-center gap-1 truncate text-[10.5px] text-slate-700"
+                                title={item.label}
+                            >
+                                {item.pinned ? (
+                                    <span
+                                        aria-label="pinned"
+                                        title="Pinned"
+                                        className="inline-block h-[5px] w-[5px] rounded-full bg-[var(--wb-accent,#6366f1)]"
+                                    />
+                                ) : (
+                                    <span aria-hidden className="inline-block h-[5px] w-[5px]" />
+                                )}
+                                <span className="truncate">{item.label}</span>
+                                {item.hasWarnings ? (
+                                    <span
+                                        aria-label="has warnings"
+                                        title="Has warnings"
+                                        className="ml-auto text-[9px] text-amber-600"
+                                    >
+                                        ⚠
+                                    </span>
+                                ) : null}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
+            {overflow.length > 0 ? (
+                <div className="mt-1.5">
+                    <p className="text-[9px] uppercase tracking-wide text-slate-400">
+                        Overflow ({overflow.length})
+                    </p>
+                    <ul className="mt-0.5 space-y-0.5">
+                        {overflow.map((item) => (
+                            <li
+                                key={`o-${item.id}`}
+                                className="flex items-center gap-1 truncate text-[10.5px] text-slate-500"
+                                title={item.label}
+                            >
+                                <span aria-hidden className="inline-block h-[5px] w-[5px]" />
+                                <span className="truncate">{item.label}</span>
+                                {item.hasWarnings ? (
+                                    <span
+                                        aria-label="has warnings"
+                                        title="Has warnings"
+                                        className="ml-auto text-[9px] text-amber-600"
+                                    >
+                                        ⚠
+                                    </span>
+                                ) : null}
+                            </li>
+                        ))}
+                    </ul>
                 </div>
             ) : null}
         </div>
@@ -454,6 +650,18 @@ function SubmenuPanel({ field, categoryId, categorySlug, folderLabel, permission
                     </p>
                 )}
             </div>
+            {/* Phase 5.3 — metadata hygiene panel. Mounted for list-type
+                fields (select / multiselect) when the admin can toggle the
+                folder's quick filter; gating mirrors QuickFilterControls so
+                permissions stay consistent across the panel. The panel
+                itself lazy-loads aliases + duplicate candidates only when
+                opened. */}
+            {isListType && canToggle ? (
+                <MetadataHygienePanel
+                    field={field}
+                    onChanged={onInvalidate}
+                />
+            ) : null}
             {footer}
         </div>
     )
@@ -673,6 +881,54 @@ export default function FolderSchemaHelp({ category, className = '', triggerClas
         [enabledFieldsSorted]
     )
 
+    // Phase 5.2 — local preview of which quick filters will appear in the
+    // sidebar vs. overflow. Computed entirely from the schema payload (no
+    // extra fetch). Sort mirrors FolderQuickFilterAssignmentService::sortKey
+    // so previews match what the user actually sees.
+    const quickFilterVisibilityPreview = useMemo(() => {
+        const fields = listableFields || []
+        const enabled = fields
+            .filter((f) => f?.quick_filter?.feature_enabled && f?.quick_filter?.enabled)
+            .map((f) => ({
+                id: f.id,
+                label: f.label || f.key || '',
+                pinned: !!f.quick_filter?.pinned,
+                order: f.quick_filter?.order,
+                weight: f.quick_filter?.weight,
+                hasWarnings: Array.isArray(f.quick_filter?.quality?.warnings)
+                    && f.quick_filter.quality.warnings.length > 0,
+            }))
+        enabled.sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+            const ao = a.order == null ? Number.MAX_SAFE_INTEGER : a.order
+            const bo = b.order == null ? Number.MAX_SAFE_INTEGER : b.order
+            if (ao !== bo) return ao - bo
+            const aw = a.weight == null ? Number.MAX_SAFE_INTEGER : a.weight
+            const bw = b.weight == null ? Number.MAX_SAFE_INTEGER : b.weight
+            if (aw !== bw) return aw - bw
+            return String(a.label).toLowerCase().localeCompare(String(b.label).toLowerCase())
+        })
+        // Mirror the frontend visibility cap (FolderQuickFilters.jsx). When
+        // page settings aren't available we default to 3 — same as the
+        // backend default in config/categories.php.
+        const cap = (() => {
+            try {
+                const settings = (typeof window !== 'undefined' && window.__INERTIA_PAGE__?.props?.folder_quick_filter_settings) || {}
+                const raw = Number(settings.max_visible_per_folder)
+                return Number.isFinite(raw) && raw >= 0 ? raw : 3
+            } catch {
+                return 3
+            }
+        })()
+        const visible = []
+        const overflow = []
+        for (const item of enabled) {
+            if (cap > 0 && visible.length < cap) visible.push(item)
+            else overflow.push(item)
+        }
+        return { visible, overflow, total: enabled.length, cap }
+    }, [listableFields])
+
     const canEditFieldDefinitions = Boolean(payload?.permissions?.can_edit_definitions)
 
     const activeField = useMemo(
@@ -792,6 +1048,9 @@ export default function FolderSchemaHelp({ category, className = '', triggerClas
                                         }`
                                       : '—'}
                             </p>
+                            <QuickFilterVisibilityPreview
+                                preview={quickFilterVisibilityPreview}
+                            />
                         </div>
                         <div className="wb-panel-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto py-1.5">
                             {error ? (

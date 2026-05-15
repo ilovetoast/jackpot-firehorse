@@ -40,6 +40,14 @@ class MetadataField extends Model
         'archived_at',
         'ai_eligible',
         'display_widget',
+        // Phase 5.2: metadata-quality signal columns. Mostly nullable /
+        // defaulted; populated opportunistically by the facet/quality
+        // services. See migration 2026_05_14_180000_add_phase_5_2_quick_filter_columns.
+        'estimated_distinct_value_count',
+        'last_facet_usage_at',
+        'facet_usage_count',
+        'is_high_cardinality',
+        'is_low_quality_candidate',
     ];
 
     protected $casts = [
@@ -56,6 +64,12 @@ class MetadataField extends Model
         'is_primary' => 'boolean',
         'deprecated_at' => 'datetime',
         'archived_at' => 'datetime',
+        // Phase 5.2 quality signals.
+        'estimated_distinct_value_count' => 'integer',
+        'last_facet_usage_at' => 'datetime',
+        'facet_usage_count' => 'integer',
+        'is_high_cardinality' => 'boolean',
+        'is_low_quality_candidate' => 'boolean',
     ];
 
     public function metadataOptions(): HasMany

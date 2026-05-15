@@ -3,10 +3,12 @@ import { Link, usePage } from '@inertiajs/react'
 import InsightsLayout from '../../layouts/InsightsLayout'
 import UploadApprovalsPanel from '../../Components/insights/UploadApprovalsPanel'
 import InsightAiSuggestionReviewModal from '../../Components/insights/InsightAiSuggestionReviewModal'
+import ContextualNavigationReviewTab from '../../Components/insights/ContextualNavigationReviewTab'
 import {
     SparklesIcon,
     TagIcon,
     FolderIcon,
+    AdjustmentsHorizontalIcon,
     CheckIcon,
     XMarkIcon,
     ArrowTopRightOnSquareIcon,
@@ -26,7 +28,7 @@ import {
     hexRgbCommaTriplet,
 } from '../../utils/colorUtils'
 
-const VALID_TABS = ['tags', 'categories', 'values', 'fields']
+const VALID_TABS = ['tags', 'categories', 'values', 'fields', 'contextual']
 
 /** Sunken well + segmented pills (matches CollectionFiltersBar / PrimaryFilterToolbarControls). */
 const reviewWellClass =
@@ -96,6 +98,15 @@ const AI_REVIEW_SUB_TABS = [
         aria: (n) => `New fields, ${n} pending`,
         hint: 'Propose a whole new field (with starter options) when many assets share a tag or pattern you do not capture yet.',
     },
+    {
+        id: 'contextual',
+        Icon: AdjustmentsHorizontalIcon,
+        label: 'Contextual navigation',
+        countKey: 'contextual',
+        title: (n) => `${n} pending navigation recommendation${n === 1 ? '' : 's'}`,
+        aria: (n) => `Contextual navigation, ${n} pending`,
+        hint: 'Recommendations to enable, pin, suppress, or warn about quick filters under specific folders.',
+    },
 ]
 
 /** One-line context under the suggestion-type tabs */
@@ -106,6 +117,8 @@ const AI_REVIEW_TAB_CONTEXT = {
         'Think apparel (**Product category**) or tackle (**Lure type**): when many assets keep getting labeled the same way—e.g. “jeans” or “crankbait”—but that label is not on the official dropdown yet, we may suggest adding it.',
     fields:
         'When many assets in a category share the same anchor tag (or metadata value) and your schema has no field for it, we suggest a field whose starter dropdown options are other tags that tend to appear on the same assets—not every frequent tag in the category.',
+    contextual:
+        'Quick-filter recommendations: which filters to surface, pin, or suppress for each folder, plus warnings when metadata is too noisy for sidebar navigation.',
 }
 const PER_PAGE = 50
 
@@ -558,6 +571,7 @@ export default function AnalyticsReview({
         categories: Number(reviewTabCounts?.categories) || 0,
         values: Number(reviewTabCounts?.values) || 0,
         fields: Number(reviewTabCounts?.fields) || 0,
+        contextual: Number(reviewTabCounts?.contextual) || 0,
     }))
     const [uploadCountsSnapshot, setUploadCountsSnapshot] = useState({ team: 0, creator: 0 })
     const { can } = usePermission()
@@ -589,6 +603,7 @@ export default function AnalyticsReview({
                         categories: Number(j.categories) || 0,
                         values: Number(j.values) || 0,
                         fields: Number(j.fields) || 0,
+                        contextual: Number(j.contextual) || 0,
                     })
                 }
             } catch {
@@ -627,12 +642,14 @@ export default function AnalyticsReview({
             categories: Math.max(prev.categories, Number(reviewTabCounts.categories) || 0),
             values: Math.max(prev.values, Number(reviewTabCounts.values) || 0),
             fields: Math.max(prev.fields, Number(reviewTabCounts.fields) || 0),
+            contextual: Math.max(prev.contextual ?? 0, Number(reviewTabCounts.contextual) || 0),
         }))
     }, [
         reviewTabCounts?.tags,
         reviewTabCounts?.categories,
         reviewTabCounts?.values,
         reviewTabCounts?.fields,
+        reviewTabCounts?.contextual,
     ])
 
     useEffect(() => {
@@ -660,6 +677,15 @@ export default function AnalyticsReview({
     useEffect(() => {
         if (!canViewAi || workspace !== 'ai') {
             setLoading(false)
+            return
+        }
+        // Phase 6 — the Contextual Navigation tab owns its own fetch via
+        // ContextualNavigationReviewTab. Skip the items pipeline when it
+        // is active so we don't double-fetch (its endpoint shape differs).
+        if (activeTab === 'contextual') {
+            setLoading(false)
+            setItems([])
+            setPagination({ total: 0, current_page: 1, last_page: 1, per_page: PER_PAGE })
             return
         }
         setLoading(true)
@@ -787,27 +813,36 @@ export default function AnalyticsReview({
     }, [])
 
     const mergedAiTabCounts = useMemo(() => {
-        const mergeKey = (key) =>
+        // For contextual we deliberately exclude pagination.total: the
+        // ContextualNavigationReviewTab owns its own fetch and `pagination`
+        // is reset to zeroes when activeTab === 'contextual' (see the items
+        // useEffect short-circuit), so leaning on it would underreport.
+        const mergeKey = (key, includePagination = true) =>
             Math.max(
                 Number(insightsCounts[key]) || 0,
                 Number(aiCountsSnapshot[key]) || 0,
-                activeTab === key && !loading ? Number(pagination.total) || 0 : 0
+                includePagination && activeTab === key && !loading
+                    ? Number(pagination.total) || 0
+                    : 0
             )
         return {
             tags: mergeKey('tags'),
             categories: mergeKey('categories'),
             values: mergeKey('values'),
             fields: mergeKey('fields'),
+            contextual: mergeKey('contextual', false),
         }
     }, [
         insightsCounts.tags,
         insightsCounts.categories,
         insightsCounts.values,
         insightsCounts.fields,
+        insightsCounts.contextual,
         aiCountsSnapshot.tags,
         aiCountsSnapshot.categories,
         aiCountsSnapshot.values,
         aiCountsSnapshot.fields,
+        aiCountsSnapshot.contextual,
         activeTab,
         loading,
         pagination.total,
@@ -818,7 +853,8 @@ export default function AnalyticsReview({
             mergedAiTabCounts.tags +
             mergedAiTabCounts.categories +
             mergedAiTabCounts.values +
-            mergedAiTabCounts.fields,
+            mergedAiTabCounts.fields +
+            mergedAiTabCounts.contextual,
         [mergedAiTabCounts]
     )
 
@@ -1324,7 +1360,15 @@ export default function AnalyticsReview({
                     <>
                         <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{AI_REVIEW_TAB_CONTEXT[activeTab]}</p>
 
-                {loading ? (
+                {activeTab === 'contextual' ? (
+                    <ContextualNavigationReviewTab
+                        canManage={canAccept || canCreateField}
+                        accentColor={reviewAccent}
+                        onCountsChanged={() => {
+                            void refetchReviewBadges()
+                        }}
+                    />
+                ) : loading ? (
                     <div className="rounded-lg bg-white p-8 text-center text-gray-500">Loading...</div>
                 ) : items.length === 0 ? (
                     pagination.total > 0 && page > 1 ? (

@@ -3,10 +3,26 @@
  * Data: auth.agency_context_picker — built server-side only for agency-context sessions.
  */
 import { useMemo, useState } from 'react'
-import { Link } from '@inertiajs/react'
+import { Link, router } from '@inertiajs/react'
 import { CheckIcon } from '@heroicons/react/20/solid'
+import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import BrandIconUnified from '../BrandIconUnified'
 import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
+
+/**
+ * Where the picker lands the user after any context choice.
+ *
+ * Always a workspace-portable, role-portable route — never the current pathname.
+ * Reasons:
+ *   • Active row (same tenant + brand) used to no-op; users on agency-only pages
+ *     (`/app/agency/dashboard`, `/app/companies/settings`, billing, …) had no
+ *     way to "get back to work" without using the sidebar. Now it always lands
+ *     somewhere they can do work.
+ *   • Inactive row used to redirect to `${pathname}${search}`, which lands on
+ *     a 403 when the source route is workspace-specific (e.g. agency dashboard
+ *     in a non-agency client workspace). Overview is universally valid.
+ */
+const PICKER_HOME_URL = '/app/overview'
 
 function brandRowForIcon(item) {
     return {
@@ -51,19 +67,17 @@ export default function AgencyContextNavPicker({
     }, [agencyPicker.groups, search])
 
     const openContext = (item) => {
+        setMenuOpen(false)
+        // Same workspace (already active): no tenant switch needed — just navigate
+        // home so the click is never a dead end. Matches Linear/Notion/Slack pickers.
         if (item.is_active) {
-            setMenuOpen(false)
+            router.visit(PICKER_HOME_URL)
             return
         }
-        const redirect =
-            typeof window !== 'undefined'
-                ? `${window.location.pathname}${window.location.search || ''}`
-                : '/app/overview'
-        setMenuOpen(false)
         switchCompanyWorkspace({
             companyId: item.tenant_id,
             brandId: item.brand_id,
-            redirect,
+            redirect: PICKER_HOME_URL,
         })
     }
 
@@ -219,9 +233,14 @@ export default function AgencyContextNavPicker({
                                                 type="button"
                                                 role="menuitem"
                                                 onClick={() => openContext(item)}
-                                                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${
+                                                title={
                                                     item.is_active
-                                                        ? 'bg-indigo-50 text-indigo-900'
+                                                        ? `Open ${item.brand_name} overview`
+                                                        : `Switch to ${item.brand_name}`
+                                                }
+                                                className={`group flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
+                                                    item.is_active
+                                                        ? 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100'
                                                         : 'text-gray-800 hover:bg-gray-50'
                                                 }`}
                                             >
@@ -230,6 +249,13 @@ export default function AgencyContextNavPicker({
                                                 {item.is_active ? (
                                                     <CheckIcon className="h-4 w-4 shrink-0 text-indigo-600" aria-hidden />
                                                 ) : null}
+                                                {/* Affordance that the row navigates — without it, the active row reads as a passive label. */}
+                                                <ArrowTopRightOnSquareIcon
+                                                    className={`h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
+                                                        item.is_active ? 'text-indigo-600/70' : 'text-gray-400'
+                                                    }`}
+                                                    aria-hidden
+                                                />
                                             </button>
                                         ))}
                                     </div>

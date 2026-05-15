@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Filters;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\MetadataField;
+use App\Services\Filters\Contracts\QuickFilterInstrumentation;
 use App\Services\Filters\FolderQuickFilterAssignmentService;
 use App\Services\Filters\FolderQuickFilterEligibilityService;
+use App\Services\Filters\FolderQuickFilterQualityService;
 use App\Services\Filters\FolderQuickFilterValueService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,6 +41,11 @@ class FolderQuickFilterValueController extends Controller
         protected FolderQuickFilterAssignmentService $assignment,
         protected FolderQuickFilterEligibilityService $eligibility,
         protected FolderQuickFilterValueService $values,
+        // Phase 5.2 — instrumentation + quality usage tracking. Both default
+        // to no-op implementations bound in AppServiceProvider, so unit
+        // tests don't need to stub them.
+        protected QuickFilterInstrumentation $instrumentation,
+        protected FolderQuickFilterQualityService $quality,
     ) {}
 
     public function show(Request $request, int $category, int $field): JsonResponse
@@ -106,6 +113,11 @@ class FolderQuickFilterValueController extends Controller
 
         $activeFilters = $this->parseActiveFilters($request);
         $payload = $this->values->getValues($categoryModel, $fieldModel, $activeFilters);
+
+        // Phase 5.2 — record the open + bump usage signals. Both swallow
+        // their own errors so we never disturb the response.
+        $this->instrumentation->recordOpen($fieldModel, $categoryModel, $tenant);
+        $this->quality->recordFacetUsage($fieldModel, $tenant);
 
         return response()->json($payload);
     }

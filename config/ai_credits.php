@@ -23,6 +23,15 @@ return [
         /** OpenAI vision (gpt-4o-mini) — photography focal point; same weight as a single tagging vision call */
         'photography_focal_point' => 1,
         'insights' => 1,
+        /**
+         * Phase 6 — Contextual Navigation Intelligence agent.
+         * Charged ONLY when AI reasoning is enabled and the run actually
+         * invokes `contextual_navigation_intelligence` for borderline cases.
+         * Pure-statistical recommendation runs do NOT debit this feature.
+         * One reasoning call per run (small completion); priced like the
+         * other lightweight reasoning features.
+         */
+        'contextual_navigation' => 1,
         'brand_research' => 25,
         'pdf_extraction' => 5,
         // Drawer / thumbnail-mode “presentation” previews: OpenAI/Gemini/FLUX image edit (see GeneratePresentationPreviewJob).

@@ -17,6 +17,13 @@ import { useProcessingDownloadsPolling } from '../../hooks/useProcessingDownload
 import { keyByDownloads, warnIfReplacingRootState } from '../../utils/downloadUtils'
 import { formatBytesHuman } from '../../utils/formatBytesHuman'
 import {
+  getWorkspaceButtonColor,
+  getWorkspaceContextualTone,
+  getWorkspaceSidebarActiveRowForegroundHex,
+  getWorkspaceSidebarForegroundHex,
+  resolveWorkspaceSidebarSurface,
+} from '../../utils/colorUtils'
+import {
   DOWNLOAD_PROCESSING_EVENT,
   DOWNLOAD_SUPPRESS_READY_TOAST_EVENT,
 } from '../../utils/downloadReadyToastEvents'
@@ -41,6 +48,54 @@ export default function DownloadReadyToastHost() {
     () => isDownloadsIndexPage(page.component, page.url),
     [page.component, page.url]
   )
+
+  /**
+   * Toast palette = same recipe the workspace sidebar uses (AssetSidebar.jsx),
+   * so the toast reads as a chip of the brand's nav rail:
+   *   • surface       = brand `nav_color` / primary, or the cinematic radial
+   *                     backdrop CSS for cinematic sidebars
+   *   • text          = '#ffffff' for cinematic / dark rails, otherwise
+   *                     `getWorkspaceSidebarForegroundHex(sidebarColor)` (binary
+   *                     contrast pick for paper-light rails)
+   *   • button (CTA)  = the active-row pill: `getWorkspaceContextualTone`
+   *                     darkened from the workspace accent, with
+   *                     `getWorkspaceSidebarActiveRowForegroundHex` for the label
+   *   • borders / muted text = white@15/65/50% on dark, black@12/65/50% on light
+   */
+  const palette = useMemo(() => {
+    const brand = auth?.activeBrand
+    const surface = resolveWorkspaceSidebarSurface(brand)
+    const sidebarColor = surface.sidebarColor
+    const sidebarBackdropCss = surface.backdropCss
+    const text =
+      sidebarBackdropCss != null && String(sidebarBackdropCss).trim() !== ''
+        ? '#ffffff'
+        : getWorkspaceSidebarForegroundHex(sidebarColor)
+    const accent = getWorkspaceButtonColor(brand) || '#6366f1'
+    const activeBg = getWorkspaceContextualTone(accent)
+    const activeText = getWorkspaceSidebarActiveRowForegroundHex(activeBg, text)
+    const onDark = text === '#ffffff'
+    return {
+      background: sidebarBackdropCss || sidebarColor,
+      border: onDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)',
+      ringInset: onDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
+      text,
+      textMuted: onDark ? 'rgba(255, 255, 255, 0.78)' : 'rgba(0, 0, 0, 0.72)',
+      textSubtle: onDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(0, 0, 0, 0.55)',
+      buttonBg: activeBg,
+      buttonHoverBg: onDark
+        ? `color-mix(in srgb, ${activeBg} 80%, white 20%)`
+        : `color-mix(in srgb, ${activeBg} 80%, black 20%)`,
+      buttonText: activeText,
+      buttonBorder: onDark ? 'rgba(255, 255, 255, 0.20)' : 'rgba(0, 0, 0, 0.15)',
+      buttonBorderHover: onDark ? 'rgba(255, 255, 255, 0.32)' : 'rgba(0, 0, 0, 0.25)',
+      buttonIcon: onDark ? 'rgba(255, 255, 255, 0.78)' : 'rgba(0, 0, 0, 0.72)',
+      closeText: onDark ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.55)',
+      closeHoverText: text,
+      closeHoverBg: onDark ? 'rgba(255, 255, 255, 0.10)' : 'rgba(0, 0, 0, 0.06)',
+      successIcon: onDark ? '#34d399' : '#059669',
+    }
+  }, [auth?.activeBrand])
   const downloadsPanel = useDownloadsPanelOptional()
 
   const [byId, setByIdState] = useState({})
@@ -283,43 +338,90 @@ export default function DownloadReadyToastHost() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="pointer-events-auto w-full overflow-hidden rounded-lg border border-slate-700/60 bg-slate-900 text-white shadow-[0_12px_40px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/[0.06]"
+            className="pointer-events-auto w-full overflow-hidden rounded-lg border shadow-[0_12px_40px_-12px_rgba(0,0,0,0.65)] ring-1"
+            style={{
+              background: palette.background,
+              borderColor: palette.border,
+              color: palette.text,
+              '--toast-text': palette.text,
+              '--toast-text-muted': palette.textMuted,
+              '--toast-text-subtle': palette.textSubtle,
+              '--toast-btn-bg': palette.buttonBg,
+              '--toast-btn-bg-hover': palette.buttonHoverBg,
+              '--toast-btn-text': palette.buttonText,
+              '--toast-btn-border': palette.buttonBorder,
+              '--toast-btn-border-hover': palette.buttonBorderHover,
+              '--toast-btn-icon': palette.buttonIcon,
+              '--toast-close-text': palette.closeText,
+              '--toast-close-hover-text': palette.closeHoverText,
+              '--toast-close-hover-bg': palette.closeHoverBg,
+              '--tw-ring-color': palette.ringInset,
+            }}
             role="status"
             aria-live="polite"
           >
             <div className="flex gap-2.5 p-2.5 sm:gap-3 sm:p-3">
               <div className="flex shrink-0 pt-0.5">
-                <CheckCircleIcon className="h-5 w-5 text-emerald-400" strokeWidth={1.75} aria-hidden />
+                <CheckCircleIcon
+                  className="h-5 w-5"
+                  style={{ color: palette.successIcon }}
+                  strokeWidth={1.75}
+                  aria-hidden
+                />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold tracking-tight text-white">Download ready</p>
-                <p className="mt-0.5 truncate text-[13px] font-medium text-slate-100">{filename}</p>
+                <p className="text-sm font-semibold tracking-tight" style={{ color: 'var(--toast-text)' }}>
+                  Download ready
+                </p>
+                <p
+                  className="mt-0.5 truncate text-[13px] font-medium"
+                  style={{ color: 'var(--toast-text-muted)' }}
+                >
+                  {filename}
+                </p>
                 {metaLine && (
-                  <p className="mt-0.5 truncate text-[11px] font-medium tracking-tight text-slate-400">{metaLine}</p>
+                  <p
+                    className="mt-0.5 truncate text-[11px] font-medium tracking-tight"
+                    style={{ color: 'var(--toast-text-subtle)' }}
+                  >
+                    {metaLine}
+                  </p>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-1">
                   <button
                     type="button"
                     onClick={() => copyUrl(t.public_url)}
-                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 text-[11px] font-medium text-white transition hover:border-slate-500 hover:bg-slate-700"
+                    className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition bg-[var(--toast-btn-bg)] text-[var(--toast-btn-text)] border-[color:var(--toast-btn-border)] hover:bg-[var(--toast-btn-bg-hover)] hover:border-[color:var(--toast-btn-border-hover)]"
                   >
-                    <ClipboardDocumentIcon className="h-3.5 w-3.5 text-slate-300" aria-hidden />
+                    <ClipboardDocumentIcon
+                      className="h-3.5 w-3.5"
+                      style={{ color: 'var(--toast-btn-icon)' }}
+                      aria-hidden
+                    />
                     Copy link
                   </button>
                   <a
                     href={t.public_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 text-[11px] font-medium text-white transition hover:border-slate-500 hover:bg-slate-700"
+                    className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition bg-[var(--toast-btn-bg)] text-[var(--toast-btn-text)] border-[color:var(--toast-btn-border)] hover:bg-[var(--toast-btn-bg-hover)] hover:border-[color:var(--toast-btn-border-hover)]"
                   >
-                    <ArrowDownTrayIcon className="h-3.5 w-3.5 text-slate-300" aria-hidden />
+                    <ArrowDownTrayIcon
+                      className="h-3.5 w-3.5"
+                      style={{ color: 'var(--toast-btn-icon)' }}
+                      aria-hidden
+                    />
                     Download
                   </a>
                   <Link
                     href={route('downloads.index')}
-                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 text-[11px] font-medium text-white transition hover:border-slate-500 hover:bg-slate-700"
+                    className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition bg-[var(--toast-btn-bg)] text-[var(--toast-btn-text)] border-[color:var(--toast-btn-border)] hover:bg-[var(--toast-btn-bg-hover)] hover:border-[color:var(--toast-btn-border-hover)]"
                   >
-                    <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 text-slate-300" aria-hidden />
+                    <ArrowTopRightOnSquareIcon
+                      className="h-3.5 w-3.5"
+                      style={{ color: 'var(--toast-btn-icon)' }}
+                      aria-hidden
+                    />
                     Open downloads
                   </Link>
                 </div>
@@ -327,7 +429,7 @@ export default function DownloadReadyToastHost() {
               <button
                 type="button"
                 onClick={dismiss}
-                className="shrink-0 self-start rounded-md p-1 text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
+                className="shrink-0 self-start rounded-md p-1 transition text-[var(--toast-close-text)] hover:bg-[var(--toast-close-hover-bg)] hover:text-[var(--toast-close-hover-text)]"
                 aria-label="Dismiss"
               >
                 <XMarkIcon className="h-4 w-4" />

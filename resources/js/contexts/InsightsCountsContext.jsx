@@ -12,6 +12,7 @@ const emptyCounts = {
     categories: 0,
     values: 0,
     fields: 0,
+    contextual: 0,
     uploadTeam: 0,
     uploadCreator: 0,
     loaded: false,
@@ -26,6 +27,11 @@ const fallbackInsightsCounts = {
     reload: () => {},
 }
 
+// `tags / categories / values / fields / contextual` mirror
+// `AiReviewController::reviewTabCountPayload`. When adding a tab, update:
+// `emptyCounts`, `seedAiCountsFromPayload`, the seed `useEffect`, the
+// `reload` aiPayload mapper, and `aiTotal` together.
+
 function seedAiCountsFromPayload(base, initialReviewTabCounts) {
     if (!initialReviewTabCounts || typeof initialReviewTabCounts !== 'object') {
         return base
@@ -36,6 +42,7 @@ function seedAiCountsFromPayload(base, initialReviewTabCounts) {
         categories: Number(initialReviewTabCounts.categories) || 0,
         values: Number(initialReviewTabCounts.values) || 0,
         fields: Number(initialReviewTabCounts.fields) || 0,
+        contextual: Number(initialReviewTabCounts.contextual) || 0,
     }
 }
 
@@ -72,12 +79,14 @@ export function InsightsCountsProvider({ children, initialReviewTabCounts = null
             categories: Number(initialReviewTabCounts.categories) || 0,
             values: Number(initialReviewTabCounts.values) || 0,
             fields: Number(initialReviewTabCounts.fields) || 0,
+            contextual: Number(initialReviewTabCounts.contextual) || 0,
         }))
     }, [
         initialReviewTabCounts?.tags,
         initialReviewTabCounts?.categories,
         initialReviewTabCounts?.values,
         initialReviewTabCounts?.fields,
+        initialReviewTabCounts?.contextual,
     ])
 
     const reload = useCallback(async () => {
@@ -109,6 +118,7 @@ export function InsightsCountsProvider({ children, initialReviewTabCounts = null
                     next.categories = Number(aiPayload.categories) || 0
                     next.values = Number(aiPayload.values) || 0
                     next.fields = Number(aiPayload.fields) || 0
+                    next.contextual = Number(aiPayload.contextual) || 0
                 }
                 if (upPayload) {
                     next.uploadTeam = Number(upPayload.team) || 0
@@ -125,7 +135,8 @@ export function InsightsCountsProvider({ children, initialReviewTabCounts = null
         reload()
     }, [reload])
 
-    const aiTotal = counts.tags + counts.categories + counts.values + counts.fields
+    const aiTotal =
+        counts.tags + counts.categories + counts.values + counts.fields + counts.contextual
     const uploadTotal = counts.uploadTeam + counts.uploadCreator
     const reviewNavTotal = aiTotal + uploadTotal
 

@@ -101,10 +101,10 @@ class FolderQuickFilterAssignmentService
 
                 return $this->eligibility->isEligible($field);
             })
-            ->sortBy(fn (MetadataFieldVisibility $row) => [
-                $row->folder_quick_filter_order === null ? PHP_INT_MAX : $row->folder_quick_filter_order,
-                strtolower((string) ($fieldsById->get($row->metadata_field_id)?->system_label ?? '')),
-            ])
+            ->sortBy(fn (MetadataFieldVisibility $row) => $this->sortKey(
+                $row,
+                (string) ($fieldsById->get($row->metadata_field_id)?->system_label ?? '')
+            ))
             ->values();
     }
 
@@ -185,12 +185,10 @@ class FolderQuickFilterAssignmentService
 
                     return (int) $row->brand_id === (int) ($folder->brand_id ?? 0);
                 })
-                ->sortBy(fn (MetadataFieldVisibility $row) => [
-                    $row->folder_quick_filter_order === null
-                        ? PHP_INT_MAX
-                        : (int) $row->folder_quick_filter_order,
-                    strtolower((string) ($row->metadataField?->system_label ?? '')),
-                ])
+                ->sortBy(fn (MetadataFieldVisibility $row) => $this->sortKey(
+                    $row,
+                    (string) ($row->metadataField?->system_label ?? '')
+                ))
                 ->values()
                 ->all();
 
@@ -366,6 +364,10 @@ class FolderQuickFilterAssignmentService
      *   - order:  int|null
      *   - weight: int|null
      *   - source: string|null  defaults to SOURCE_MANUAL
+     *   - pinned: bool|null    Phase 5.2: pin/unpin alongside enable.
+     *                          When omitted the existing row's pinned
+     *                          state is preserved (defaults to false on
+     *                          first insert).
      *
      * @throws InvalidArgumentException When the filter is not eligible. Callers
      *   that want a soft check should use {@see supportsFolderQuickFiltering()}
@@ -380,12 +382,17 @@ class FolderQuickFilterAssignmentService
         $order = $this->normalizeOrder($opts['order'] ?? null);
         $weight = $this->normalizeWeight($opts['weight'] ?? null);
 
-        $row = $this->upsertRow($folder, $filter, [
+        $payload = [
             'show_in_folder_quick_filters' => true,
             'folder_quick_filter_order' => $order,
             'folder_quick_filter_weight' => $weight,
             'folder_quick_filter_source' => $source,
-        ]);
+        ];
+        if (array_key_exists('pinned', $opts)) {
+            $payload['is_pinned_folder_quick_filter'] = (bool) $opts['pinned'];
+        }
+
+        $row = $this->upsertRow($folder, $filter, $payload);
 
         return $row;
     }
@@ -408,6 +415,11 @@ class FolderQuickFilterAssignmentService
             'show_in_folder_quick_filters' => false,
             'folder_quick_filter_order' => null,
             'folder_quick_filter_weight' => null,
+            // Phase 5.2: clear pinned state on disable. Pinning a hidden
+            // filter has no observable effect (the sort comparator never
+            // sees disabled rows), and leaving a stale `is_pinned=true`
+            // would surprise admins who re-enable later.
+            'is_pinned_folder_quick_filter' => false,
             // Source is intentionally retained so we can audit whether the row
             // was originally seeded vs manually configured. Phase 3+ may use
             // this to decide whether re-running the seeder should re-enable
@@ -442,6 +454,126 @@ class FolderQuickFilterAssignmentService
         $this->upsertRow($folder, $filter, [
             'folder_quick_filter_source' => $source === null ? null : $this->normalizeSource($source),
         ]);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 5.2 — Pinning
+    // -----------------------------------------------------------------
+
+    /**
+     * Pin a quick filter for a folder. Pinned filters sort before non-pinned
+     * (see {@see sortKey()}) and resist overflow hiding by virtue of always
+     * landing in the visible slice.
+     *
+     * Pinning a filter that isn't yet enabled as a quick filter is allowed —
+     * the pin is recorded on the visibility row regardless. Renderers that
+     * iterate "enabled quick filters" still won't surface it until enable is
+     * called too. This matches existing behaviour for `order` / `weight` set
+     * on a disabled row.
+     *
+     * @throws InvalidArgumentException When the filter is not eligible.
+     */
+    public function pinQuickFilter(Category $folder, MetadataField $filter): void
+    {
+        $this->setQuickFilterPinned($folder, $filter, true);
+    }
+
+    public function unpinQuickFilter(Category $folder, MetadataField $filter): void
+    {
+        $this->setQuickFilterPinned($folder, $filter, false);
+    }
+
+    /**
+     * Idempotent setter for pinned state. Persists to the same visibility
+     * row that holds order/weight/source so a single SELECT is enough to
+     * resolve everything in {@see getQuickFiltersForFolder()}.
+     */
+    public function setQuickFilterPinned(Category $folder, MetadataField $filter, bool $pinned): void
+    {
+        $this->assertEligible($filter);
+        $this->assertFolder($folder);
+
+        $this->upsertRow($folder, $filter, [
+            'is_pinned_folder_quick_filter' => $pinned,
+        ]);
+    }
+
+    public function isQuickFilterPinned(Category $folder, MetadataField $filter): bool
+    {
+        $row = $this->findRow($folder, $filter);
+
+        return $row !== null && (bool) $row->is_pinned_folder_quick_filter;
+    }
+
+    /**
+     * Phase 5.2 — central deterministic sort comparator used by both single
+     * and batch read paths. The order is intentional:
+     *
+     *   1. Pinned first (false sorts after true → tuple `[0]` = pinned ? 0 : 1).
+     *   2. Explicit order (NULL → infinity so unset rows sink to the bottom).
+     *   3. Weight (NULL → infinity, same reason). Phase 6+ may use this for
+     *      AI-recommended ordering between rows that share an explicit order.
+     *   4. Alphabetical fallback on the field's system label so the result is
+     *      stable across requests even when every preceding key ties.
+     *
+     * @return list<int|string>
+     */
+    private function sortKey(MetadataFieldVisibility $row, string $label): array
+    {
+        return [
+            $row->is_pinned_folder_quick_filter ? 0 : 1,
+            $row->folder_quick_filter_order === null
+                ? PHP_INT_MAX
+                : (int) $row->folder_quick_filter_order,
+            $row->folder_quick_filter_weight === null
+                ? PHP_INT_MAX
+                : (int) $row->folder_quick_filter_weight,
+            strtolower($label),
+        ];
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 5.2 — Visibility / overflow split
+    // -----------------------------------------------------------------
+
+    /**
+     * Configured cap on visible quick filters per folder. Mirrors the value
+     * `AssetController::index` sends to the frontend so backend visibility
+     * preview tooling can match what the user actually sees.
+     */
+    public function maxVisiblePerFolder(): int
+    {
+        $configured = (int) config('categories.folder_quick_filters.max_visible_per_folder', 3);
+
+        return max(0, $configured);
+    }
+
+    /**
+     * Split an ordered quick filter collection into `visible` and `overflow`
+     * lists according to {@see maxVisiblePerFolder()}. Pinned rows are
+     * already at the front by sort order, so a naive `slice` does the right
+     * thing — the helper exists so callers don't reimplement the cap math.
+     *
+     * @template T
+     * @param  iterable<T>  $rows
+     * @return array{visible: list<T>, overflow: list<T>}
+     */
+    public function partitionVisibleAndOverflow(iterable $rows): array
+    {
+        $cap = $this->maxVisiblePerFolder();
+        $visible = [];
+        $overflow = [];
+        $i = 0;
+        foreach ($rows as $row) {
+            if ($cap > 0 && $i < $cap) {
+                $visible[] = $row;
+            } else {
+                $overflow[] = $row;
+            }
+            $i++;
+        }
+
+        return ['visible' => $visible, 'overflow' => $overflow];
     }
 
     // -----------------------------------------------------------------

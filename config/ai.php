@@ -735,6 +735,34 @@ PROMPT,
                 // No specific permissions required (system-triggered, read-only)
             ],
         ],
+        /*
+         * Phase 6 — Contextual Navigation Intelligence.
+         *
+         * Reasoning-only agent. Statistical signals (coverage, narrowing
+         * power, fragmentation, usage) are computed by
+         * ContextualNavigationScoringService WITHOUT calling AI.
+         *
+         * The agent is invoked through `AIService::executeAgent` ONLY for
+         * borderline / hybrid recommendations where a free-text rationale
+         * adds clarity for admins. Pure-statistical recommendations skip
+         * the agent entirely and do NOT debit credits.
+         *
+         * Credit feature key (config/ai_credits.php): `contextual_navigation`.
+         * Quota gate: AiUsageService::checkUsage($tenant, 'contextual_navigation').
+         */
+        'contextual_navigation_intelligence' => [
+            'name' => 'Contextual Navigation Intelligence',
+            'description' => 'Reasons over folder × quick-filter signals to produce admin-reviewable navigation recommendations.',
+            'scope' => 'tenant',
+            'default_model' => 'gpt-4o-mini',
+            'allowed_actions' => ['read'],
+            'permissions' => [
+                // Tenant-scoped, system-triggered by RunContextualNavigationInsightsJob.
+                // Admin-triggered runs require `metadata.tenant.visibility.manage`
+                // at the controller layer; the agent itself is read-only and
+                // never mutates configuration.
+            ],
+        ],
         'download_zip_failure_analyzer' => [
             'name' => 'Download ZIP Failure Analyzer',
             'description' => 'Analyzes download ZIP build failures and recommends escalation',

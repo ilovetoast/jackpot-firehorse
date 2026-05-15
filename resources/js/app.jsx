@@ -39,6 +39,30 @@ if (typeof document !== 'undefined') {
         { once: true }
     )
 }
+
+// bfcache safety net for /app pages.
+//
+// `Cache-Control: no-store` (see PreventBackForwardCacheForAuthenticatedApp middleware)
+// is the primary defence — modern browsers skip bfcache when they see it. This listener
+// is the belt-and-braces fallback for cases the header doesn't cover:
+//   • Older browser versions / privacy-mode quirks that still bfcache no-store responses.
+//   • Cross-tab workspace switches: tab A is on /app/assets, tab B switches the session
+//     to a different tenant; tab A's stale page must reload on next focus / back-nav.
+//
+// `event.persisted === true` means the page is being restored from bfcache (no server
+// hit took place). Reload forces a fresh server render against the current session
+// cookie, so the rendered tenant/brand always matches reality.
+//
+// Public/marketing/gateway routes are left alone — bfcache there is a perf win, not
+// a correctness risk.
+if (typeof window !== 'undefined') {
+    window.addEventListener('pageshow', (event) => {
+        if (!event.persisted) return
+        if (window.location.pathname.startsWith('/app')) {
+            window.location.reload()
+        }
+    })
+}
 import { createRoot } from 'react-dom/client'
 import BrandThemeProvider from './Components/BrandThemeProvider'
 import FlashMessage from './Components/FlashMessage'

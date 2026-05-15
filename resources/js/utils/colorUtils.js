@@ -330,10 +330,27 @@ export function getContrastTextColor(backgroundColor) {
 }
 
 /**
- * Label color for solid brand-filled primary buttons (workbench `--wb-accent` fills).
- * Strict binary {@link getContrastTextColor} often picks black on saturated oranges/reds because it
- * marginally wins WCAG math, but product CTAs expect light copy. Prefer white when it meets WCAG AA
- * for **large** text (3:1); otherwise fall back to strict contrast.
+ * Label color for solid brand-filled primary buttons (workbench `--wb-accent` fills, segmented-control
+ * "active" pills, Insights review tab pills, etc.).
+ *
+ * Mirrors {@link getWorkspaceSidebarForegroundHex} on purpose — both surfaces are "brand chrome,"
+ * and a brand's button and its sidebar must agree on whether they read as light-on-dark or dark-on-light.
+ * Product convention (Stripe, Linear, Shopify, …) is light copy on chrome unless the surface is
+ * paper-pale enough that white text becomes unreadable.
+ *
+ * Why a luminance gate, not a strict binary contrast check:
+ *   • {@link getContrastTextColor} alone flips to black on saturated mid-tint brand colors
+ *     (orange-500 #f97316, amber-500, vermilion #e25822, …) because black marginally wins
+ *     WCAG math vs white — but those are exactly the colors brands pick *because* their CTAs
+ *     are meant to look like light-on-dark.
+ *   • The previous WCAG-AA-large-text threshold (3:1 vs white) was off by a hair: vivid orange
+ *     #f97316 lands at ~2.92 vs white and was getting black text — visibly wrong against the
+ *     same brand's sidebar, which uses the luminance rule and picks white.
+ *
+ * Decision rule:
+ *   • Background luminance > 0.88 (paper / off-white): use strict binary contrast → returns dark.
+ *   • Otherwise: white. Same threshold as the sidebar so brand chrome stays consistent across
+ *     buttons, sidebars, and segmented controls for a given brand.
  *
  * @param {string|null|undefined} backgroundHex — resting or hover fill, #RRGGBB
  * @returns {'#ffffff'|'#000000'}
@@ -341,8 +358,10 @@ export function getContrastTextColor(backgroundColor) {
 export function getSolidFillButtonForegroundHex(backgroundHex) {
     if (!backgroundHex) return '#ffffff'
     const bg = normalizeHexColor(backgroundHex)
-    if (getContrastRatio('#ffffff', bg) >= 3) return '#ffffff'
-    return getContrastTextColor(bg)
+    if (getLuminance(bg) > 0.88) {
+        return getContrastTextColor(bg)
+    }
+    return '#ffffff'
 }
 
 /**

@@ -12,6 +12,7 @@ import {
     Squares2X2Icon,
     ArrowTrendingUpIcon,
     UsersIcon,
+    ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
@@ -121,10 +122,12 @@ export default function AgencyDashboard({
             {
                 preserveScroll: true,
                 onSuccess: () => {
-                    window.location.href = '/app/overview'
+                    // `replace()` so /app/agency/dashboard (the entry we're switching from) leaves the
+                    // back stack — that route is agency-tenant-only and 403s in the destination workspace.
+                    window.location.replace('/app/overview')
                 },
                 onError: () => {
-                    window.location.href = '/app/overview'
+                    window.location.replace('/app/overview')
                 },
             }
         )
@@ -389,8 +392,49 @@ export default function AgencyDashboard({
                             <div className="min-w-0 flex-1 space-y-8">
                         {dashTab === 'overview' && (
                             <section className="mb-2">
+                                {/*
+                                  * Your-agency tile: one-click escape back to the agency's own brand.
+                                  * The "Jump to a brand" grid below intentionally lists *clients only*,
+                                  * which used to leave agencies with no on-page affordance to return
+                                  * to their own workspace — the brand-picker dropdown was the only way,
+                                  * and clicking the active row there was a no-op (the bug we just fixed).
+                                  * Promoted from the Clients-tab callout because Overview is where users
+                                  * land first and is therefore where "back to my work" needs to live.
+                                  */}
+                                {managed_agency?.name && (
+                                    <div
+                                        className={`${glassPanel} mb-5 flex items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4`}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <p className={statLabel}>Your agency</p>
+                                            <p className="mt-1 truncate text-sm font-semibold text-white">
+                                                {managed_agency.name}
+                                            </p>
+                                            {managed_agency.default_brand?.name && (
+                                                <p className={`mt-0.5 truncate ${bodySmall}`}>
+                                                    Default brand: {managed_agency.default_brand.name}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={openAgencyDefaultOverview}
+                                            title={
+                                                managed_agency.default_brand?.name
+                                                    ? `Open ${managed_agency.default_brand.name} overview`
+                                                    : 'Open agency overview'
+                                            }
+                                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white/10 px-3.5 py-2 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                                        >
+                                            <span>Open overview</span>
+                                            <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden />
+                                        </button>
+                                    </div>
+                                )}
                                 <div className="mb-3 flex items-center gap-2">
-                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">Brands</span>
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-white/35">
+                                        Client brands
+                                    </span>
                                 </div>
                                 <AgencyBrandQuickJump clients={managed_clients} brandColor={brandColor} />
                             </section>

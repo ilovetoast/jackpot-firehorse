@@ -62,6 +62,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'ensure.onboarding' => \App\Http\Middleware\EnsureOnboardingComplete::class,
             'tenant.admin.brand_setup' => \App\Http\Middleware\EnsureTenantAdminForBrandWorkspaceSetup::class,
             'impersonation' => \App\Http\Middleware\ImpersonationMiddleware::class,
+            'prevent.bfcache' => \App\Http\Middleware\PreventBackForwardCacheForAuthenticatedApp::class,
         ]);
 
         $middleware->redirectUsersTo('/');

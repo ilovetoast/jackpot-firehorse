@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 import FolderQuickFilterRow from './FolderQuickFilterRow'
+import FolderQuickFilterOverflow from './FolderQuickFilterOverflow'
 import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 
@@ -99,8 +100,41 @@ export default function FolderQuickFilters({
     if (!enabled) return null
     if (!Array.isArray(quickFilters) || quickFilters.length === 0) return null
 
-    const visible = maxVisible > 0 ? quickFilters.slice(0, maxVisible) : []
-    const overflow = Math.max(0, quickFilters.length - visible.length)
+    // Phase 5.2 — pinned filters resist overflow. The backend already sorts
+    // pinned-first, so a naive `slice(0, maxVisible)` would already keep them
+    // visible; this loop makes the guarantee explicit (and survives a future
+    // sort change). We start from the natural sort order, ensure every pinned
+    // entry lands in `visible`, then top up with the next non-pinned entries
+    // until the cap is hit. `hidden` gets the rest.
+    const { visible, hidden } = useMemo(() => {
+        if (maxVisible <= 0) {
+            return { visible: [], hidden: quickFilters }
+        }
+        const pinned = []
+        const unpinned = []
+        for (const row of quickFilters) {
+            if (row?.pinned) pinned.push(row)
+            else unpinned.push(row)
+        }
+        const visibleOut = []
+        // Pinned rows always go first, capped by maxVisible. If the admin
+        // pinned more than fits, the last pinned rows still overflow — UX
+        // surfaces this in the admin visibility preview so admins can
+        // reduce.
+        for (const row of pinned) {
+            if (visibleOut.length >= maxVisible) break
+            visibleOut.push(row)
+        }
+        for (const row of unpinned) {
+            if (visibleOut.length >= maxVisible) break
+            visibleOut.push(row)
+        }
+        const visibleIds = new Set(visibleOut.map((r) => r.metadata_field_id))
+        const hiddenOut = quickFilters.filter(
+            (r) => !visibleIds.has(r.metadata_field_id)
+        )
+        return { visible: visibleOut, hidden: hiddenOut }
+    }, [quickFilters, maxVisible])
 
     // Phase 4.4: brand-aware tonal palette tinted from the sidebar surface
     // and active-row tone.
@@ -135,6 +169,11 @@ export default function FolderQuickFilters({
                             // through for a11y only.
                             isActive={count > 0}
                             activeValueCount={count}
+                            // Phase 5.2 — pinned visual hint (subtle pin
+                            // glyph; no extra row chrome). Admins manage
+                            // pinning from FolderSchemaHelp's QuickFilter
+                            // controls.
+                            isPinned={!!row.pinned}
                             textColor={textColor}
                             activeAccentColor={activeAccentColor}
                             // Phase 4.4 — pass tone so row + flyout share
@@ -144,15 +183,14 @@ export default function FolderQuickFilters({
                     </li>
                 )
             })}
-            {overflow > 0 ? (
+            {hidden.length > 0 ? (
                 <li>
-                    <div
-                        className="truncate px-2 py-1 text-[11px]"
-                        style={{ color: tone.labelWeak }}
-                        aria-label={`${overflow} more quick filters available`}
-                    >
-                        +{overflow} more
-                    </div>
+                    <FolderQuickFilterOverflow
+                        hiddenFilters={hidden}
+                        categoryId={categoryId}
+                        tone={tone}
+                        activeCountByFieldKey={activeCountByFieldKey}
+                    />
                 </li>
             ) : null}
         </ul>

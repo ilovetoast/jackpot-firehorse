@@ -52,6 +52,14 @@ class AnalyticsOverviewController extends Controller
             $creatorInsights = app(GetProstaffInsightsData::class)->forBrand($brand);
         }
 
+        // Phase 6 — top contextual navigation recommendations as overview cards.
+        // Tenant-scoped; empty array when feature disabled or nothing pending.
+        $contextualNavSummary = null;
+        if ($tenant && (bool) config('contextual_navigation_insights.enabled', true)) {
+            $contextualNavSummary = app(\App\Services\ContextualNavigation\ContextualNavigationPayloadService::class)
+                ->overviewSummary($tenant, topLimit: 4);
+        }
+
         return Inertia::render('Insights/Overview', [
             'stats' => [
                 'total_assets' => $data['total_assets'],
@@ -69,6 +77,7 @@ class AnalyticsOverviewController extends Controller
             'creator_module_enabled' => (bool) $creatorModuleEnabled,
             'creator_insights' => $creatorInsights,
             'storage_insight' => $data['storage_insight'] ?? null,
+            'contextual_navigation' => $contextualNavSummary,
         ]);
     }
 

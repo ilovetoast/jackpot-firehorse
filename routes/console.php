@@ -161,6 +161,28 @@ if ($schedulerEnabled) {
         ->withoutOverlapping(120)
         ->description('Queue metadata insights sync jobs for tenants with ai_insights_enabled');
 
+    // Phase 6 — Contextual Navigation Intelligence dispatcher.
+    // Runs weekly per tenant (cooldown enforced inside the job; this is
+    // the upper bound on dispatch frequency). Both gates checked here +
+    // again inside the job to keep the dispatcher honest in the absence
+    // of one or the other.
+    if ((bool) config('contextual_navigation_insights.scheduled_enabled', true)
+        && (bool) config('contextual_navigation_insights.enabled', true)
+    ) {
+        Schedule::call(function () {
+            \App\Models\Tenant::query()
+                ->where('ai_insights_enabled', true)
+                ->orderBy('id')
+                ->pluck('id')
+                ->each(function ($id) {
+                    \App\Jobs\RunContextualNavigationInsightsJob::dispatch((int) $id);
+                });
+        })->name('contextual-nav-insights:dispatch')
+            ->weeklyOn(1, '04:55') // Mondays at 04:55 — staggered after metadata insights at 04:25
+            ->withoutOverlapping(180)
+            ->description('Queue contextual navigation recommendation jobs for tenants with ai_insights_enabled');
+    }
+
     // Disposable demo workspace cleanup (Phase 4): only registers when enabled; respects demo.cleanup_dry_run.
     if (config('demo.cleanup_enabled')) {
         $demoCleanupCmd = (bool) config('demo.cleanup_dry_run', false)

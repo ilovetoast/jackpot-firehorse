@@ -114,6 +114,15 @@ class AITaskType
     public const AUDIO_INSIGHTS = 'audio_insights';
 
     /**
+     * Phase 6 — Contextual Navigation Intelligence.
+     * Borderline-case rationale enrichment over pre-computed statistical
+     * scores. Tenant-scoped, system-triggered by
+     * RunContextualNavigationInsightsJob; debits the
+     * `contextual_navigation` credit feature in AiUsageService.
+     */
+    public const CONTEXTUAL_NAVIGATION_REASONING = 'contextual_navigation_reasoning';
+
+    /**
      * Get all task types as an array.
      *
      * @return array<string>
@@ -131,6 +140,7 @@ class AITaskType
             self::SYSTEM_RELIABILITY_ANALYSIS,
             self::ASSET_TAG_SUGGESTION,
             self::ASSET_METADATA_GENERATION,
+            self::CONTEXTUAL_NAVIGATION_REASONING,
             self::PHOTOGRAPHY_FOCAL_POINT,
             self::VIDEO_INSIGHTS,
             self::APPROVAL_FEEDBACK_SUMMARY,

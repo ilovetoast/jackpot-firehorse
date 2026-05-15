@@ -224,6 +224,34 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\Filters\Facet\AssetFacetCountService::class);
         $this->app->singleton(\App\Services\Filters\Facet\FolderQuickFilterFacetService::class);
         $this->app->singleton(\App\Services\Filters\Facet\FilterFacetAggregationService::class);
+        // Phase 5.2 — quality service + instrumentation seam.
+        // Quality service is a thin singleton with no I/O outside the request
+        // lifecycle. Instrumentation defaults to the Null implementation;
+        // environments that want log-channel events can rebind to
+        // LogQuickFilterInstrumentation, and a future analytics-backed impl
+        // can replace it without touching call sites.
+        $this->app->singleton(\App\Services\Filters\FolderQuickFilterQualityService::class);
+        $this->app->singleton(
+            \App\Services\Filters\Contracts\QuickFilterInstrumentation::class,
+            \App\Services\Filters\Instrumentation\NullQuickFilterInstrumentation::class,
+        );
+        // Phase 5.3 — metadata hygiene infrastructure. All stateless
+        // singletons. The normalizer has no dependencies; canonicalization
+        // depends on the normalizer; duplicate detection depends on the
+        // normalizer; merge depends on both. Container resolves the chain.
+        $this->app->singleton(\App\Services\Hygiene\MetadataValueNormalizer::class);
+        $this->app->singleton(\App\Services\Hygiene\MetadataCanonicalizationService::class);
+        $this->app->singleton(\App\Services\Hygiene\MetadataDuplicateDetector::class);
+        $this->app->singleton(\App\Services\Hygiene\MetadataValueMergeService::class);
+
+        // Phase 6 — Contextual Navigation Intelligence. Stateless singletons.
+        // Reasoner depends on AIService (already bound) + AiUsageService.
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationScoringService::class);
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationRecommender::class);
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationStaleResolver::class);
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationApprovalService::class);
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationAiReasoner::class);
+        $this->app->singleton(\App\Services\ContextualNavigation\ContextualNavigationPayloadService::class);
 
         $this->app->singleton(\App\Services\SpatieRoleLookup::class);
 

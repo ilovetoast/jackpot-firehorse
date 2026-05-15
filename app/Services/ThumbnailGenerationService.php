@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\Model3dPreviewFailedException;
 use App\Models\Asset;
 use App\Models\AssetVersion;
 use App\Models\StorageBucket;
@@ -2421,7 +2422,18 @@ class ThumbnailGenerationService
         $this->model3dPreviewReport['blender_used'] = false;
         $this->model3dMasterPngPath = null;
 
-        throw new \RuntimeException(Str::limit($failureMessage, 500));
+        $limited = Str::limit($failureMessage, 500);
+
+        // Typed exception so GenerateThumbnailsJob can short-circuit to a terminal
+        // SKIPPED state (no retries, no Sentry spam) — invalid source bytes don't
+        // become valid by retrying on the same hardware.
+        throw new Model3dPreviewFailedException(
+            message: $limited,
+            userMessage: $limited,
+            fileType: 'model_glb',
+            blenderAttempted: false,
+            invalidSource: true,
+        );
     }
 
     /**
@@ -2546,7 +2558,25 @@ class ThumbnailGenerationService
         $this->model3dPreviewReport['poster_stub'] = false;
         $this->model3dPreviewReport['blender_used'] = false;
 
-        throw new \RuntimeException(Str::limit($failure, 500));
+        $limited = Str::limit($failure, 500);
+        $debug = is_array($this->model3dPreviewReport['blender_render_debug'] ?? null)
+            ? $this->model3dPreviewReport['blender_render_debug']
+            : [];
+
+        // Typed exception so GenerateThumbnailsJob can recognize this as a
+        // terminal user-data failure and apply the "model3d preview skipped"
+        // SKIPPED state — same UX as resource-exhaustion / source-too-large.
+        // Retrying a Blender process error 32× on the same hardware never
+        // produces a different outcome and only spams Sentry with `error`-level
+        // events for what is, in practice, a malformed or unsupported model.
+        throw new Model3dPreviewFailedException(
+            message: $limited,
+            userMessage: $limited,
+            fileType: $fileType,
+            blenderAttempted: $tryBlender,
+            invalidSource: false,
+            debug: $debug,
+        );
     }
 
     protected function model3dRegistryTypeSupportsBlenderImport(string $fileType): bool

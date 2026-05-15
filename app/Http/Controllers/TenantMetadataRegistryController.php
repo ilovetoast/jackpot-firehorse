@@ -489,6 +489,8 @@ class TenantMetadataRegistryController extends Controller
                     'folder_quick_filter_order',
                     'folder_quick_filter_weight',
                     'folder_quick_filter_source',
+                    // Phase 5.2 — pinned per visibility row.
+                    'is_pinned_folder_quick_filter',
                     'brand_id',
                 ]);
             if ($categoryModel->brand_id) {
@@ -509,6 +511,41 @@ class TenantMetadataRegistryController extends Controller
         }
         $quickFilterEligibility = app(FolderQuickFilterEligibilityService::class);
 
+        // Phase 5.2 — Quality summaries keyed by field_id. Evaluated in one
+        // batch (single SELECT) so the schema admin endpoint stays O(1) per
+        // row. The MetadataField model carries the persisted quality columns
+        // and the service derives flags + warning copy from them.
+        /** @var array<int, array<string, mixed>> $quickFilterQualityByField */
+        $quickFilterQualityByField = [];
+        if ($quickFiltersEnabledFeature && $fieldIds !== []) {
+            /** @var \App\Services\Filters\FolderQuickFilterQualityService $qualityService */
+            $qualityService = app(\App\Services\Filters\FolderQuickFilterQualityService::class);
+            $fieldsForQuality = \App\Models\MetadataField::query()
+                ->whereIn('id', $fieldIds)
+                ->get();
+            foreach ($fieldsForQuality as $field) {
+                // Phase 5.3 — pass tenant context so the alias_count signal
+                // is computed (alias scope is per-tenant; without tenant
+                // we'd silently report 0).
+                $quickFilterQualityByField[(int) $field->id] = $qualityService->evaluate($field, $tenant);
+            }
+        }
+
+        // Phase 6 — pending Contextual Navigation Intelligence hints for this
+        // (tenant, folder). Batch-loaded so per-field rendering avoids N+1.
+        /** @var array<int, list<array<string, mixed>>> $contextualNavHintsByField */
+        $contextualNavHintsByField = [];
+        if (
+            $quickFiltersEnabledFeature
+            && $fieldIds !== []
+            && $categoryId !== null
+            && (bool) config('contextual_navigation_insights.enabled', true)
+        ) {
+            $contextualNavHintsByField = app(
+                \App\Services\ContextualNavigation\ContextualNavigationPayloadService::class
+            )->hintsForFolderFields((int) $tenant->id, (int) $categoryId, $fieldIds);
+        }
+
         $buildPayload = function (array $row) use (
             $categoryId,
             $suppressedByField,
@@ -516,7 +553,9 @@ class TenantMetadataRegistryController extends Controller
             $systemOptionsLabels,
             $quickFilterRowsByField,
             $quickFiltersEnabledFeature,
-            $quickFilterEligibility
+            $quickFilterEligibility,
+            $quickFilterQualityByField,
+            $contextualNavHintsByField
         ): array {
             $f = $row['field'];
             $fid = (int) ($f['id'] ?? 0);
@@ -572,6 +611,15 @@ class TenantMetadataRegistryController extends Controller
                     $quickFilterEligibility->reasonIneligible($eligibilityInput)
                 );
             }
+            $quality = $quickFilterQualityByField[$fid] ?? [
+                'estimated_distinct_value_count' => null,
+                'last_facet_usage_at' => null,
+                'facet_usage_count' => 0,
+                'is_high_cardinality' => false,
+                'is_low_quality_candidate' => false,
+                'warnings' => [],
+            ];
+
             $quickFilter = [
                 'feature_enabled' => $quickFiltersEnabledFeature,
                 'supported' => $isEligibleForQuickFilter,
@@ -583,6 +631,23 @@ class TenantMetadataRegistryController extends Controller
                     ? (int) $qfRow->folder_quick_filter_weight
                     : null,
                 'source' => $qfRow?->folder_quick_filter_source ?? null,
+                // Phase 5.2 — pinning + quality summary surface.
+                'pinned' => $qfRow !== null && (bool) ($qfRow->is_pinned_folder_quick_filter ?? false),
+                'quality' => [
+                    'is_high_cardinality' => (bool) $quality['is_high_cardinality'],
+                    'is_low_quality_candidate' => (bool) $quality['is_low_quality_candidate'],
+                    'estimated_distinct_value_count' => $quality['estimated_distinct_value_count'],
+                    'facet_usage_count' => (int) ($quality['facet_usage_count'] ?? 0),
+                    'last_facet_usage_at' => $quality['last_facet_usage_at'] ?? null,
+                    // Phase 5.3 — hygiene signals.
+                    'alias_count' => (int) ($quality['alias_count'] ?? 0),
+                    'duplicate_candidate_count' => (int) ($quality['duplicate_candidate_count'] ?? 0),
+                    'warnings' => $quality['warnings'],
+                ],
+                // Phase 6 — Contextual Navigation Intelligence hints.
+                // Up to 3 pending recommendations / warnings for this
+                // (folder, field). Empty array when none or feature off.
+                'contextual_nav_hints' => $contextualNavHintsByField[$fid] ?? [],
                 'ineligible_reason' => $ineligibleReason,
             ];
 

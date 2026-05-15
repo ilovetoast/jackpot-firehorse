@@ -12,6 +12,7 @@ import {
     isUnifiedAiCreditsPayload,
 } from '../../utils/aiCreditsUsageDisplay'
 import PendingAiSuggestionsModal from '../../Components/PendingAiSuggestionsModal'
+import ContextualNavigationOverviewCard from '../../Components/insights/ContextualNavigationOverviewCard'
 import CreatorInsights from '../../Components/insights/CreatorInsights'
 import StorageInsightPanel from '../../Components/insights/StorageInsightPanel'
 import useLogoWhiteBgPreview from '../../utils/useLogoWhiteBgPreview'
@@ -77,6 +78,8 @@ export default function AnalyticsOverview({
     creator_module_enabled = false,
     creator_insights = null,
     storage_insight = null,
+    /** Phase 6 — Contextual Navigation Intelligence summary (or null when feature off / no recs). */
+    contextual_navigation = null,
 }) {
     const [suggestionsModalOpen, setSuggestionsModalOpen] = useState(false)
     const [lazyMeta, setLazyMeta] = useState(null)
@@ -205,6 +208,9 @@ export default function AnalyticsOverview({
     return (
         <InsightsLayout title="Insights Overview" activeSection="overview">
             <div className="space-y-6 animate-fadeInUp-d1">
+                {/* Phase 6 — Contextual Navigation Intelligence overview card.
+                    Renders nothing when total_pending is 0 or the feature is off. */}
+                <ContextualNavigationOverviewCard summary={contextual_navigation} />
                 {ai_monthly_cap_alert?.features?.length > 0 && (
                     <section
                         className="rounded-xl border border-amber-300 bg-amber-50 p-4 sm:p-5"

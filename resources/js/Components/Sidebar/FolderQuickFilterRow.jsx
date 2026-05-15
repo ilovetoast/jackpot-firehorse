@@ -21,18 +21,23 @@ export default function FolderQuickFilterRow({
     categoryId,
     isActive = false,
     activeValueCount = 0,
+    /** Phase 5.2 — pinned by admin; shows a subtle leading glyph. */
+    isPinned = false,
     textColor,
     activeAccentColor,
     tone: incomingTone,
 }) {
     const titleAttr = useMemo(() => {
-        if (!isActive) return field.label
-        if (activeValueCount === 1) return `${field.label} · 1 active value`
-        if (activeValueCount > 1) {
-            return `${field.label} · ${activeValueCount} active values`
+        const pinSuffix = isPinned ? ' · pinned' : ''
+        if (!isActive) return `${field.label}${pinSuffix}`
+        if (activeValueCount === 1) {
+            return `${field.label} · 1 active value${pinSuffix}`
         }
-        return `${field.label} · active`
-    }, [field.label, isActive, activeValueCount])
+        if (activeValueCount > 1) {
+            return `${field.label} · ${activeValueCount} active values${pinSuffix}`
+        }
+        return `${field.label} · active${pinSuffix}`
+    }, [field.label, isActive, activeValueCount, isPinned])
 
     const tone = useMemo(
         () => incomingTone || resolveQuickFilterTone(textColor),
@@ -83,6 +88,17 @@ export default function FolderQuickFilterRow({
                             <span className="min-w-0 flex-1 truncate">
                                 {field.label}
                             </span>
+                            {/* Phase 5.2 — trailing pin glyph. Sits in the
+                                row's right gutter so it never displaces
+                                the active-dimension dot in the left rail.
+                                Subtle by design: same weak label tone, no
+                                background. */}
+                            {isPinned ? (
+                                <PinGlyph
+                                    className="h-[10px] w-[10px] shrink-0"
+                                    color={tone.labelWeak}
+                                />
+                            ) : null}
                         </PopoverButton>
                         <PopoverPanel
                             transition
@@ -108,5 +124,28 @@ export default function FolderQuickFilterRow({
                 )
             }}
         </Popover>
+    )
+}
+
+/**
+ * Phase 5.2 — pin glyph. Tiny SVG so it never dominates the row label.
+ * Visually a thumbtack outline; rendered in tone.labelWeak so it reads as
+ * metadata, not an action.
+ */
+function PinGlyph({ className = 'h-[10px] w-[10px]', color = 'currentColor' }) {
+    return (
+        <svg
+            viewBox="0 0 12 12"
+            className={className}
+            aria-hidden
+            fill="none"
+            stroke={color}
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M7.2 1.5l3.3 3.3-1.6 0.5-2.7 2.7 0.4 1.7-1.1 1.1-2.0-2.0-2.5 2.5" />
+            <path d="M5.5 5.5l1 1" />
+        </svg>
     )
 }

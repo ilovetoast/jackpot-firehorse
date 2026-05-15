@@ -32,6 +32,9 @@ class MetadataFieldVisibility extends Model
         'folder_quick_filter_order',
         'folder_quick_filter_weight',
         'folder_quick_filter_source',
+        // Phase 5.2: pinning. Pinned filters sort first and resist overflow.
+        // See migration 2026_05_14_180000_add_phase_5_2_quick_filter_columns.
+        'is_pinned_folder_quick_filter',
     ];
 
     protected $casts = [
@@ -44,6 +47,7 @@ class MetadataFieldVisibility extends Model
         'show_in_folder_quick_filters' => 'boolean',
         'folder_quick_filter_order' => 'integer',
         'folder_quick_filter_weight' => 'integer',
+        'is_pinned_folder_quick_filter' => 'boolean',
     ];
 
     public function metadataField(): BelongsTo

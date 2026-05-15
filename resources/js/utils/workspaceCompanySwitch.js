@@ -56,9 +56,14 @@ export function switchCompanyWorkspace({ companyId, brandId = null, redirect = '
                 !data.redirect.startsWith('/app/api')
                     ? data.redirect
                     : redirect
-            window.location.href = target
+            // `replace()` (not `href =`) so the previous tenant's URL is dropped
+            // from the back stack. Without this, browser-Back returns the user to
+            // a page rendered for the *old* tenant — server then renders that URL
+            // for the *new* tenant's session, producing 403/404/empty-state UI
+            // ("the back button got stuck"). See docs/WORKSPACE_SWITCHING.md.
+            window.location.replace(target)
         })
         .catch(() => {
-            window.location.href = redirect
+            window.location.replace(redirect)
         })
 }

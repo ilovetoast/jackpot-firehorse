@@ -121,10 +121,11 @@ export default function AppNav({
             },
         })
             .then(() => {
-                window.location.href = redirectPath
+                // `replace()` so browser-Back skips this tenant-stale URL — see workspaceCompanySwitch.js for rationale.
+                window.location.replace(redirectPath)
             })
             .catch(() => {
-                window.location.href = redirectPath
+                window.location.replace(redirectPath)
             })
     }
 
@@ -152,12 +153,14 @@ export default function AppNav({
                     }
                     search = params.toString() ? `?${params}` : ''
                 }
-                window.location.href = newPath + search
+                // Brand switch has the same back-stack staleness as company switch:
+                // the previous brand's URL would render against the new brand's session.
+                window.location.replace(newPath + search)
             } else {
-                window.location.href = '/app/overview'
+                window.location.replace('/app/overview')
             }
         }).catch(() => {
-            window.location.href = '/app/overview'
+            window.location.replace('/app/overview')
         })
     }
 

@@ -5,6 +5,7 @@ namespace App\Services\Filters;
 use App\Models\Category;
 use App\Models\MetadataField;
 use App\Services\Filters\Facet\AssetFacetCountService;
+use App\Services\Hygiene\MetadataCanonicalizationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -46,6 +47,10 @@ class FolderQuickFilterValueService
 
     public function __construct(
         protected AssetFacetCountService $facetCounts,
+        // Phase 5.3 — alias hydration. Optional so existing tests that
+        // construct the service directly (without container resolution)
+        // still work. When absent, alias data simply isn't shipped.
+        protected ?MetadataCanonicalizationService $canonical = null,
     ) {}
 
     /**
@@ -97,6 +102,17 @@ class FolderQuickFilterValueService
             $countsAvailable = $this->hydrateCounts($values, $folder, $field, $activeFilters);
         }
 
+        // Phase 5.3 — passive alias surface. Each visible value gets a
+        // (possibly empty) `aliases` list of values that resolve to it.
+        // Filter matching is NOT routed through the alias table here —
+        // this is purely informational so admins (and future UI) can show
+        // "outdoors / out-door → outdoor" badges without changing query
+        // semantics.
+        $aliasesAvailable = false;
+        if ($values !== [] && $type !== 'boolean') {
+            $aliasesAvailable = $this->hydrateAliases($values, $folder, $field);
+        }
+
         return [
             'field' => [
                 'id' => (int) $field->id,
@@ -108,7 +124,95 @@ class FolderQuickFilterValueService
             'has_more' => $hasMore,
             'limit' => $limit,
             'counts_available' => $countsAvailable,
+            'aliases_available' => $aliasesAvailable,
         ];
+    }
+
+    /**
+     * Phase 5.3 — populate `aliases` on every visible value. Cheap one-shot
+     * SELECT keyed by canonical_value within the (tenant, field) scope.
+     * Returns whether any aliases were attached so the UI can decide
+     * whether to render the alias surface at all.
+     */
+    private function hydrateAliases(
+        array &$values,
+        Category $folder,
+        MetadataField $field,
+    ): bool {
+        if ($this->canonical === null) {
+            return false;
+        }
+        $tenant = $folder->tenant;
+        if ($tenant === null) {
+            return false;
+        }
+        try {
+            $rows = \App\Models\MetadataValueAlias::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('metadata_field_id', $field->id)
+                ->get(['alias_value', 'canonical_value']);
+        } catch (\Throwable $e) {
+            Log::debug('FolderQuickFilterValueService: alias hydrate failed', [
+                'field_id' => $field->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+        if ($rows->isEmpty()) {
+            // Still set the empty array so the frontend can rely on the
+            // shape without nullchecks. `aliases_available=false` tells it
+            // not to show alias affordances at all.
+            foreach ($values as $idx => $_v) {
+                $values[$idx]['aliases'] = [];
+            }
+
+            return false;
+        }
+        $byCanonical = [];
+        foreach ($rows as $r) {
+            $byCanonical[(string) $r->canonical_value] ??= [];
+            $byCanonical[(string) $r->canonical_value][] = (string) $r->alias_value;
+        }
+        $any = false;
+        foreach ($values as $idx => $row) {
+            $canonicalKey = is_string($row['value'] ?? null) ? $row['value'] : '';
+            $matches = $byCanonical[$canonicalKey] ?? [];
+            // Some admins enter aliases by-value ("outdoors") whose
+            // canonical normalizes the same way ("outdoor"); the alias
+            // table stores the normalized form. Try the normalized key
+            // too so we match both casings.
+            if ($matches === [] && is_string($canonicalKey)) {
+                $normalized = $this->normalizerNormalize($canonicalKey);
+                if ($normalized !== '' && isset($byCanonical[$normalized])) {
+                    $matches = $byCanonical[$normalized];
+                }
+            }
+            $values[$idx]['aliases'] = array_values(array_unique($matches));
+            if ($matches !== []) {
+                $any = true;
+            }
+        }
+
+        return $any;
+    }
+
+    /**
+     * Tiny inline normalize (no class dependency) so we don't have to
+     * inject the normalizer just to compare canonical key casings here.
+     * Mirrors {@see MetadataValueNormalizer::normalize} for the read path.
+     */
+    private function normalizerNormalize(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        $value = function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+        $value = preg_replace('/[\-_\/\.\:\,]+/u', ' ', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+
+        return trim($value);
     }
 
     /**

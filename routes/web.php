@@ -190,7 +190,10 @@ Route::post('/app/admin/performance/client-metric', $performanceClientMetric)->m
 Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
     ->name('test-push');
 
-Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403'])->prefix('app')->group(function () {
+// `prevent.bfcache` adds `Cache-Control: no-store` so browser-Back triggers a fresh server render
+// (reading the current session/tenant) instead of restoring a stale page from the browser's bfcache.
+// See App\Http\Middleware\PreventBackForwardCacheForAuthenticatedApp for the full rationale.
+Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', 'prevent.bfcache'])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 
@@ -330,6 +333,16 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
         Route::patch('/api/tenant/metadata/fields/{field}/categories/{category}/folder-quick-filter', [\App\Http\Controllers\Filters\FolderQuickFilterController::class, 'update'])->name('tenant.metadata.category.field.folder-quick-filter');
         // Phase 4 — Folder Quick Filters: lazy value picker for the sidebar flyout.
         Route::get('/api/tenant/folders/{category}/quick-filters/{field}/values', [\App\Http\Controllers\Filters\FolderQuickFilterValueController::class, 'show'])->name('tenant.folders.quick-filter.values');
+        // Phase 5.2 — Folder Quick Filters: fire-and-forget instrumentation hooks.
+        Route::post('/api/tenant/folders/{category}/quick-filters/overflow-open', [\App\Http\Controllers\Filters\FolderQuickFilterInstrumentationController::class, 'overflowOpen'])->name('tenant.folders.quick-filter.instrumentation.overflow-open');
+        Route::post('/api/tenant/folders/{category}/quick-filters/{field}/selection', [\App\Http\Controllers\Filters\FolderQuickFilterInstrumentationController::class, 'selection'])->name('tenant.folders.quick-filter.instrumentation.selection');
+        // Phase 5.3 — Metadata hygiene: aliases, duplicate candidates, merges.
+        Route::get('/api/tenant/metadata/fields/{field}/hygiene/aliases', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'listAliases'])->name('tenant.metadata.hygiene.aliases.index');
+        Route::post('/api/tenant/metadata/fields/{field}/hygiene/aliases', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'addAlias'])->name('tenant.metadata.hygiene.aliases.store');
+        Route::delete('/api/tenant/metadata/fields/{field}/hygiene/aliases/{aliasId}', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'removeAlias'])->name('tenant.metadata.hygiene.aliases.destroy');
+        Route::get('/api/tenant/metadata/fields/{field}/hygiene/duplicates', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'duplicateCandidates'])->name('tenant.metadata.hygiene.duplicates');
+        Route::post('/api/tenant/metadata/fields/{field}/hygiene/merge', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'merge'])->name('tenant.metadata.hygiene.merge');
+        Route::get('/api/tenant/metadata/fields/{field}/hygiene/merges', [\App\Http\Controllers\Hygiene\MetadataHygieneController::class, 'recentMerges'])->name('tenant.metadata.hygiene.merges.index');
         Route::post('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'suppressForCategory'])->name('tenant.metadata.category.suppress');
         Route::delete('/api/tenant/metadata/fields/{field}/categories/{category}/suppress', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'unsuppressForCategory'])->name('tenant.metadata.category.unsuppress');
         Route::get('/api/tenant/metadata/fields/{field}/categories', [\App\Http\Controllers\TenantMetadataRegistryController::class, 'getSuppressedCategories'])->name('tenant.metadata.category.list');
@@ -944,6 +957,12 @@ Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::cla
             Route::post('/api/ai/review/value-suggestions/{id}/reject', [\App\Http\Controllers\AiReviewController::class, 'rejectValueSuggestion'])->whereNumber('id')->name('api.ai.review.value-suggestions.reject');
             Route::post('/api/ai/review/field-suggestions/{id}/accept', [\App\Http\Controllers\AiReviewController::class, 'acceptFieldSuggestion'])->whereNumber('id')->name('api.ai.review.field-suggestions.accept');
             Route::post('/api/ai/review/field-suggestions/{id}/reject', [\App\Http\Controllers\AiReviewController::class, 'rejectFieldSuggestion'])->whereNumber('id')->name('api.ai.review.field-suggestions.reject');
+
+            // Phase 6 — Contextual Navigation Intelligence review queue.
+            Route::post('/api/ai/review/contextual/{id}/approve', [\App\Http\Controllers\Insights\ContextualNavigationReviewController::class, 'approve'])->whereNumber('id')->name('api.ai.review.contextual.approve');
+            Route::post('/api/ai/review/contextual/{id}/reject', [\App\Http\Controllers\Insights\ContextualNavigationReviewController::class, 'reject'])->whereNumber('id')->name('api.ai.review.contextual.reject');
+            Route::post('/api/ai/review/contextual/{id}/defer', [\App\Http\Controllers\Insights\ContextualNavigationReviewController::class, 'defer'])->whereNumber('id')->name('api.ai.review.contextual.defer');
+            Route::post('/api/ai/review/contextual/run', [\App\Http\Controllers\Insights\ContextualNavigationReviewController::class, 'run'])->name('api.ai.review.contextual.run');
 
             // TASK 2: Pending metadata approvals endpoint (UI-only, does not alter approval logic)
             Route::get('/api/pending-metadata-approvals', [\App\Http\Controllers\AssetMetadataController::class, 'getAllPendingMetadataApprovals'])->name('api.pending-metadata-approvals');

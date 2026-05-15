@@ -62,12 +62,13 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
                 if (brandUrlMatch && brandUrlMatch[1] !== String(brandId)) {
                     const newPath = `/app/brands/${brandId}${brandUrlMatch[2] || ''}`
                     const search = typeof window !== 'undefined' ? window.location.search : ''
-                    window.location.href = newPath + search
+                    // `replace()` so the old-brand URL leaves the back stack (would render stale against new brand's session).
+                    window.location.replace(newPath + search)
                 } else {
-                    window.location.href = '/app/overview'
+                    window.location.replace('/app/overview')
                 }
             }).catch(() => {
-                window.location.href = '/app/overview'
+                window.location.replace('/app/overview')
             })
         }
     }

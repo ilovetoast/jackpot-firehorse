@@ -28,7 +28,7 @@ import axios from 'axios'
 import { usePermission } from '../hooks/usePermission'
 import ProcessingActionCard from './ProcessingActionCard'
 import PlacementNotice, { PlacementNoticeAckRow } from './placement/PlacementNotice'
-import { placementPrimaryQuietButtonClasses } from './placement/surfaces'
+import { getWorkspacePrimaryActionButtonColors } from '../utils/colorUtils'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
@@ -468,6 +468,16 @@ export default function BulkActionsModal({
 }) {
     const { auth } = usePage().props
     const { can } = usePermission()
+
+    // Brand-derived primary button colors (same recipe as the Add Asset / primary
+    // action button on the page). Honors `workspace_button_style` (primary / secondary
+    // / accent / context) so this modal's CTA matches the rest of the workspace chrome
+    // instead of falling back to placement-fixed orange/violet/blue or the old
+    // hard-coded red caution swatch.
+    const brandButtonColors = useMemo(
+        () => getWorkspacePrimaryActionButtonColors(auth?.activeBrand),
+        [auth?.activeBrand]
+    )
     const canBulkRename = can('metadata.edit_post_upload')
     const canBulkRemoveTags = can('assets.tags.delete')
     const canQueueVideoInsights = can('metadata.edit_post_upload')
@@ -1182,6 +1192,7 @@ export default function BulkActionsModal({
                                     checked={fullPipelineResourceAck}
                                     onChange={(e) => setFullPipelineResourceAck(e.target.checked)}
                                     label="I understand this is resource intensive."
+                                    accentColor={brandButtonColors.resting}
                                 />
                             )}
 
@@ -1210,13 +1221,19 @@ export default function BulkActionsModal({
                                         pipelineSelectionBlocksAction ||
                                         (isFullPipelineBulk && !fullPipelineResourceAck)
                                     }
-                                    className={`px-4 py-2 text-sm font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors ${
-                                        isFullPipelineBulk
-                                            ? 'text-white bg-red-600 hover:bg-red-700'
-                                            : isSitePipelineSyncDelete
-                                              ? 'text-white bg-amber-700 hover:bg-amber-800'
-                                              : placementPrimaryQuietButtonClasses(placement)
+                                    className={`px-4 py-2 text-sm font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                        isSitePipelineSyncDelete
+                                            ? 'text-white bg-amber-700 hover:bg-amber-800 focus-visible:outline-amber-700'
+                                            : 'text-white bg-[var(--bulk-brand-btn)] hover:bg-[var(--bulk-brand-btn-hover)] focus-visible:outline-[color:var(--bulk-brand-btn)]'
                                     }`}
+                                    style={
+                                        isSitePipelineSyncDelete
+                                            ? undefined
+                                            : {
+                                                  '--bulk-brand-btn': brandButtonColors.resting,
+                                                  '--bulk-brand-btn-hover': brandButtonColors.hover,
+                                              }
+                                    }
                                 >
                                     {submitting
                                         ? `Processing ${n} assets...`

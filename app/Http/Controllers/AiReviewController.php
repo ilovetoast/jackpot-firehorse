@@ -33,7 +33,8 @@ class AiReviewController extends Controller
     public function index(Request $request): Response
     {
         $tab = (string) $request->query('tab', 'tags');
-        $allowed = ['tags', 'categories', 'values', 'fields'];
+        // Phase 6 — `contextual` is the navigation-intelligence tab.
+        $allowed = ['tags', 'categories', 'values', 'fields', 'contextual'];
         if (! in_array($tab, $allowed, true)) {
             $tab = 'tags';
         }
@@ -147,8 +148,14 @@ class AiReviewController extends Controller
         if ($type === 'fields') {
             return $this->getFieldSuggestions($tenant, $brand, $request);
         }
+        if ($type === 'contextual') {
+            // Delegate to the dedicated contextual-navigation controller so
+            // this file stays focused on field/value/tag/category review.
+            return app(\App\Http\Controllers\Insights\ContextualNavigationReviewController::class)
+                ->list($request);
+        }
 
-        return response()->json(['message' => 'Invalid type. Use tags, categories, values, or fields.'], 400);
+        return response()->json(['message' => 'Invalid type. Use tags, categories, values, fields, or contextual.'], 400);
     }
 
     /**
@@ -188,6 +195,13 @@ class AiReviewController extends Controller
             'categories' => $this->countCategorySuggestions($tenant, $brand, $user),
             'values' => $this->countValueSuggestionsPending($tenant),
             'fields' => $this->countFieldSuggestionsPending($tenant),
+            // Phase 6 — pending contextual navigation recommendations.
+            // Tenant-scoped (not brand-scoped) since the recommender writes
+            // brand-aware rows but the tab badge is a tenant-wide signal.
+            'contextual' => (int) \DB::table('contextual_navigation_recommendations')
+                ->where('tenant_id', $tenant->id)
+                ->where('status', \App\Models\ContextualNavigationRecommendation::STATUS_PENDING)
+                ->count(),
         ];
     }
 

@@ -346,14 +346,34 @@ class AssetController extends Controller
         if ($folderQuickFiltersEnabled && $categories->isNotEmpty()) {
             /** @var FolderQuickFilterAssignmentService $quickFilterAssignment */
             $quickFilterAssignment = app(FolderQuickFilterAssignmentService::class);
+            /** @var \App\Services\Filters\FolderQuickFilterQualityService $quickFilterQuality */
+            $quickFilterQuality = app(\App\Services\Filters\FolderQuickFilterQualityService::class);
             $quickFilterRowsByCategoryId = $quickFilterAssignment->getQuickFiltersForFolders($categories);
 
-            $allCategories = $allCategories->map(function ($category) use ($quickFilterRowsByCategoryId) {
+            $allCategories = $allCategories->map(function ($category) use ($quickFilterRowsByCategoryId, $quickFilterQuality, $tenant) {
                 $id = isset($category['id']) ? (int) $category['id'] : 0;
                 $rows = $id > 0 ? ($quickFilterRowsByCategoryId[$id] ?? []) : [];
 
-                $category['quick_filters'] = array_map(static function ($row) {
+                // Phase 5.2 — payload now includes pinned + quality summary per
+                // row. The frontend slices `quick_filters` against
+                // max_visible_per_folder and the overflow flyout reads the rest;
+                // because the service now sorts pinned-first, the slice is
+                // guaranteed to retain pinned entries.
+                $category['quick_filters'] = array_map(static function ($row) use ($quickFilterQuality, $tenant) {
                     $field = $row->metadataField;
+
+                    $quality = $field
+                        ? $quickFilterQuality->evaluate($field, $tenant)
+                        : [
+                            'estimated_distinct_value_count' => null,
+                            'last_facet_usage_at' => null,
+                            'facet_usage_count' => 0,
+                            'is_high_cardinality' => false,
+                            'is_low_quality_candidate' => false,
+                            'alias_count' => 0,
+                            'duplicate_candidate_count' => 0,
+                            'warnings' => [],
+                        ];
 
                     return [
                         'metadata_field_id' => (int) $row->metadata_field_id,
@@ -367,6 +387,19 @@ class AssetController extends Controller
                             ? (int) $row->folder_quick_filter_weight
                             : null,
                         'source' => $row->folder_quick_filter_source,
+                        'pinned' => (bool) $row->is_pinned_folder_quick_filter,
+                        'quality' => [
+                            'is_high_cardinality' => (bool) $quality['is_high_cardinality'],
+                            'is_low_quality_candidate' => (bool) $quality['is_low_quality_candidate'],
+                            // Estimated count is admin-only signal; the sidebar
+                            // never renders it but the admin UI does. Cheap to
+                            // ship as a small int.
+                            'estimated_distinct_value_count' => $quality['estimated_distinct_value_count'],
+                            // Phase 5.3 — hygiene signals.
+                            'alias_count' => (int) ($quality['alias_count'] ?? 0),
+                            'duplicate_candidate_count' => (int) ($quality['duplicate_candidate_count'] ?? 0),
+                            'warnings' => $quality['warnings'],
+                        ],
                     ];
                 }, $rows);
 
@@ -1723,6 +1756,13 @@ class AssetController extends Controller
                 'enabled' => $folderQuickFiltersEnabled,
                 'desktop_only' => (bool) ($folderQuickFilterSettings['desktop_only'] ?? true),
                 'max_visible_per_folder' => (int) ($folderQuickFilterSettings['max_visible_per_folder'] ?? 3),
+                // Phase 5.2 — gates the "Manage filter" footer link inside
+                // the value flyout. Frontend never enforces auth on its own;
+                // it just renders or hides the affordance. Server-side
+                // routes still validate the permission on click.
+                'can_manage_filters' => (bool) ($user
+                    && $tenant
+                    && $user->hasPermissionForTenant($tenant, 'metadata.tenant.visibility.manage')),
             ],
             'bulk_categories_by_asset_type' => $bulkCategoriesByAssetType,
             'categories_by_type' => [

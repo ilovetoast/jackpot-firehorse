@@ -410,6 +410,34 @@ export default function FolderQuickFilterFlyout({
                     for more.
                 </div>
             ) : null}
+
+            {/* Phase 5.2 — admin-only "Manage filter" deep link. Visibility is
+                gated server-side via folder_quick_filter_settings.can_manage_filters
+                so unauthorized users never see the affordance. The link
+                deep-links into the existing filter management surface; no
+                new admin panel is built here. */}
+            {settings?.can_manage_filters ? (
+                <div
+                    className="flex items-center justify-end px-3 py-1.5"
+                    style={{
+                        borderTop: `1px solid ${tone.separator}`,
+                    }}
+                >
+                    <a
+                        href={`/app/admin/metadata/fields/${field.id}`}
+                        className="text-[11px] underline-offset-2 hover:underline"
+                        style={{ color: tone.labelWeak }}
+                        onClick={(e) => {
+                            // Never block the popover's own outside-click /
+                            // close handlers; just let the navigation
+                            // happen.
+                            e.stopPropagation()
+                        }}
+                    >
+                        Manage filter
+                    </a>
+                </div>
+            ) : null}
         </div>
     )
 }

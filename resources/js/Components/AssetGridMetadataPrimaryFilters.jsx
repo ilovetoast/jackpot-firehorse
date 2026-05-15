@@ -58,7 +58,11 @@ import { updateFilterDebug } from '../utils/assetFilterDebug'
 import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { resolveVisibilityAssetType } from '../utils/filterScopeRules'
-import { ensureAccentContrastOnWhite, hexToRgba } from '../utils/colorUtils'
+import {
+    ensureAccentContrastOnWhite,
+    getWorkspacePrimaryActionButtonColors,
+    hexToRgba,
+} from '../utils/colorUtils'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 
 /**
@@ -247,19 +251,30 @@ export default function AssetGridMetadataPrimaryFilters({
         return field?.display_label || field?.label || fieldKey
     }
 
-    // Brand-tinted "Applied:" chip tokens — same recipe as `--jp-bs-soft-bg` /
-    // `--jp-bs-soft-border` (brand settings) and the SortDropdown accent: a soft
-    // tint of the workspace primary on white, with a contrast-corrected accent
-    // color for the label/icon (WCAG AA on white via ensureAccentContrastOnWhite).
+    // Brand-tinted "Applied:" chip tokens.
+    //
+    // Goal: chip should read as a lighter, ghost-button companion to the
+    // Add Asset / primary action button — same hue, just inverted contrast.
+    //   • Text/icon = exact resting color of the Add Asset button
+    //     (`getWorkspacePrimaryActionButtonColors`), so the chip's foreground
+    //     is the **full** brand color users already associate with primary
+    //     actions on this page. Run through `ensureAccentContrastOnWhite` as
+    //     a safety net for context-style/light brand combos that wouldn't
+    //     otherwise meet WCAG AA on white.
+    //   • Background / border = soft tint of the same color (same recipe as
+    //     `--jp-bs-soft-bg` / `--jp-bs-soft-border` in brand settings).
     const appliedChipStyle = useMemo(() => {
-        const accentText = ensureAccentContrastOnWhite(primaryColor)
+        const { resting } = getWorkspacePrimaryActionButtonColors(auth?.activeBrand)
+        const buttonColor = resting || primaryColor
+        const accentText = ensureAccentContrastOnWhite(buttonColor)
         return {
-            background: hexToRgba(primaryColor, 0.10),
-            border: `1px solid ${hexToRgba(primaryColor, 0.22)}`,
+            background: hexToRgba(buttonColor, 0.12),
+            border: `1px solid ${hexToRgba(buttonColor, 0.28)}`,
             color: accentText,
             removeColor: accentText,
+            ringColor: buttonColor,
         }
-    }, [primaryColor])
+    }, [auth?.activeBrand, primaryColor])
 
     // Always render the primary filter container
     if (compact) {
@@ -341,7 +356,7 @@ export default function AssetGridMetadataPrimaryFilters({
                                     type="button"
                                     onClick={() => handleRemoveFilter(fieldKey)}
                                     className="hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 rounded"
-                                    style={{ color: appliedChipStyle.removeColor, '--tw-ring-color': primaryColor }}
+                                    style={{ color: appliedChipStyle.removeColor, '--tw-ring-color': appliedChipStyle.ringColor }}
                                     aria-label={`Remove ${fieldKey} filter`}
                                 >
                                     <XMarkIcon className="h-3.5 w-3.5" />
