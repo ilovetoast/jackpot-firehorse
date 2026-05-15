@@ -1,4 +1,4 @@
-import { Link, usePage } from '@inertiajs/react'
+import { usePage } from '@inertiajs/react'
 
 /** Inverted wordmark for dark UIs when no tenant/brand (gateway default). */
 export const JACKPOT_WORDMARK_INVERTED_SRC = '/jp-wordmark-inverted.svg'
@@ -11,6 +11,8 @@ export default function LogoMark({
     /** When set, the mark is wrapped in an Inertia link (e.g. gateway → `/`). */
     href = null,
     linkAriaLabel = 'Jackpot home',
+    /** Force the Jackpot wordmark (e.g. multi-brand picker uses a neutral canvas). */
+    forceJackpotWordmark = false,
 }) {
     const { theme } = usePage().props
     const resolvedName = name || theme?.name || 'Jackpot'
@@ -67,21 +69,24 @@ export default function LogoMark({
         </div>
     )
 
-    const inner = theme?.mode === 'default' ? defaultMark : brandedRow('')
+    const useJackpotMark = forceJackpotWordmark || theme?.mode === 'default'
+    const inner = useJackpotMark ? defaultMark : brandedRow('')
 
     if (href) {
+        // Use a native <a> so the ?marketing_site=1 param reaches the PHP middleware
+        // and sets the session bypass flag before the redirect strips the param.
         return (
-            <Link
+            <a
                 href={href}
                 className={`inline-flex items-center rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B0B0D] ${className}`.trim()}
                 aria-label={linkAriaLabel}
             >
                 {inner}
-            </Link>
+            </a>
         )
     }
 
-    if (theme?.mode === 'default') {
+    if (useJackpotMark) {
         return (
             <div className={`flex items-center ${className}`}>
                 <img

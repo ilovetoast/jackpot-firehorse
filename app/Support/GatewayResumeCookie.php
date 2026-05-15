@@ -11,8 +11,10 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Crypt;
 
 /**
- * Short-lived encrypted cookie so multi-brand users can resume the last
- * workspace on GET /gateway without the picker (see BrandContextResolver).
+ * Short-lived encrypted cookie storing last tenant+brand for the authenticated user.
+ * It is **not** applied on the primary gateway route (`GET /gateway`): that screen must
+ * always offer workspace/brand choice when the user has multiple brands. The cookie is
+ * still queued from /app session for TTL continuity across other navigation patterns.
  *
  * @see docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md
  */
@@ -92,6 +94,12 @@ class GatewayResumeCookie
             return null;
         }
         if ($request->query('mode') && in_array($request->query('mode'), ['login', 'register'], true)) {
+            return null;
+        }
+
+        // Never pin workspace from resume on the main gateway page — multi-brand users must
+        // choose there; session + normal gateway resolution still apply.
+        if ($request->routeIs('gateway')) {
             return null;
         }
 

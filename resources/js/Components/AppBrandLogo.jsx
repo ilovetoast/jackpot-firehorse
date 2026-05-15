@@ -110,9 +110,9 @@ export default function AppBrandLogo({ activeBrand, brands, textColor, logoFilte
         
         // No brands available — show Jackpot logo (e.g. on no-company / errors page)
         return (
-            <Link href="/" className="flex items-center py-2 hover:opacity-90">
+            <a href="/?marketing_site=1" className="flex items-center py-2 hover:opacity-90">
                 <JackpotLogo className="h-12 w-auto" />
-            </Link>
+            </a>
         )
     }
 

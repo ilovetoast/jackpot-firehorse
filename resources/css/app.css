@@ -839,3 +839,97 @@ body.has-mobile-tabbar {
         0 0 0 1px rgba(99, 102, 241, 0.12);
     pointer-events: none;
 }
+
+/* Gateway workspace picker — animatable brand hover background (see GatewayLayout). */
+@property --gw-brand-p-r {
+    syntax: '<integer>';
+    initial-value: 124;
+    inherits: false;
+}
+@property --gw-brand-p-g {
+    syntax: '<integer>';
+    initial-value: 58;
+    inherits: false;
+}
+@property --gw-brand-p-b {
+    syntax: '<integer>';
+    initial-value: 237;
+    inherits: false;
+}
+@property --gw-brand-s-r {
+    syntax: '<integer>';
+    initial-value: 139;
+    inherits: false;
+}
+@property --gw-brand-s-g {
+    syntax: '<integer>';
+    initial-value: 92;
+    inherits: false;
+}
+@property --gw-brand-s-b {
+    syntax: '<integer>';
+    initial-value: 246;
+    inherits: false;
+}
+
+.gateway-brand-ambient {
+    transition:
+        opacity 700ms ease-out,
+        --gw-brand-p-r 700ms ease-out,
+        --gw-brand-p-g 700ms ease-out,
+        --gw-brand-p-b 700ms ease-out,
+        --gw-brand-s-r 700ms ease-out,
+        --gw-brand-s-g 700ms ease-out,
+        --gw-brand-s-b 700ms ease-out;
+    background:
+        radial-gradient(circle at 20% 20%, rgb(var(--gw-brand-p-r) var(--gw-brand-p-g) var(--gw-brand-p-b) / 0.2) 0%, transparent),
+        radial-gradient(circle at 80% 80%, rgb(var(--gw-brand-s-r) var(--gw-brand-s-g) var(--gw-brand-s-b) / 0.2) 0%, transparent),
+        #0b0b0d;
+}
+
+/* Gateway workspace picker — animatable brand hover background (see GatewayLayout). */
+@property --gw-brand-p-r {
+    syntax: '<integer>';
+    initial-value: 124;
+    inherits: false;
+}
+@property --gw-brand-p-g {
+    syntax: '<integer>';
+    initial-value: 58;
+    inherits: false;
+}
+@property --gw-brand-p-b {
+    syntax: '<integer>';
+    initial-value: 237;
+    inherits: false;
+}
+@property --gw-brand-s-r {
+    syntax: '<integer>';
+    initial-value: 139;
+    inherits: false;
+}
+@property --gw-brand-s-g {
+    syntax: '<integer>';
+    initial-value: 92;
+    inherits: false;
+}
+@property --gw-brand-s-b {
+    syntax: '<integer>';
+    initial-value: 246;
+    inherits: false;
+}
+
+.gateway-brand-ambient {
+    transition:
+        opacity 700ms ease-out,
+        --gw-brand-p-r 700ms ease-out,
+        --gw-brand-p-g 700ms ease-out,
+        --gw-brand-p-b 700ms ease-out,
+        --gw-brand-s-r 700ms ease-out,
+        --gw-brand-s-g 700ms ease-out,
+        --gw-brand-s-b 700ms ease-out;
+    background:
+        radial-gradient(circle at 20% 20%, rgb(var(--gw-brand-p-r) var(--gw-brand-p-g) var(--gw-brand-p-b) / 0.2) 0%, transparent),
+        radial-gradient(circle at 80% 80%, rgb(var(--gw-brand-s-r) var(--gw-brand-s-g) var(--gw-brand-s-b) / 0.2) 0%, transparent),
+        #0b0b0d;
+}

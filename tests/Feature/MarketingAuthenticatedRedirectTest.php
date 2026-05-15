@@ -58,6 +58,27 @@ class MarketingAuthenticatedRedirectTest extends TestCase
         $this->assertTrue(session(RedirectAuthenticatedFromMarketingSurface::SESSION_KEY));
     }
 
+    public function test_authenticated_user_with_active_session_is_redirected_to_overview(): void
+    {
+        $tenant = Tenant::create([
+            'name' => 'Co-Active',
+            'slug' => 'co-active',
+        ]);
+        $user = User::create([
+            'email' => 'active@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'A',
+            'last_name' => 'U',
+        ]);
+        $user->tenants()->attach($tenant->id, ['role' => 'owner']);
+
+        // Simulate an active workspace session (already picked tenant + brand).
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $tenant->id, 'brand_id' => 99])
+            ->get('/')
+            ->assertRedirect('/app/overview');
+    }
+
     public function test_any_app_request_clears_marketing_bypass(): void
     {
         $tenant = Tenant::create([

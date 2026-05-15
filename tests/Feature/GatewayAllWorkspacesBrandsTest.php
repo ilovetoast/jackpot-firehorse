@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Brand;
 use App\Models\Tenant;
+use App\Models\TenantAgency;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -83,6 +84,70 @@ class GatewayAllWorkspacesBrandsTest extends TestCase
                 ->has('context.available_brands', 2)
                 ->where('context.available_brands.0.tenant_is_agency', true)
                 ->where('context.available_brands.1.tenant_is_agency', false));
+    }
+
+    public function test_agency_user_gets_agency_and_managed_client_picker_groups(): void
+    {
+        $agency = Tenant::create(['name' => 'Velvet Hammer', 'slug' => 'velvet-hammer', 'is_agency' => true]);
+        $clientA = Tenant::create(['name' => 'ACG', 'slug' => 'acg']);
+        $clientB = Tenant::create(['name' => 'Augusta', 'slug' => 'augusta']);
+
+        $brandAg = Brand::create(['tenant_id' => $agency->id, 'name' => 'Velvet Hammer', 'slug' => 'vh-brand']);
+        $brandA1 = Brand::create(['tenant_id' => $clientA->id, 'name' => 'Thaw', 'slug' => 'thaw']);
+        $brandA2 = Brand::create(['tenant_id' => $clientA->id, 'name' => 'True', 'slug' => 'true']);
+        $brandB1 = Brand::create(['tenant_id' => $clientB->id, 'name' => 'Augusta', 'slug' => 'augusta-brand']);
+
+        $user = User::create([
+            'email' => 'agency-groups@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'A',
+            'last_name' => 'G',
+        ]);
+        $user->tenants()->attach($agency->id, ['role' => 'admin', 'is_agency_managed' => false]);
+        $user->tenants()->attach($clientA->id, [
+            'role' => 'admin',
+            'is_agency_managed' => true,
+            'agency_tenant_id' => $agency->id,
+        ]);
+        $user->tenants()->attach($clientB->id, [
+            'role' => 'admin',
+            'is_agency_managed' => true,
+            'agency_tenant_id' => $agency->id,
+        ]);
+        foreach ([$brandAg, $brandA1, $brandA2, $brandB1] as $b) {
+            $user->brands()->attach($b->id, ['role' => 'admin', 'removed_at' => null]);
+        }
+
+        TenantAgency::create([
+            'tenant_id' => $clientA->id,
+            'agency_tenant_id' => $agency->id,
+            'role' => 'agency_admin',
+            'brand_assignments' => [],
+            'created_by' => $user->id,
+        ]);
+        TenantAgency::create([
+            'tenant_id' => $clientB->id,
+            'agency_tenant_id' => $agency->id,
+            'role' => 'agency_admin',
+            'brand_assignments' => [],
+            'created_by' => $user->id,
+        ]);
+
+        $this->actingAs($user)
+            ->get(route('gateway'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('context.brand_picker_scope', 'all_workspaces')
+                ->has('context.brand_picker_groups', 3)
+                ->where('context.brand_picker_groups.0.type', 'agency')
+                ->where('context.brand_picker_groups.0.section_label', 'Agency workspace')
+                ->where('context.brand_picker_groups.0.tenant_name', 'Velvet Hammer')
+                ->where('context.brand_picker_groups.1.type', 'client')
+                ->where('context.brand_picker_groups.1.section_label', 'Managed clients')
+                ->where('context.brand_picker_groups.1.tenant_name', 'ACG')
+                ->where('context.brand_picker_groups.2.type', 'client')
+                ->where('context.brand_picker_groups.2.section_label', null)
+                ->where('context.brand_picker_groups.2.tenant_name', 'Augusta'));
     }
 
     public function test_company_query_scopes_brand_list_to_that_workspace(): void

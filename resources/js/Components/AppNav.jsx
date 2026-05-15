@@ -1060,9 +1060,9 @@ export default function AppNav({
                                     />
                                 )
                             ) : (
-                                <Link href="/" className="flex items-center">
+                                <a href="/?marketing_site=1" className="flex items-center">
                                     <JackpotLogo className="h-8 w-auto" />
-                                </Link>
+                                </a>
                             )}
                         </div>
 

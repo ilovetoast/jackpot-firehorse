@@ -20,7 +20,7 @@ class GatewayResumeCookieTest extends TestCase
         config()->set('plans.free.limits.max_brands', 50);
     }
 
-    public function test_valid_resume_cookie_yields_enter_mode_when_user_has_two_brands(): void
+    public function test_resume_cookie_is_ignored_on_plain_gateway_for_multi_brand_user(): void
     {
         $tenant = Tenant::create([
             'name' => 'Acme Co',
@@ -65,8 +65,8 @@ class GatewayResumeCookieTest extends TestCase
             ->get(route('gateway'))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->where('mode', 'enter')
-                ->where('context.gateway_resume_active', true));
+                ->where('mode', 'brand_select')
+                ->where('context.gateway_resume_active', false));
     }
 
     public function test_switch_query_shows_brand_picker_and_does_not_use_resume(): void

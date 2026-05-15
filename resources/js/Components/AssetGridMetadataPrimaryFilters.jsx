@@ -59,7 +59,6 @@ import { FilterFieldInput } from './FilterFieldInput'
 import { resolve, CONTEXT, WIDGET } from '../utils/widgetResolver'
 import { resolveVisibilityAssetType } from '../utils/filterScopeRules'
 import {
-    ensureAccentContrastOnWhite,
     getWorkspacePrimaryActionButtonColors,
     hexToRgba,
 } from '../utils/colorUtils'
@@ -251,28 +250,17 @@ export default function AssetGridMetadataPrimaryFilters({
         return field?.display_label || field?.label || fieldKey
     }
 
-    // Brand-tinted "Applied:" chip tokens.
-    //
-    // Goal: chip should read as a lighter, ghost-button companion to the
-    // Add Asset / primary action button — same hue, just inverted contrast.
-    //   • Text/icon = exact resting color of the Add Asset button
-    //     (`getWorkspacePrimaryActionButtonColors`), so the chip's foreground
-    //     is the **full** brand color users already associate with primary
-    //     actions on this page. Run through `ensureAccentContrastOnWhite` as
-    //     a safety net for context-style/light brand combos that wouldn't
-    //     otherwise meet WCAG AA on white.
-    //   • Background / border = soft tint of the same color (same recipe as
-    //     `--jp-bs-soft-bg` / `--jp-bs-soft-border` in brand settings).
+    // Brand-tinted "Applied:" chip tokens — same resting hue as Add Asset / segmented primary selection
+    // ({@link getWorkspacePrimaryActionButtonColors}), not ensureAccentContrastOnWhite on raw primary.
     const appliedChipStyle = useMemo(() => {
         const { resting } = getWorkspacePrimaryActionButtonColors(auth?.activeBrand)
-        const buttonColor = resting || primaryColor
-        const accentText = ensureAccentContrastOnWhite(buttonColor)
+        const chipHue = resting || primaryColor
         return {
-            background: hexToRgba(buttonColor, 0.12),
-            border: `1px solid ${hexToRgba(buttonColor, 0.28)}`,
-            color: accentText,
-            removeColor: accentText,
-            ringColor: buttonColor,
+            background: hexToRgba(chipHue, 0.12),
+            border: `1px solid ${hexToRgba(chipHue, 0.28)}`,
+            color: chipHue,
+            removeColor: chipHue,
+            ringColor: chipHue,
         }
     }, [auth?.activeBrand, primaryColor])
 

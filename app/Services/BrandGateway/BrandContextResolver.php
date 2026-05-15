@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Auth;
 
 class BrandContextResolver
 {
+    public function __construct(
+        protected GatewayBrandPickerGroupsBuilder $brandPickerGroupsBuilder,
+    ) {}
+
     /**
      * Resolve the brand/tenant context for the gateway.
      *
@@ -140,6 +144,11 @@ class BrandContextResolver
             }
         }
 
+        $brandPickerGroups = null;
+        if ($user !== null && $brandPickerScope === 'all_workspaces' && $availableBrands !== []) {
+            $brandPickerGroups = $this->brandPickerGroupsBuilder->build($user, $availableBrands);
+        }
+
         return [
             'tenant' => $tenant ? $this->serializeTenant($tenant) : null,
             'brand' => $brand ? $this->serializeBrand($brand) : null,
@@ -152,12 +161,18 @@ class BrandContextResolver
             /** Logged-in user belongs to the resolved tenant but has zero brand memberships (gateway brand picker empty). */
             'tenant_member_without_brands' => $user !== null && $tenant !== null && count($availableBrands) === 0
                 && $brandPickerScope !== 'all_workspaces',
-            /** True when a valid jp_gateway_resume cookie pinned tenant+brand (cinematic enter despite multi-brand). */
+            /** True when resume cookie pinned tenant+brand (never set on route `gateway` — see {@see GatewayResumeCookie::tryDecodeAndAuthorize}). */
             'gateway_resume_active' => $gatewayResumeActive,
             /**
              * all_workspaces: GET /gateway lists every brand the user can open across companies (unless URL/subdomain scopes the list).
              */
             'brand_picker_scope' => $brandPickerScope,
+            /**
+             * Agency users: AGENCY WORKSPACE + MANAGED CLIENTS sections (mirrors nav context picker).
+             *
+             * @var array<int, array<string, mixed>>|null
+             */
+            'brand_picker_groups' => $brandPickerGroups,
         ];
     }
 

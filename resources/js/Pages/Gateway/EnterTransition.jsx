@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePage } from '@inertiajs/react'
 
-export default function EnterTransition({ suppressAutoRedirect = false }) {
+export default function EnterTransition() {
     const { theme } = usePage().props
     const [stage, setStage] = useState('init')
 
@@ -11,9 +11,6 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
     const destination = '/app/overview'
 
     useEffect(() => {
-        if (suppressAutoRedirect) {
-            return undefined
-        }
         if (isInstant) {
             // Instant mode: quick 150ms fade-out, no progress bar — feels intentional, not jarring
             const t1 = setTimeout(() => setStage('fade'), 10)
@@ -36,7 +33,7 @@ export default function EnterTransition({ suppressAutoRedirect = false }) {
             clearTimeout(t2)
             clearTimeout(t3)
         }
-    }, [isInstant, destination, suppressAutoRedirect])
+    }, [isInstant, destination])
 
     const primary = theme?.colors?.primary || '#7c3aed'
     const isJackpotDefault = theme?.mode === 'default'

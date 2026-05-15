@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Head, usePage } from '@inertiajs/react'
 import GatewayLayout from './GatewayLayout'
 import LoginForm from './LoginForm'
@@ -7,7 +7,6 @@ import CompanySelector from './CompanySelector'
 import BrandSelector from './BrandSelector'
 import InviteAccept from './InviteAccept'
 import EnterTransition from './EnterTransition'
-import BrandSwitchModal from './BrandSwitchModal'
 
 const MODES = {
     LOGIN: 'login',
@@ -23,14 +22,32 @@ const MODES = {
 export default function GatewayIndex({ context, mode: initialMode, invite_token, flash_error, auto_enter }) {
     const { flash, theme } = usePage().props
     const [mode, setMode] = useState(initialMode || MODES.LOGIN)
-    const [switchOpen, setSwitchOpen] = useState(false)
-    /** Stops EnterTransition redirect timers when user opens Switch (interrupt auto-enter). */
-    const [suppressAutoRedirect, setSuppressAutoRedirect] = useState(false)
+    const [pickerAmbientBrand, setPickerAmbientBrand] = useState(null)
 
-    const openSwitch = useCallback(() => {
-        setSuppressAutoRedirect(true)
-        setSwitchOpen(true)
-    }, [])
+    useEffect(() => {
+        const clearsHover = [
+            MODES.LOGIN,
+            MODES.REGISTER,
+            MODES.COMPANY_SELECT,
+            MODES.INVITE_LOGIN,
+            MODES.INVITE_REGISTER,
+        ]
+        if (clearsHover.includes(mode)) {
+            setPickerAmbientBrand(null)
+        }
+    }, [mode])
+
+    // The workspace pickers always use the Jackpot cinematic shell (no brand chosen yet).
+    // Auth forms (login / register) adopt the brand's ambient when a brand URL was specified
+    // (e.g. /gateway?brand=nebo&mode=login) — theme.mode will be 'brand' or 'tenant' in that case.
+    const hasBrandOrTenantTheme = theme?.mode && theme.mode !== 'default'
+    const jackpotPreBrandShell = [MODES.COMPANY_SELECT, MODES.BRAND_SELECT].includes(mode)
+        || (!hasBrandOrTenantTheme && [
+            MODES.LOGIN,
+            MODES.REGISTER,
+            MODES.INVITE_LOGIN,
+            MODES.INVITE_REGISTER,
+        ].includes(mode))
 
     const handleToggleMode = useCallback((newMode) => {
         setMode(newMode)
@@ -40,16 +57,9 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
         return (
             <>
                 <Head title={theme?.name || 'Jackpot'} />
-                <GatewayLayout onSwitchOpen={openSwitch} showHeaderLogo={false}>
-                    <EnterTransition suppressAutoRedirect={suppressAutoRedirect} />
+                <GatewayLayout ambient="theme" showHeaderLogo={false}>
+                    <EnterTransition />
                 </GatewayLayout>
-
-                {switchOpen && (
-                    <BrandSwitchModal
-                        context={context}
-                        onClose={() => setSwitchOpen(false)}
-                    />
-                )}
             </>
         )
     }
@@ -85,14 +95,17 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                 return (
                     <BrandSelector
                         brands={context.available_brands}
+                        brandPickerGroups={context.brand_picker_groups}
                         tenant={context.tenant}
                         brandPickerScope={context.brand_picker_scope}
                         tenantMemberWithoutBrands={Boolean(context.tenant_member_without_brands)}
+                        activeBrandId={context.brand?.id ?? null}
+                        onAmbientHover={setPickerAmbientBrand}
                     />
                 )
 
             case MODES.ENTER:
-                return <EnterTransition suppressAutoRedirect={suppressAutoRedirect} />
+                return <EnterTransition />
 
             case MODES.INVITE_ACCEPT:
             case MODES.INVITE_REGISTER:
@@ -117,7 +130,20 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
     return (
         <>
             <Head title={theme?.name || 'Jackpot'} />
-            <GatewayLayout onSwitchOpen={openSwitch} showHeaderLogo={mode !== MODES.ENTER}>
+            <GatewayLayout
+                ambient={jackpotPreBrandShell ? 'jackpot-pick' : 'theme'}
+                ambientHoverBrand={mode === MODES.BRAND_SELECT ? pickerAmbientBrand : null}
+                layoutMode={(() => {
+                    if (mode !== MODES.BRAND_SELECT) return 'default'
+                    const scope  = context?.brand_picker_scope
+                    const brands = context?.available_brands ?? []
+                    const groups = context?.brand_picker_groups
+                    if (scope !== 'all_workspaces') return 'default'
+                    if (brands.length > 16 || (Array.isArray(groups) && groups.length > 5)) return 'enterprise'
+                    return 'lanes'
+                })()}
+                showHeaderLogo={mode !== MODES.ENTER}
+            >
                 {(flash?.error || flash_error) && (
                     <div className="mb-6 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-sm text-center max-w-md mx-auto">
                         {flash?.error || flash_error}
@@ -125,13 +151,6 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                 )}
                 {renderContent()}
             </GatewayLayout>
-
-            {switchOpen && (
-                <BrandSwitchModal
-                    context={context}
-                    onClose={() => setSwitchOpen(false)}
-                />
-            )}
         </>
     )
 }

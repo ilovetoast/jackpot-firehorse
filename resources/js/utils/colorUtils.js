@@ -410,6 +410,53 @@ export function getWorkspaceSidebarActiveRowForegroundHex(highlightBgHex, sideba
  * @param {string|null|undefined} secondary
  * @returns {string} CSS background (gradient or solid color)
  */
+/**
+ * Gateway / brand login shell background — mirrors {@link BrandThemeBuilder::resolveBackground}.
+ *
+ * @param {string|null|undefined} primary
+ * @param {string|null|undefined} secondary
+ * @returns {string}
+ */
+export function buildBrandGatewayBackground(primary, secondary) {
+    const p = normalizeHexColor(primary)
+    const s = normalizeHexColor(secondary || primary)
+    return [
+        `radial-gradient(circle at 20% 20%, ${p}33, transparent)`,
+        `radial-gradient(circle at 80% 80%, ${s}33, transparent)`,
+        '#0B0B0D',
+    ].join(', ')
+}
+
+/** @returns {{ r: number, g: number, b: number }} */
+export function hexToRgbParts(hexColor) {
+    const h = normalizeHexColor(hexColor).slice(1)
+    return {
+        r: Number.parseInt(h.slice(0, 2), 16),
+        g: Number.parseInt(h.slice(2, 4), 16),
+        b: Number.parseInt(h.slice(4, 6), 16),
+    }
+}
+
+/**
+ * CSS custom properties for {@link .gateway-brand-ambient} (animatable via @property).
+ *
+ * @param {string|null|undefined} primary
+ * @param {string|null|undefined} secondary
+ * @returns {Record<string, number>}
+ */
+export function brandGatewayHoverCssVars(primary, secondary) {
+    const p = hexToRgbParts(primary)
+    const s = hexToRgbParts(secondary || primary)
+    return {
+        '--gw-brand-p-r': p.r,
+        '--gw-brand-p-g': p.g,
+        '--gw-brand-p-b': p.b,
+        '--gw-brand-s-r': s.r,
+        '--gw-brand-s-g': s.g,
+        '--gw-brand-s-b': s.b,
+    }
+}
+
 export function resolveBrandIconBackground(style, primary, secondary) {
     const p = primary || '#6366f1'
     const s = secondary || '#8b5cf6'
