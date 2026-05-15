@@ -657,10 +657,12 @@ class MetadataFieldsSeeder extends Seeder
             'display_widget' => 'select',
         ]);
         // “Where is it?” — sync replaces options not listed (staging: run MetadataFieldsSeeder after deploy).
+        // Use studio_location (not "studio") so the slug does not collide with photo_type "studio" (shot style),
+        // which keeps filters, AI tag→field matching, and value suggestions unambiguous.
         $this->syncOptions($environmentTypeId, [
             ['value' => 'indoor', 'system_label' => 'Indoor'],
             ['value' => 'outdoor', 'system_label' => 'Outdoor'],
-            ['value' => 'studio', 'system_label' => 'Studio'],
+            ['value' => 'studio_location', 'system_label' => 'Studio'],
             ['value' => 'urban', 'system_label' => 'Urban'],
             ['value' => 'nature', 'system_label' => 'Nature'],
             ['value' => 'mixed_composite', 'system_label' => 'Mixed/Composite'],

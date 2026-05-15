@@ -1105,7 +1105,7 @@ class DevelopmentDataSeeder extends Seeder
             'orientation' => fake()->randomElement(['landscape', 'portrait', 'square']),
             'color_space' => fake()->randomElement(['srgb', 'adobe_rgb', 'cmyk']),
             'resolution_class' => fake()->randomElement(['low', 'medium', 'high', 'ultra']),
-            'environment_type' => fake()->randomElement(['indoor', 'outdoor', 'studio', 'urban', 'nature', 'unknown']),
+            'environment_type' => fake()->randomElement(['indoor', 'outdoor', 'studio_location', 'urban', 'nature', 'unknown']),
             'subject_type' => fake()->randomElement(['product', 'person', 'food_beverage', 'architecture', 'landscape_place']),
             default => fake()->word(),
         };

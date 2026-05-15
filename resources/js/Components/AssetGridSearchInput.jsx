@@ -432,7 +432,11 @@ export default function AssetGridSearchInput({
     const rightPadRem = isSearchPending ? 4.25 : hasText ? 2.25 : 0.625
 
     return (
-        <div className={`asset-grid-search-root relative z-10 w-full min-w-0 ${className}`} ref={rootRef}>
+        <div
+            className={`asset-grid-search-root relative z-30 w-full min-w-0 ${className}`}
+            ref={rootRef}
+        >
+            {/* z-30: above secondary filters sticky row (z-10) so suggestions are not covered */}
             <form onSubmit={handleFormSubmit} role="search" className="contents">
                 <button
                     type="submit"

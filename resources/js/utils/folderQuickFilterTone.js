@@ -11,7 +11,7 @@
  * color, so the same alpha-darkened hover tone renders identically on
  * both.
  *
- * @param {string|undefined|null} textColor          Sidebar foreground color hex (e.g. '#ffffff' or '#0f172a').
+ * @param {string|undefined|null} textColor          Sidebar row foreground (e.g. '#ffffff', '#fff', or 'rgba(255,255,255,0.88)').
  * @param {string|undefined|null} sidebarColor       Sidebar background color hex (e.g. '#5B2D7E').
  * @param {string|undefined|null} sidebarActiveBg    Brand-darkened active-row background hex (Sidebar `activeBgColor`).
  * @param {string|undefined|null} brandAccentHex     Workspace / brand primary (e.g. button color). When set, selected
@@ -19,7 +19,9 @@
  */
 export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg, brandAccentHex = null) {
     const tc = (textColor || '').toString().trim().toLowerCase()
-    const isDark = tc === '#ffffff' || tc === '#fff' || tc === 'white'
+    // Sidebar row foreground is often rgba(255,255,255,…) rather than literal "#fff"; treat any
+    // sufficiently light foreground as "dark rail" so the flyout matches the workspace sidebar.
+    const isDark = isLightOnDarkSidebarForeground(tc)
 
     // Surface colors:
     //   - Prefer the sidebar's actual surface color so the flyout reads as
@@ -97,6 +99,39 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg,
             '0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 18px -6px rgba(15, 23, 42, 0.12), 0 24px 60px -24px rgba(15, 23, 42, 0.18)',
         scrollbarThumb: 'rgba(15, 23, 42, 0.18)',
     }
+}
+
+/**
+ * True when the sidebar passes a light foreground (white / near-white), including common
+ * rgba() forms from theme tokens — not only exact "#ffffff".
+ */
+function isLightOnDarkSidebarForeground(normalizedLower) {
+    const tc = normalizedLower
+    if (tc === '#ffffff' || tc === '#fff' || tc === 'white') {
+        return true
+    }
+    const rgba = tc.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/)
+    if (rgba) {
+        const r = Number(rgba[1])
+        const g = Number(rgba[2])
+        const b = Number(rgba[3])
+        const a = rgba[4] !== undefined ? Number(rgba[4]) : 1
+        if (!Number.isFinite(a) || a < 0.12) {
+            return false
+        }
+        const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+        return lum >= 0.72
+    }
+    const hex = normalizeHex(tc)
+    if (hex) {
+        const rgb = hexToRgb(hex)
+        if (!rgb) {
+            return false
+        }
+        const lum = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255
+        return lum >= 0.72
+    }
+    return false
 }
 
 /** Normalize "#abc"/"#aabbcc" to "#aabbcc". Returns null on bad input. */

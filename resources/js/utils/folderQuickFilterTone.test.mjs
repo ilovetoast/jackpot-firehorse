@@ -64,6 +64,17 @@ test('resolveQuickFilterTone: case-insensitive white detection', () => {
     assert.equal(resolveQuickFilterTone('white').isDark, true)
 })
 
+test('resolveQuickFilterTone: rgba near-white textColor selects dark flyout (matches dark sidebar rail)', () => {
+    const t = resolveQuickFilterTone('rgba(255, 255, 255, 0.88)', '#1a1a1c', '#2d2d32')
+    assert.equal(t.isDark, true)
+    assert.match(t.surface, /^rgba\(26,\s*26,\s*28/)
+})
+
+test('resolveQuickFilterTone: rgba dark slate textColor stays light flyout variant', () => {
+    const t = resolveQuickFilterTone('rgba(15, 23, 42, 0.92)', '#f8fafc')
+    assert.equal(t.isDark, false)
+})
+
 test('resolveQuickFilterTone: undefined / null / empty default to light variant', () => {
     assert.equal(resolveQuickFilterTone(undefined).isDark, false)
     assert.equal(resolveQuickFilterTone(null).isDark, false)

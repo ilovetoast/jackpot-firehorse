@@ -78,6 +78,21 @@ class ValueSuggestionEngine
                     continue;
                 }
 
+                if ($this->shouldSkipForSiblingFieldOptionCatalog(
+                    $fieldId,
+                    $canonical,
+                    $optionValuesByFieldId
+                )) {
+                    $log->debug('[value_suggestions] Skipped: value already used on another select field catalog', [
+                        'tenant_id' => $tenantId,
+                        'category_slug' => $slug,
+                        'field_key' => $field->key,
+                        'value' => $canonical,
+                    ]);
+
+                    continue;
+                }
+
                 if ($this->isDuplicateSuggestion($existingSuggestionKeys, (string) $field->key, $canonical)) {
                     $log->debug('[value_suggestions] Skipped: duplicate pending/accepted suggestion', [
                         'tenant_id' => $tenantId,
@@ -259,6 +274,31 @@ class ValueSuggestionEngine
         $v = strtolower(trim($rawOrNormalized));
 
         return in_array($v, $optionSetLower, true);
+    }
+
+    /**
+     * @param  array<int, list<string>>  $optionValuesByFieldId
+     */
+    protected function shouldSkipForSiblingFieldOptionCatalog(
+        int $currentFieldId,
+        string $canonicalLower,
+        array $optionValuesByFieldId
+    ): bool {
+        if (! config('ai_metadata_value_suggestions.dedupe_suggested_values_across_select_field_options', true)) {
+            return false;
+        }
+
+        $v = strtolower(trim($canonicalLower));
+        foreach ($optionValuesByFieldId as $fid => $set) {
+            if ((int) $fid === $currentFieldId) {
+                continue;
+            }
+            if (in_array($v, $set, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function insertIgnoreRow(

@@ -21,5 +21,13 @@ return [
     /** @var list<string> Extra field keys to exclude from merged-signal value suggestions (in addition to automatic population). */
     'excluded_field_keys' => [],
 
+    /**
+     * When true, do not propose a new option value for field A if the same normalized value
+     * already exists on any other select/multiselect field’s catalog (metadata_options).
+     * Prevents cross-dimension duplicates such as "studio" on Environment when Photo type
+     * already lists "studio".
+     */
+    'dedupe_suggested_values_across_select_field_options' => true,
+
     'min_option_length_for_tag_substring_match' => 6,
 ];
