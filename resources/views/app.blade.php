@@ -9,7 +9,7 @@
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="default">
         <meta name="apple-mobile-web-app-title" content="{{ config('app.name', 'Jackpot') }}">
-        @if(app()->environment('staging'))
+        @if(config('app.block_search_engine_crawling'))
         <meta name="robots" content="noindex, nofollow">
         @endif
         <link rel="manifest" href="/manifest.webmanifest">

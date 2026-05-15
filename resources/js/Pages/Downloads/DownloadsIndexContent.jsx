@@ -25,6 +25,7 @@ import Avatar from '../../Components/Avatar'
 import BrandAvatar from '../../Components/BrandAvatar'
 import EditDownloadSettingsModal from '../../Components/EditDownloadSettingsModal'
 import ShareEmailToField from '../../Components/downloads/ShareEmailToField'
+import { getWorkspaceButtonColor, ensureAccentContrastOnWhite } from '../../utils/colorUtils'
 
 function formatDate(iso) {
   if (!iso) return '—'
@@ -82,8 +83,8 @@ function accessBadge(accessMode, passwordProtected = false) {
       title: passwordProtected ? 'Anyone with the link can open the page; a password is required to download.' : 'Anyone with the link can download.',
     },
     brand: { label: 'Brand', className: 'bg-violet-100 text-violet-800', title: 'Only brand members can access.' },
-    company: { label: 'Company', className: 'bg-indigo-100 text-indigo-800', title: 'Only company members can access.' },
-    team: { label: 'Company', className: 'bg-indigo-100 text-indigo-800', title: 'Only company members can access.' },
+    company: { label: 'Company', className: 'bg-slate-100 text-slate-800', title: 'Only company members can access.' },
+    team: { label: 'Company', className: 'bg-slate-100 text-slate-800', title: 'Only company members can access.' },
     users: { label: 'Specific users', className: 'bg-slate-100 text-slate-700', title: 'Only selected users can access.' },
     restricted: { label: 'Specific users', className: 'bg-slate-100 text-slate-700', title: 'Only selected users can access.' },
   }
@@ -309,7 +310,11 @@ export function DownloadsIndexContent({
     )
   }, [onNavigateList, filters, paginationMeta])
 
-  const brandAccent = auth?.activeBrand?.primary_color || '#6366f1'
+  const brandAccent = useMemo(() => {
+    const b = auth?.activeBrand
+    const raw = b ? getWorkspaceButtonColor(b) : '#64748b'
+    return ensureAccentContrastOnWhite(raw)
+  }, [auth?.activeBrand])
 
   const copyLink = (url, id) => {
     if (!url) return
@@ -1374,7 +1379,10 @@ export function DownloadsIndexContent({
       {/* Share via email modal */}
       {shareEmailDownload && (
         <div className={`fixed inset-0 flex items-center justify-center p-4 bg-black/50 ${onNavigateList ? 'z-[200]' : 'z-50'}`} aria-modal="true" role="dialog">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
+            style={{ ['--primary']: brandAccent }}
+          >
             <h3 className="text-lg font-semibold text-gray-900">Share via email</h3>
             <p className="mt-1 text-sm text-gray-500">
               Send the download link to someone
@@ -1399,7 +1407,7 @@ export function DownloadsIndexContent({
                 disabled={shareEmailForm.processing}
                 error={shareEmailForm.errors?.to || pageErrors?.to || null}
                 labelClassName="block text-sm font-medium text-gray-700"
-                inputClassName="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                inputClassName="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-[color:var(--primary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--primary)]/30 sm:text-sm"
               />
               <div>
                 <label htmlFor="share-email-message" className="block text-sm font-medium text-gray-700">
@@ -1410,7 +1418,7 @@ export function DownloadsIndexContent({
                   rows={3}
                   value={shareEmailForm.data.message}
                   onChange={(e) => shareEmailForm.setData('message', e.target.value)}
-                  className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-[color:var(--primary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--primary)]/30 sm:text-sm"
                   placeholder="Add a personal note..."
                 />
               </div>

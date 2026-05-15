@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import { Link, usePage } from '@inertiajs/react'
 import AppHead from '../../Components/AppHead'
 import AppNav from '../../Components/AppNav'
@@ -7,6 +7,13 @@ import SettingsInPageNavLabel from '../../Components/settings/SettingsInPageNavL
 import ColorPickerControl from '../../Components/BrandGuidelines/controls/ColorPickerControl'
 import FontManager from '../../Components/BrandGuidelines/FontManager'
 import { SparklesIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
+import {
+    getWorkspaceButtonColor,
+    ensureAccentContrastOnWhite,
+    darkenColor,
+    getWorkspacePrimaryActionButtonColors,
+    getSolidFillButtonForegroundHex,
+} from '../../utils/colorUtils'
 
 const READINESS_COLORS = {
     incomplete: 'bg-red-100 text-red-800',
@@ -82,7 +89,7 @@ function TagInput({ value, onChange, placeholder }) {
                     onChange={(e) => setInputVal(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
                     placeholder={placeholder}
-                    className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    className="block flex-1 rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm"
                 />
                 <button type="button" onClick={addTag} className="rounded-md bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200">
                     Add
@@ -193,6 +200,15 @@ function CampaignColorRow({ label, value, onChange }) {
 export default function CampaignIdentity({ collection, campaign_identity: existingIdentity, collection_images: collectionImages = [] }) {
     const { auth } = usePage().props
     const isEditing = !!existingIdentity
+
+    const campaignChrome = useMemo(() => {
+        const accent = getWorkspaceButtonColor(auth?.activeBrand) || '#ea580c'
+        const link = ensureAccentContrastOnWhite(accent)
+        const linkHover = darkenColor(link, 12)
+        const btn = getWorkspacePrimaryActionButtonColors(auth?.activeBrand)
+        const onAccent = getSolidFillButtonForegroundHex(btn.resting)
+        return { accent, link, linkHover, btn, onAccent }
+    }, [auth?.activeBrand])
 
     const [saving, setSaving] = useState(false)
     const [saved, setSaved] = useState(false)
@@ -341,7 +357,14 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
     const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
     return (
-        <div className="min-h-full">
+        <div
+            className="min-h-full"
+            style={{
+                ['--ca']: campaignChrome.accent,
+                ['--ca-link']: campaignChrome.link,
+                ['--ca-link-hover']: campaignChrome.linkHover,
+            }}
+        >
             <AppHead title={`Campaign Identity — ${collection.name}`} />
             <AppNav brand={auth?.activeBrand} tenant={null} />
             <main className="bg-gray-50/80">
@@ -395,13 +418,13 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
                                         placeholder="e.g. Black Friday 2026"
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm"
                                     />
                                     {slug && (
                                         <p className="mt-1 text-xs text-gray-400 font-mono">
                                             slug: {slug}
                                             {!slugManual && !isEditing && (
-                                                <button type="button" onClick={() => setSlugManual(true)} className="ml-2 text-indigo-500 hover:text-indigo-700 font-sans">edit</button>
+                                                <button type="button" onClick={() => setSlugManual(true)} className="ml-2 font-sans text-[color:var(--ca-link)] hover:text-[color:var(--ca-link-hover)]">edit</button>
                                             )}
                                         </p>
                                     )}
@@ -410,7 +433,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                             type="text"
                                             value={slug}
                                             onChange={(e) => setSlug(e.target.value)}
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-xs font-mono"
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm text-xs font-mono"
                                             placeholder="custom-slug"
                                         />
                                     )}
@@ -422,7 +445,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                             id="campaign-status"
                                             value={status}
                                             onChange={(e) => setStatus(e.target.value)}
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm capitalize"
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm capitalize"
                                         >
                                             {STATUS_OPTIONS.map((s) => (
                                                 <option key={s} value={s}>{s}</option>
@@ -438,7 +461,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         onChange={(e) => setGoal(e.target.value)}
                                         placeholder="What is this campaign trying to achieve?"
                                         rows={3}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm"
                                     />
                                     <CampaignFieldSuggest collectionId={collection.id} fieldPath="campaign_goal" currentValue={goal} onSuggestion={setGoal} />
                                 </div>
@@ -450,7 +473,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         onChange={(e) => setDescription(e.target.value)}
                                         placeholder="Describe the campaign"
                                         rows={3}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm"
                                     />
                                     <CampaignFieldSuggest collectionId={collection.id} fieldPath="campaign_description" currentValue={description} onSuggestion={setDescription} />
                                 </div>
@@ -468,15 +491,15 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                                     onClick={() => setFeaturedAssetId(featuredAssetId === img.id ? null : img.id)}
                                                     className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
                                                         featuredAssetId === img.id
-                                                            ? 'border-indigo-500 ring-2 ring-indigo-500/30 scale-[1.02]'
+                                                            ? 'border-[color:var(--ca)] ring-2 ring-[color:color-mix(in_srgb,var(--ca)_35%,transparent)] scale-[1.02]'
                                                             : 'border-gray-200 hover:border-gray-400'
                                                     }`}
                                                     title={img.title}
                                                 >
                                                     <img src={img.thumbnail_url} alt="" className="w-full h-full object-cover" />
                                                     {featuredAssetId === img.id && (
-                                                        <div className="absolute inset-0 bg-indigo-500/10 flex items-center justify-center">
-                                                            <span className="bg-indigo-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">Selected</span>
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-[color:color-mix(in_srgb,var(--ca)_12%,transparent)]">
+                                                            <span className="rounded bg-[color:var(--ca)] px-1.5 py-0.5 text-[9px] font-bold text-white">Selected</span>
                                                         </div>
                                                     )}
                                                 </button>
@@ -497,8 +520,8 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                             <SectionCard id="campaign-colors" title="Campaign Colors" subtitle="Define the campaign color palette. Brand colors are shown for quick reuse.">
                                 {/* Brand palette recommendation */}
                                 {(brandColors.primary || brandColors.secondary || brandColors.accent) && (
-                                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-4">
-                                        <p className="text-xs font-semibold text-indigo-900 mb-2">Brand palette</p>
+                                    <div className="rounded-lg border border-gray-200 bg-[color:color-mix(in_srgb,var(--ca)_8%,white)] p-4">
+                                        <p className="mb-2 text-xs font-semibold text-gray-900">Brand palette</p>
                                         <div className="flex flex-wrap gap-2">
                                             <BrandColorSwatch color={brandColors.primary} label="Primary" onClick={addPaletteColor} />
                                             <BrandColorSwatch color={brandColors.secondary} label="Secondary" onClick={addPaletteColor} />
@@ -516,7 +539,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                                 <button type="button" onClick={() => removePaletteColor(i)} className="text-xs text-gray-400 hover:text-red-500">&times;</button>
                                             </div>
                                         ))}
-                                        <button type="button" onClick={() => addPaletteColor('#6366f1')} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800">
+                                        <button type="button" onClick={() => addPaletteColor('#6366f1')} className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--ca-link)] hover:text-[color:var(--ca-link-hover)]">
                                             + Add color
                                         </button>
                                     </div>
@@ -531,7 +554,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                                 <button type="button" onClick={() => removeAccentColor(i)} className="text-xs text-gray-400 hover:text-red-500">&times;</button>
                                             </div>
                                         ))}
-                                        <button type="button" onClick={() => addAccentColor('#f59e0b')} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800">
+                                        <button type="button" onClick={() => addAccentColor('#f59e0b')} className="inline-flex items-center gap-1 text-xs font-medium text-[color:var(--ca-link)] hover:text-[color:var(--ca-link-hover)]">
                                             + Add accent color
                                         </button>
                                     </div>
@@ -563,7 +586,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         onChange={(e) => setTypoDirection(e.target.value)}
                                         placeholder="Overall typography direction for this campaign"
                                         rows={2}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm"
                                     />
                                 </div>
                             </SectionCard>
@@ -576,7 +599,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         role="switch"
                                         aria-checked={scoringEnabled}
                                         onClick={() => setScoringEnabled((v) => !v)}
-                                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${scoringEnabled ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_srgb,var(--ca)_45%,transparent)] focus:ring-offset-2 ${scoringEnabled ? 'bg-[color:var(--ca)]' : 'bg-gray-200'}`}
                                     >
                                         <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${scoringEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                                     </button>
@@ -610,7 +633,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         <SectionCard title="Visual Style" subtitle="Style description, motifs, and art direction for this campaign.">
                                             <div>
                                                 <FieldLabel>Visual style description</FieldLabel>
-                                                <textarea value={styleDescription} onChange={(e) => setStyleDescription(e.target.value)} placeholder="Describe the campaign visual style" rows={3} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <textarea value={styleDescription} onChange={(e) => setStyleDescription(e.target.value)} placeholder="Describe the campaign visual style" rows={3} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Visual motifs / themes</FieldLabel>
@@ -618,7 +641,7 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Composition / art direction notes</FieldLabel>
-                                                <textarea value={compositionNotes} onChange={(e) => setCompositionNotes(e.target.value)} placeholder="Layout, framing, art direction notes" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <textarea value={compositionNotes} onChange={(e) => setCompositionNotes(e.target.value)} placeholder="Layout, framing, art direction notes" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                         </SectionCard>
 
@@ -626,15 +649,15 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                         <SectionCard title="Messaging & Voice" subtitle="Tone, voice, CTA direction, and campaign copy guidelines.">
                                             <div>
                                                 <FieldLabel>Tone</FieldLabel>
-                                                <input type="text" value={tone} onChange={(e) => setTone(e.target.value)} placeholder="e.g. Urgent, playful, deal-driven" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <input type="text" value={tone} onChange={(e) => setTone(e.target.value)} placeholder="e.g. Urgent, playful, deal-driven" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Voice notes</FieldLabel>
-                                                <textarea value={voiceNotes} onChange={(e) => setVoiceNotes(e.target.value)} placeholder="Specific voice guidelines" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <textarea value={voiceNotes} onChange={(e) => setVoiceNotes(e.target.value)} placeholder="Specific voice guidelines" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">CTA direction</FieldLabel>
-                                                <input type="text" value={ctaDirection} onChange={(e) => setCtaDirection(e.target.value)} placeholder="e.g. Shop Now, Grab the Deal" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <input type="text" value={ctaDirection} onChange={(e) => setCtaDirection(e.target.value)} placeholder="e.g. Shop Now, Grab the Deal" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Required CTA patterns</FieldLabel>
@@ -670,11 +693,11 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Logo treatment notes</FieldLabel>
-                                                <textarea value={logoTreatmentNotes} onChange={(e) => setLogoTreatmentNotes(e.target.value)} placeholder="How should the logo appear?" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <textarea value={logoTreatmentNotes} onChange={(e) => setLogoTreatmentNotes(e.target.value)} placeholder="How should the logo appear?" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                             <div>
                                                 <FieldLabel hint="(optional)">Category / execution notes</FieldLabel>
-                                                <textarea value={categoryNotes} onChange={(e) => setCategoryNotes(e.target.value)} placeholder="Packaging, execution, category-specific notes" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
+                                                <textarea value={categoryNotes} onChange={(e) => setCategoryNotes(e.target.value)} placeholder="Packaging, execution, category-specific notes" rows={2} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--ca)] focus:ring-1 focus:ring-[color:var(--ca)] sm:text-sm" />
                                             </div>
                                         </SectionCard>
                                     </div>
@@ -696,7 +719,11 @@ export default function CampaignIdentity({ collection, campaign_identity: existi
                                     type="button"
                                     onClick={handleSave}
                                     disabled={saving}
-                                    className="inline-flex items-center rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+                                    className="inline-flex items-center rounded-md px-5 py-2.5 text-sm font-semibold shadow-sm transition-colors hover:brightness-105 disabled:opacity-50"
+                                    style={{
+                                        backgroundColor: campaignChrome.btn.resting,
+                                        color: campaignChrome.onAccent,
+                                    }}
                                 >
                                     {saving ? 'Saving\u2026' : isEditing ? 'Update Campaign Identity' : 'Create Campaign Identity'}
                                 </button>

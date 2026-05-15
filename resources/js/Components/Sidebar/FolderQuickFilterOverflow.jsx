@@ -25,6 +25,7 @@ export default function FolderQuickFilterOverflow({
     /** List of hidden quick-filter rows from the AssetController payload. */
     hiddenFilters = [],
     categoryId,
+    categorySlug,
     tone,
     activeCountByFieldKey = {},
     /** All folder quick-filter field keys (visible + hidden) for URL exclusivity in the value flyout. */
@@ -93,13 +94,14 @@ export default function FolderQuickFilterOverflow({
                         </PopoverButton>
                         <PopoverPanel
                             transition
-                            anchor={{ to: 'right start', gap: 16, offset: 0 }}
+                            anchor={{ to: 'right start', gap: 0, offset: 0 }}
                             className="z-[220] motion-safe:transition motion-safe:duration-[130ms] motion-safe:ease-out data-[closed]:translate-x-[-2px] data-[closed]:opacity-0 motion-reduce:transition-none motion-reduce:data-[closed]:opacity-100"
                         >
                             {selectedField ? (
                                 <OverflowValueView
                                     field={selectedField}
                                     categoryId={categoryId}
+                                    categorySlug={categorySlug}
                                     tone={tone}
                                     exclusiveQuickFilterKeys={allQuickFilterFieldKeys.filter(
                                         (k) => k !== selectedField.key
@@ -127,13 +129,23 @@ export default function FolderQuickFilterOverflow({
 }
 
 function OverflowListView({ hiddenFilters, tone, activeCountByFieldKey, onPick }) {
+    const usesWorkspaceSidebarBackdrop =
+        tone.flyoutBackground != null && String(tone.flyoutBackground).trim() !== ''
+
     return (
         <div
             role="dialog"
             aria-label="More quick filters"
-            className="w-[15rem] max-h-[18rem] overflow-hidden border backdrop-blur-md"
+            className={`w-[15rem] max-h-[18rem] overflow-hidden border ${
+                usesWorkspaceSidebarBackdrop ? '' : 'backdrop-blur-md'
+            }`}
             style={{
-                background: tone.surface,
+                ...(usesWorkspaceSidebarBackdrop
+                    ? {
+                          background: tone.flyoutBackground,
+                          backgroundColor: tone.flyoutBackgroundColor ?? '#0B0B0D',
+                      }
+                    : { background: tone.surface }),
                 borderColor: tone.border,
                 boxShadow: tone.shadow,
                 color: tone.labelStrong,
@@ -213,7 +225,7 @@ function OverflowListView({ hiddenFilters, tone, activeCountByFieldKey, onPick }
  * "back" affordance so users can return to the overflow list without
  * dismissing the popover entirely.
  */
-function OverflowValueView({ field, categoryId, tone, exclusiveQuickFilterKeys, onBack, onRequestClose }) {
+function OverflowValueView({ field, categoryId, categorySlug, tone, exclusiveQuickFilterKeys, onBack, onRequestClose }) {
     return (
         <div className="relative">
             <button
@@ -235,6 +247,7 @@ function OverflowValueView({ field, categoryId, tone, exclusiveQuickFilterKeys, 
             <FolderQuickFilterFlyout
                 field={field}
                 categoryId={categoryId}
+                categorySlug={categorySlug}
                 tone={tone}
                 exclusiveQuickFilterKeys={exclusiveQuickFilterKeys}
                 onRequestClose={onRequestClose}

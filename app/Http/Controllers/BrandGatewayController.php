@@ -12,6 +12,7 @@ use App\Services\ActivityRecorder;
 use App\Services\BrandGateway\BrandContextResolver;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Support\GatewayIntendedUrl;
+use App\Support\GatewayResumeCookie;
 use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
 use App\Mail\EmailVerification;
 use Illuminate\Http\RedirectResponse;
@@ -25,6 +26,10 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
+/**
+ * Public gateway (login, company/brand pickers, cinematic enter).
+ * Product defaults and deferred brand-level controls: docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md
+ */
 class BrandGatewayController extends Controller
 {
     public function __construct(
@@ -56,7 +61,22 @@ class BrandGatewayController extends Controller
      */
     public function index(Request $request): Response|RedirectResponse
     {
+        if ($request->query('switch')) {
+            GatewayResumeCookie::queueForget();
+        }
+
         $context = $this->contextResolver->resolve($request);
+
+        if (Auth::check()
+            && ($context['gateway_resume_active'] ?? false)
+            && ($context['tenant']['id'] ?? null)
+            && ($context['brand']['id'] ?? null)
+            && ! in_array($request->query('mode'), ['login', 'register'], true)) {
+            session([
+                'tenant_id' => $context['tenant']['id'],
+                'brand_id' => $context['brand']['id'],
+            ]);
+        }
 
         if (Auth::check() && count($context['available_companies']) === 0) {
             session()->forget(['tenant_id', 'brand_id', 'collection_id']);
@@ -77,6 +97,15 @@ class BrandGatewayController extends Controller
         $theme = $this->buildThemeFromContext($context);
         $mode = $this->determineMode($request, $context);
 
+        if ($mode === 'enter') {
+            $theme['portal']['entry']['style'] = 'cinematic';
+        }
+
+        // Product default: cinematic enter is automatic whenever mode is enter (portal_settings.entry.auto_enter is deferred — see docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md).
+        $autoEnter = $mode === 'enter'
+            && ! $request->query('switch')
+            && ! in_array($request->query('mode'), ['login', 'register'], true);
+
         if (Auth::check()
             && ($context['tenant_member_without_brands'] ?? false)
             && $mode === 'brand_select') {
@@ -87,12 +116,6 @@ class BrandGatewayController extends Controller
                 'mode' => $mode,
             ]);
         }
-
-        $portalAutoEnter = $theme['portal']['entry']['auto_enter'] ?? true;
-        $autoEnter = $mode === 'enter'
-            && $portalAutoEnter
-            && ! $request->query('switch')
-            && ! $request->query('mode');
 
         $this->trackGatewayEvent(
             $autoEnter ? EventType::GATEWAY_AUTO_ENTER : EventType::GATEWAY_VIEWED,
@@ -677,6 +700,8 @@ class BrandGatewayController extends Controller
      */
     protected function redirectToGatewayIntended(): RedirectResponse|SymfonyResponse
     {
+        GatewayResumeCookie::queueFromSession();
+
         $intended = session()->pull('intended_url');
 
         if ($intended) {
@@ -700,23 +725,12 @@ class BrandGatewayController extends Controller
     }
 
     /**
-     * Resolve the default landing route from portal_settings.entry.default_destination.
+     * Default landing after gateway entry. Always Overview (tasks); intended_url still wins in redirectToGatewayIntended.
+     * portal_settings.entry.default_destination is deferred — see docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md.
      */
     protected function resolveDefaultDestination(): string
     {
-        $brandId = session('brand_id');
-        if (! $brandId) {
-            return '/app/overview';
-        }
-
-        $brand = Brand::find($brandId);
-        $destination = $brand?->getPortalSetting('entry.default_destination', 'assets');
-
-        return match ($destination) {
-            'guidelines' => '/app/brand-guidelines',
-            'collections' => '/app/collections',
-            default => '/app/overview',
-        };
+        return '/app/overview';
     }
 
     /**
@@ -811,12 +825,15 @@ class BrandGatewayController extends Controller
             return 'login';
         }
 
+        if ($context['gateway_resume_active'] ?? false) {
+            return 'enter';
+        }
+
         if ($context['is_multi_company'] && ! $context['tenant']) {
             return 'company_select';
         }
 
-        // When user has multiple brands, ALWAYS show brand selector — never auto-enter.
-        // Ensures they can switch brands/accounts before entering.
+        // When user has multiple brands, show brand selector unless gateway_resume_active (handled above).
         if ($context['is_multi_brand']) {
             return 'brand_select';
         }

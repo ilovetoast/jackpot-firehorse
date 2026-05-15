@@ -39,11 +39,11 @@ export default function AssetDetailDrawer({ asset, onClose }) {
     const [activityEvents, setActivityEvents] = useState([])
     const [activityLoading, setActivityLoading] = useState(false)
     const [zoomRasterTick, setZoomRasterTick] = useState(0)
-    const { dam_file_types: damFileTypes, dam_3d_enabled: dam3dEnabled } = usePage().props
+    const { dam_file_types: damFileTypes, dam_3d_realtime_viewer_enabled: damRealtimeViewer } = usePage().props
 
     const showRealtimeGlb = useMemo(
-        () => shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true),
-        [asset, damFileTypes, dam3dEnabled],
+        () => shouldShowRealtimeGlbModelViewer(asset, damFileTypes, damRealtimeViewer === true),
+        [asset, damFileTypes, damRealtimeViewer],
     )
 
     const thumbnailUrlLarge =

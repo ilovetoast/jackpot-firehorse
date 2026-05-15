@@ -876,7 +876,7 @@ function VisualReferenceCategoryPicker({ brandId, referenceCategories, onChange,
     )
 }
 
-export default function BrandsEdit({ brand, brand_users, brand_roles, available_users, pending_invitations, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url, creator_module = {}, can_remove_user_from_company = false }) {
+export default function BrandsEdit({ brand, brand_users, brand_roles, available_users, pending_invitations, tenant_settings, current_plan, model_payload, brand_model, active_version, all_versions = [], research_insights, compliance_aggregate, top_executions, bottom_executions, portal_settings, portal_features, portal_url, creator_module = {}, can_remove_user_from_company = false, gateway_show_legacy_entry_controls = false }) {
     const { auth, headlineAppearanceCatalog = [], onboarding_status: onboardingStatus } = usePage().props
     const effectivePermissions = Array.isArray(auth?.effective_permissions) ? auth.effective_permissions : []
     const isFreePlan = current_plan === 'free'
@@ -3118,6 +3118,8 @@ export default function BrandsEdit({ brand, brand_users, brand_roles, available_
                                     setData={setData}
                                     portalFeatures={portal_features}
                                     brand={brand}
+                                    brandDnaTagline={modelPayload?.positioning?.tagline ?? null}
+                                    gatewayShowLegacyEntryControls={gateway_show_legacy_entry_controls}
                                     onSave={autoSaveBrandField}
                                 />
                             </div>

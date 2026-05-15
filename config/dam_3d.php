@@ -9,6 +9,9 @@
  *
  * Environment (minimal):
  *   DAM_3D                        When true, 3D raster thumbnail/poster pipeline may run.
+ *   DAM_3D_REALTIME_VIEWER        When true, the app mounts `<model-viewer>` for native GLB (`model_glb`) when URLs exist.
+ *                                   Defaults to the same value as DAM_3D. Set true on **web-only staging** where
+ *                                   `DAM_3D=false` on containers but GLB signed URLs + CDN CORS still work.
  *   DAM_3D_BLENDER_BINARY         Optional path to the Blender executable. **Workers:** use the official **Blender 4.5.3 LTS** linux-x64 tarball, install to **`/usr/local/bin/blender`**, and set **`DAM_3D_BLENDER_BINARY=/usr/local/bin/blender`** (see `docs/environments/BLENDER_DAM_3D_INSTALL.md`). Never required on web-only PHP nodes.
  *   DAM_3D_REAL_RENDER_ENABLED    Default true. Set false to always use stub posters (workers without Blender).
  *
@@ -17,6 +20,19 @@
  */
 return [
     'enabled' => (bool) env('DAM_3D', false),
+
+    /**
+     * In-browser GLB preview (`<model-viewer>`). Independent of `enabled` so staging web can turn on
+     * the viewer while workers keep `DAM_3D=false` (no Blender on web nodes).
+     */
+    'realtime_viewer_enabled' => (static function (): bool {
+        $raw = env('DAM_3D_REALTIME_VIEWER');
+        if ($raw !== null && $raw !== '') {
+            return filter_var($raw, FILTER_VALIDATE_BOOL);
+        }
+
+        return (bool) env('DAM_3D', false);
+    })(),
 
     'blender_binary' => env('DAM_3D_BLENDER_BINARY', '/usr/local/bin/blender'),
 

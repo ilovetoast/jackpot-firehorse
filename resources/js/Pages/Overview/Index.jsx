@@ -134,7 +134,7 @@ export default function Overview() {
     const aiInsightsState = insights?.ai_insights ?? []
     const insightsUpdatedAt = insights?.generated_at ?? null
 
-    // Theme from API wins when loaded; until then use Inertia auth.activeBrand so first paint matches brand (no indigo flash).
+    // Theme from API wins when loaded; until then use Inertia auth.activeBrand so first paint matches workspace brand (accent / shell), not app-default chrome.
     const brandColor =
         theme.colors?.primary || activeBrand?.primary_color || '#71717a'
     const secondaryForBackdrop =

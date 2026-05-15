@@ -33,6 +33,8 @@ import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 export default function FolderQuickFilters({
     quickFilters = [],
     categoryId,
+    /** Folder slug for Manage hub deep links (`?category=`). */
+    categorySlug,
     isActiveFolder = false,
     /** From the active row chrome so the nested list reads as "owned by" the folder. */
     textColor,
@@ -43,6 +45,8 @@ export default function FolderQuickFilters({
     sidebarActiveBgColor,
     /** Workspace brand primary (hex) — tints selected flyout rows toward brand, not slate blue. */
     brandAccentHex,
+    /** Same cinematic gradient as AssetSidebar when brand uses workspace sidebar style "cinematic". */
+    sidebarBackdropCss = null,
 }) {
     const { props, url } = usePage()
     const settings = props?.folder_quick_filter_settings || {}
@@ -146,7 +150,13 @@ export default function FolderQuickFilters({
 
     // Phase 4.4: brand-aware tonal palette tinted from the sidebar surface
     // and active-row tone.
-    const tone = resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBgColor, brandAccentHex)
+    const tone = resolveQuickFilterTone(
+        textColor,
+        sidebarColor,
+        sidebarActiveBgColor,
+        brandAccentHex,
+        sidebarBackdropCss
+    )
 
     return (
         <ul
@@ -174,6 +184,7 @@ export default function FolderQuickFilters({
                             }}
                             exclusiveQuickFilterKeys={quickFilterFieldKeys.filter((k) => k !== row.field_key)}
                             categoryId={categoryId}
+                            categorySlug={categorySlug}
                             // Phase 4.3 — binary active state. Count travels
                             // through for a11y only.
                             isActive={count > 0}
@@ -197,6 +208,7 @@ export default function FolderQuickFilters({
                     <FolderQuickFilterOverflow
                         hiddenFilters={hidden}
                         categoryId={categoryId}
+                        categorySlug={categorySlug}
                         tone={tone}
                         activeCountByFieldKey={activeCountByFieldKey}
                         allQuickFilterFieldKeys={quickFilterFieldKeys}

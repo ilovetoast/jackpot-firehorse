@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\DeleteAvatarJob;
 use App\Models\DataSubjectRequest;
+use App\Support\GatewayResumeCookie;
 use App\Services\CloudFrontSignedUrlService;
 use App\Services\Privacy\UserPersonalDataExportService;
 use App\Services\TenantBucketService;
@@ -200,6 +201,8 @@ class ProfileController extends Controller
         Auth::logout();
 
         $user->delete();
+
+        GatewayResumeCookie::queueForget();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

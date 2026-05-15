@@ -16,9 +16,21 @@
  * @param {string|undefined|null} sidebarActiveBg    Brand-darkened active-row background hex (Sidebar `activeBgColor`).
  * @param {string|undefined|null} brandAccentHex     Workspace / brand primary (e.g. button color). When set, selected
  *                                                    flyout rows + multiselect indicators tint from this instead of slate.
+ * @param {string|undefined|null} sidebarBackdropCss When set (cinematic workspace sidebar), the flyout uses this same
+ *                                                    `background` as the sidebar so the panel matches brand theme.
  */
-export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg, brandAccentHex = null) {
+export function resolveQuickFilterTone(
+    textColor,
+    sidebarColor,
+    sidebarActiveBg,
+    brandAccentHex = null,
+    sidebarBackdropCss = null
+) {
     const tc = (textColor || '').toString().trim().toLowerCase()
+    const backdrop =
+        typeof sidebarBackdropCss === 'string' && sidebarBackdropCss.trim() !== ''
+            ? sidebarBackdropCss.trim()
+            : null
     // Sidebar row foreground is often rgba(255,255,255,…) rather than literal "#fff"; treat any
     // sufficiently light foreground as "dark rail" so the flyout matches the workspace sidebar.
     const isDark = isLightOnDarkSidebarForeground(tc)
@@ -50,11 +62,21 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg,
     const hoverHex = anchorHex
     const sharedHoverBg = withAlpha(hoverHex, 0.55)
 
+    const flyoutBackdrop =
+        backdrop != null
+            ? {
+                  flyoutBackground: backdrop,
+                  flyoutBackgroundColor: '#0B0B0D',
+              }
+            : {}
+
     if (isDark) {
         return {
             isDark: true,
             surface: withAlpha(surfaceHex, 0.96),
-            surfaceElevated: withAlpha(elevatedSurfaceHex, 0.96),
+            surfaceElevated: backdrop
+                ? 'rgba(255, 255, 255, 0.08)'
+                : withAlpha(elevatedSurfaceHex, 0.96),
             border: 'rgba(255, 255, 255, 0.06)',
             separator: 'rgba(255, 255, 255, 0.06)',
             rowOpenBg,
@@ -75,13 +97,16 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg,
             shadow:
                 '0 1px 2px rgba(0, 0, 0, 0.30), 0 6px 18px -6px rgba(0, 0, 0, 0.45), 0 24px 60px -24px rgba(0, 0, 0, 0.55)',
             scrollbarThumb: 'rgba(255, 255, 255, 0.18)',
+            ...flyoutBackdrop,
         }
     }
 
     return {
         isDark: false,
         surface: withAlpha(surfaceHex, 0.98),
-        surfaceElevated: withAlpha(elevatedSurfaceHex, 0.98),
+        surfaceElevated: backdrop
+            ? 'rgba(15, 23, 42, 0.06)'
+            : withAlpha(elevatedSurfaceHex, 0.98),
         border: 'rgba(15, 23, 42, 0.08)',
         separator: 'rgba(15, 23, 42, 0.06)',
         rowOpenBg,
@@ -98,6 +123,7 @@ export function resolveQuickFilterTone(textColor, sidebarColor, sidebarActiveBg,
         shadow:
             '0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 18px -6px rgba(15, 23, 42, 0.12), 0 24px 60px -24px rgba(15, 23, 42, 0.18)',
         scrollbarThumb: 'rgba(15, 23, 42, 0.18)',
+        ...flyoutBackdrop,
     }
 }
 

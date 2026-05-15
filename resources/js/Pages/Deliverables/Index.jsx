@@ -754,7 +754,8 @@ function DeliverablesIndexPage({ categories, bulk_categories_by_asset_type = nul
                                             ref={isActive ? activeTabRef : null}
                                             type="button"
                                             onClick={() => handleMobileCategoryTabChange(index)}
-                                            className={`relative shrink-0 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-100 ${
+                                            style={{ ['--mobile-tab-focus-ring']: workspaceAccentColor }}
+                                            className={`relative shrink-0 px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-[color:var(--mobile-tab-focus-ring)] focus:ring-offset-2 focus:ring-offset-gray-100 ${
                                                 isActive
                                                     ? 'bg-white text-gray-900 shadow-md ring-1 ring-gray-200/60'
                                                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50/80'

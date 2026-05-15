@@ -14,6 +14,7 @@ class Dam3dDiagnoseCommandTest extends TestCase
         $this->assertSame(0, $code);
         $out = Artisan::output();
         $this->assertStringContainsString('DAM_3D enabled:', $out);
+        $this->assertStringContainsString('DAM_3D realtime viewer', $out);
         $this->assertStringContainsString('Laravel Sail', $out);
         $this->assertStringContainsString('Likely Docker worker runtime', $out);
         $this->assertStringContainsString('PATH blender (command -v):', $out);

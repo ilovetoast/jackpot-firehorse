@@ -31,6 +31,8 @@ import {
     getWorkspaceSidebarForegroundHex,
     getWorkspaceSidebarActiveRowForegroundHex,
     resolveWorkspaceSidebarSurface,
+    ensureAccentContrastOnWhite,
+    darkenColor,
 } from '../../utils/colorUtils'
 import axios from 'axios'
 import { dedupeAssetsById } from '../../utils/assetUtils'
@@ -89,6 +91,14 @@ export default function CollectionsIndex({
     const { isCinematic: sidebarIsCinematic, sidebarColor, backdropCss: sidebarBackdropCss } =
         resolveWorkspaceSidebarSurface(auth.activeBrand)
     const workspaceAccentColor = getWorkspaceButtonColor(auth.activeBrand)
+    const collectionCrossPageLink = useMemo(
+        () => ensureAccentContrastOnWhite(workspaceAccentColor),
+        [workspaceAccentColor]
+    )
+    const collectionCrossPageLinkHover = useMemo(
+        () => darkenColor(collectionCrossPageLink, 12),
+        [collectionCrossPageLink]
+    )
     /** Solid rail: light copy on brand tints (see `getWorkspaceSidebarForegroundHex`). */
     const textColor = sidebarIsCinematic ? '#ffffff' : getWorkspaceSidebarForegroundHex(sidebarColor)
     /** Same selection chrome as AssetSidebar (darkened accent), not full saturation — keeps white/light rail legible. */
@@ -581,10 +591,11 @@ export default function CollectionsIndex({
                                                             key={c.id}
                                                             type="button"
                                                             onClick={() => navigateToCollection(c.id)}
+                                                            style={{ ['--coll-focus-ring']: workspaceAccentColor }}
                                                             whileHover={{ scale: 1.02, y: -2 }}
                                                             whileTap={{ scale: 0.99 }}
                                                             transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-                                                            className="group relative overflow-hidden rounded-xl bg-gray-900 text-left shadow-md transition-shadow duration-300 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 motion-reduce:transform-none motion-reduce:hover:transform-none"
+                                                            className="group relative overflow-hidden rounded-xl bg-gray-900 text-left shadow-md transition-shadow duration-300 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--coll-focus-ring)] motion-reduce:transform-none motion-reduce:hover:transform-none"
                                                         >
                                                             <div className="aspect-[16/10] w-full overflow-hidden">
                                                                 {c.featured_image_url ? (
@@ -800,18 +811,24 @@ export default function CollectionsIndex({
                                         </>
                                     ) : (
                                         /* Empty state: collection selected but no assets */
-                                        <div className="max-w-2xl mx-auto py-16 px-6 text-center">
+                                        <div
+                                            className="max-w-2xl mx-auto py-16 px-6 text-center"
+                                            style={{
+                                                ['--cx-link']: collectionCrossPageLink,
+                                                ['--cx-hover']: collectionCrossPageLinkHover,
+                                            }}
+                                        >
                                             <FolderIcon className="mx-auto h-16 w-16 text-gray-300" />
                                             <h2 className="mt-4 text-xl font-bold tracking-tight text-gray-900 sm:text-2xl">
                                                 This collection is empty
                                             </h2>
                                             <p className="mt-4 text-base leading-7 text-gray-600">
                                                 Add assets to this collection from the{' '}
-                                                <a href="/app/assets" className="font-medium text-indigo-600 hover:text-indigo-500 underline underline-offset-2">
+                                                <a href="/app/assets" className="font-medium underline underline-offset-2 text-[color:var(--cx-link)] hover:text-[color:var(--cx-hover)]">
                                                     Assets
                                                 </a>{' '}
                                                 or{' '}
-                                                <a href="/app/executions" className="font-medium text-indigo-600 hover:text-indigo-500 underline underline-offset-2">
+                                                <a href="/app/executions" className="font-medium underline underline-offset-2 text-[color:var(--cx-link)] hover:text-[color:var(--cx-hover)]">
                                                     Executions
                                                 </a>{' '}
                                                 page by selecting items and choosing &ldquo;Add to collection.&rdquo;

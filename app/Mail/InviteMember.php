@@ -13,6 +13,7 @@ use App\Mail\BaseMailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\URL;
 
 class InviteMember extends BaseMailable
 {
@@ -65,6 +66,16 @@ class InviteMember extends BaseMailable
             ->first();
     }
 
+    protected function brandedGatewayLoginUrl(): ?string
+    {
+        $b = $this->brandForMailVisuals();
+        if (! $b || ! $b->slug) {
+            return null;
+        }
+
+        return URL::route('gateway', ['mode' => 'login', 'brand' => $b->slug]);
+    }
+
     /**
      * Get the message envelope.
      */
@@ -98,6 +109,7 @@ class InviteMember extends BaseMailable
                 'tenant_name' => $this->tenant->name,
                 'inviter_name' => $this->inviter->name,
                 'invite_url' => $this->inviteUrl,
+                'branded_login_url' => $this->brandedGatewayLoginUrl(),
                 'app_name' => config('app.name'),
                 'app_url' => rtrim((string) config('app.url'), '/'),
                 'tenant_logo_block' => TransactionalEmailHtml::tenantLogoBlockFromBrand($visualBrand),
@@ -118,6 +130,7 @@ class InviteMember extends BaseMailable
                 'inviter' => $this->inviter,
                 'inviteUrl' => $this->inviteUrl,
                 'brandingBrand' => $this->brandForMailVisuals(),
+                'brandedLoginUrl' => $this->brandedGatewayLoginUrl(),
             ],
         );
     }

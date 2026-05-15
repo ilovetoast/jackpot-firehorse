@@ -28,7 +28,7 @@ import axios from 'axios'
 import { usePermission } from '../hooks/usePermission'
 import ProcessingActionCard from './ProcessingActionCard'
 import PlacementNotice, { PlacementNoticeAckRow } from './placement/PlacementNotice'
-import { getWorkspacePrimaryActionButtonColors } from '../utils/colorUtils'
+import { getWorkspacePrimaryActionButtonColors, ensureAccentContrastOnWhite, darkenColor } from '../utils/colorUtils'
 
 const EASING_TOOLBAR = 'cubic-bezier(0.16, 1, 0.3, 1)'
 
@@ -478,6 +478,17 @@ export default function BulkActionsModal({
         () => getWorkspacePrimaryActionButtonColors(auth?.activeBrand),
         [auth?.activeBrand]
     )
+    const brandFormChromeVars = useMemo(() => {
+        if (placement !== 'brand') return {}
+        const accent = brandButtonColors.resting
+        const link = ensureAccentContrastOnWhite(accent)
+        const linkHover = darkenColor(link, 14)
+        return {
+            ['--bam-accent']: accent,
+            ['--bam-link']: link,
+            ['--bam-link-hover']: linkHover,
+        }
+    }, [placement, brandButtonColors.resting])
     const canBulkRename = can('metadata.edit_post_upload')
     const canBulkRemoveTags = can('assets.tags.delete')
     const canQueueVideoInsights = can('metadata.edit_post_upload')
@@ -746,6 +757,7 @@ export default function BulkActionsModal({
                 style={{
                     opacity: modalEntered ? 1 : 0,
                     transform: modalEntered ? 'translateY(0)' : 'translateY(8px)',
+                    ...brandFormChromeVars,
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
@@ -1035,7 +1047,11 @@ export default function BulkActionsModal({
                                                     setAssignAssetType(e.target.value)
                                                     setAssignCategoryId('')
                                                 }}
-                                                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mb-4"
+                                                className={
+                                                    placement === 'brand'
+                                                        ? 'block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--bam-accent)] focus:ring-1 focus:ring-[color:var(--bam-accent)] text-sm mb-4'
+                                                        : 'block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mb-4'
+                                                }
                                             >
                                                 {BULK_ASSET_TYPE_OPTIONS.map((opt) => (
                                                     <option key={opt.value} value={opt.value}>
@@ -1051,7 +1067,11 @@ export default function BulkActionsModal({
                                     <select
                                         value={assignCategoryId}
                                         onChange={(e) => setAssignCategoryId(e.target.value)}
-                                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                        className={
+                                            placement === 'brand'
+                                                ? 'block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--bam-accent)] focus:ring-1 focus:ring-[color:var(--bam-accent)] text-sm'
+                                                : 'block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm'
+                                        }
                                     >
                                         <option value="">Choose a folder…</option>
                                         {assignCategoryOptions.map((cat) => (
@@ -1077,7 +1097,11 @@ export default function BulkActionsModal({
                                         onChange={(e) => setRejectionReason(e.target.value)}
                                         rows={3}
                                         maxLength={2000}
-                                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm"
+                                        className={
+                                            placement === 'brand'
+                                                ? 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-[color:var(--bam-accent)] focus:border-[color:var(--bam-accent)] shadow-sm'
+                                                : 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm'
+                                        }
                                         placeholder="Enter reason for rejection..."
                                     />
                                     <p className="mt-1 text-xs text-gray-400">
@@ -1104,7 +1128,11 @@ export default function BulkActionsModal({
                                             onChange={(e) => setBulkRenameBase(e.target.value)}
                                             placeholder="e.g. Photo Shoot XY"
                                             maxLength={200}
-                                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm"
+                                            className={
+                                                placement === 'brand'
+                                                    ? 'block w-full rounded-md border-gray-300 shadow-sm focus:border-[color:var(--bam-accent)] focus:ring-1 focus:ring-[color:var(--bam-accent)] text-sm'
+                                                    : 'block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm'
+                                            }
                                         />
                                     </div>
                                     {bulkRenameBase.trim() && renamePreview.length > 0 && (
@@ -1114,7 +1142,11 @@ export default function BulkActionsModal({
                                                 <button
                                                     type="button"
                                                     onClick={() => setRenamePreviewExpanded(!renamePreviewExpanded)}
-                                                    className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                                                    className={
+                                                        placement === 'brand'
+                                                            ? 'inline-flex items-center gap-1 text-xs text-[color:var(--bam-link)] hover:text-[color:var(--bam-link-hover)]'
+                                                            : 'inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800'
+                                                    }
                                                 >
                                                     <DocumentDuplicateIcon className="h-4 w-4" />
                                                     {renamePreviewExpanded ? 'Hide list' : 'Show all filenames'}

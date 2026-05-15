@@ -68,7 +68,7 @@ export default function MarketingHome() {
     const { auth, signup_enabled } = usePage().props
 
     const primaryHref = auth?.user ? '/app/overview' : signup_enabled !== false ? '/gateway?mode=register' : '/contact'
-    const primaryLabel = auth?.user ? 'Go to app' : 'Get early access'
+    const primaryLabel = auth?.user ? 'Workspace' : 'Get early access'
 
     return (
         <MarketingLayout>

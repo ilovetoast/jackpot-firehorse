@@ -178,7 +178,8 @@ class BrandThemeBuilder
     }
 
     /**
-     * Tagline priority: portal_settings.entry.tagline_override > Brand DNA tagline > null
+     * Tagline on gateway entry: {@see docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md}.
+     * entry.tagline_source: brand | custom | hidden (legacy rows omit source — override text still wins, then DNA).
      */
     private function resolveTagline(?Brand $brand): ?string
     {
@@ -186,11 +187,38 @@ class BrandThemeBuilder
             return null;
         }
 
-        $portalTagline = $brand->getPortalSetting('entry.tagline_override');
-        if ($portalTagline !== null && $portalTagline !== '') {
-            return $portalTagline;
+        $ps = $brand->portal_settings ?? [];
+        $source = data_get($ps, 'entry.tagline_source');
+        $override = data_get($ps, 'entry.tagline_override');
+        $dna = $this->resolveDnaTagline($brand);
+
+        if ($source === 'hidden') {
+            return null;
+        }
+        if ($source === 'custom') {
+            if ($override === null || $override === '') {
+                return null;
+            }
+
+            return trim((string) $override);
+        }
+        if ($source === 'brand') {
+            return $dna;
         }
 
+        // Legacy: no tagline_source — preserve override-first behavior, then DNA.
+        if ($override !== null && $override !== '') {
+            return trim((string) $override);
+        }
+
+        return $dna;
+    }
+
+    private function resolveDnaTagline(?Brand $brand): ?string
+    {
+        if (! $brand) {
+            return null;
+        }
         try {
             $brandModel = $brand->brandModel;
             if (! $brandModel || ! $brandModel->active_version_id) {
@@ -199,8 +227,9 @@ class BrandThemeBuilder
 
             $activeVersion = $brandModel->activeVersion;
             $payload = $activeVersion?->model_payload ?? [];
+            $t = $payload['identity']['tagline'] ?? null;
 
-            return $payload['identity']['tagline'] ?? null;
+            return ($t !== null && $t !== '') ? trim((string) $t) : null;
         } catch (\Throwable) {
             return null;
         }
@@ -267,6 +296,7 @@ class BrandThemeBuilder
                 'primary_button' => data_get($ps, 'entry.primary_button', 'assets'),
                 'secondary_button' => data_get($ps, 'entry.secondary_button', 'guidelines'),
                 'tagline_override' => data_get($ps, 'entry.tagline_override'),
+                'tagline_source' => data_get($ps, 'entry.tagline_source'),
             ],
             'public' => [
                 'enabled' => (bool) data_get($ps, 'public.enabled', false),
@@ -302,6 +332,7 @@ class BrandThemeBuilder
                 'primary_button' => 'assets',
                 'secondary_button' => 'guidelines',
                 'tagline_override' => null,
+                'tagline_source' => null,
             ],
             'public' => [
                 'enabled' => false,

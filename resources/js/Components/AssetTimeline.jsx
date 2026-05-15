@@ -246,8 +246,8 @@ export default function AssetTimeline({
         if (eventType === 'asset.version.created' || eventType === 'asset.version.restored' || eventType === 'asset.replaced') {
             return {
                 icon: History,
-                color: 'text-indigo-500',
-                bgColor: 'bg-indigo-50',
+                color: 'text-slate-600',
+                bgColor: 'bg-slate-100',
             }
         }
 
@@ -465,7 +465,7 @@ export default function AssetTimeline({
                                                     )}
                                                     {/* Show manual trigger indicator for thumbnail started events */}
                                                     {event.metadata.triggered_by === 'user_manual_request' && event.event_type === 'asset.thumbnail.started' && (
-                                                        <p className={`italic ${isDark ? 'text-neutral-400' : 'text-indigo-600'}`}>
+                                                        <p className={`italic ${isDark ? 'text-neutral-400' : 'text-slate-600'}`}>
                                                             Manually triggered by user
                                                         </p>
                                                     )}

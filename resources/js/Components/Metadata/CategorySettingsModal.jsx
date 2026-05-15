@@ -172,7 +172,7 @@ export default function CategorySettingsModal({
                                         type="text"
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
-                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm text-gray-900 focus:border-[color:var(--wb-accent)] focus:ring-1 focus:ring-[color:var(--wb-ring)]"
                                     />
                                 </div>
                                 <div>
@@ -183,7 +183,7 @@ export default function CategorySettingsModal({
                                         id="category-type"
                                         value={assetType}
                                         onChange={(e) => setAssetType(e.target.value)}
-                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm text-gray-900 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                        className="block w-full rounded-md border border-gray-300 py-1.5 px-2.5 text-sm text-gray-900 focus:border-[color:var(--wb-accent)] focus:ring-1 focus:ring-[color:var(--wb-ring)]"
                                     >
                                         <option value="asset">Asset</option>
                                         <option value="deliverable">Execution</option>
@@ -194,7 +194,8 @@ export default function CategorySettingsModal({
                                         type="checkbox"
                                         checked={isHidden}
                                         onChange={(e) => setIsHidden(e.target.checked)}
-                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                        className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-0"
+                                        style={{ accentColor: 'var(--wb-accent)' }}
                                     />
                                     <span className="text-sm text-gray-700">Hidden from uploader</span>
                                 </label>
@@ -213,7 +214,7 @@ export default function CategorySettingsModal({
                                     </p>
                                     <a
                                         href={manageCategoriesUrl}
-                                        className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                        className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--wb-accent)]"
                                     >
                                         <ArrowTopRightOnSquareIcon className="h-4 w-4" />
                                         Configure folder filters
@@ -238,7 +239,8 @@ export default function CategorySettingsModal({
                                             setError(null)
                                         }
                                     }}
-                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-0"
+                                    style={{ accentColor: 'var(--wb-accent)' }}
                                 />
                                 <span className="text-sm text-gray-700">Restrict access</span>
                             </label>
@@ -257,7 +259,8 @@ export default function CategorySettingsModal({
                                                             type="checkbox"
                                                             checked={isSelected}
                                                             onChange={() => toggleRole(roleKey)}
-                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-0"
+                                    style={{ accentColor: 'var(--wb-accent)' }}
                                                         />
                                                         <span className="text-sm text-gray-700 capitalize">{roleLabel}</span>
                                                     </label>
@@ -276,7 +279,8 @@ export default function CategorySettingsModal({
                                                             type="checkbox"
                                                             checked={isSelected}
                                                             onChange={() => toggleUser(user.id)}
-                                                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                            className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-0"
+                                    style={{ accentColor: 'var(--wb-accent)' }}
                                                         />
                                                         <span className="text-sm text-gray-700">
                                                             {user.name} {user.email && `(${user.email})`}
@@ -323,7 +327,7 @@ export default function CategorySettingsModal({
                             type="button"
                             onClick={handleSave}
                             disabled={loading || !name?.trim() || (isPrivate && !hasRestrictSelection)}
-                            className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center rounded-md bg-[var(--wb-accent)] px-3 py-2 text-sm font-semibold text-[var(--wb-on-accent)] shadow-sm hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--wb-accent)] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {loading ? 'Saving…' : 'Save'}
                         </button>

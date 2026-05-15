@@ -12,6 +12,23 @@ import { parseFiltersFromUrl } from '../../utils/filterUrlUtils'
 import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 
 /**
+ * In-app Manage hub URL with folder + field editor deep link (not the JSON
+ * `tenant.metadata.fields.show` API — that route is fetch/XHR only).
+ */
+function manageFilterHubHref(categorySlug, fieldId) {
+    const params = {}
+    if (categorySlug) params.category = String(categorySlug)
+    if (fieldId != null && fieldId !== '') params.field_values = String(fieldId)
+    if (typeof route === 'function') {
+        const keys = Object.keys(params)
+        return keys.length ? route('manage.categories', params) : route('manage.categories')
+    }
+    const base = '/app/manage/categories'
+    const qs = new URLSearchParams(params).toString()
+    return qs ? `${base}?${qs}` : base
+}
+
+/**
  * Phase 4 — value picker flyout panel.
  *
  * Phase 4.2 (UX/design pass) — the panel reads as a contextual extension of
@@ -35,6 +52,8 @@ import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 export default function FolderQuickFilterFlyout({
     field,
     categoryId,
+    /** Active folder slug — required for `?category=` so Manage opens the right folder. */
+    categorySlug,
     /** Optional pre-derived tone from the row. If omitted, we derive from textColor on the page. */
     tone: incomingTone,
     /** Other quick-filter dimensions on this folder — removed from URL when this dimension changes. */
@@ -58,6 +77,8 @@ export default function FolderQuickFilterFlyout({
         () => incomingTone || resolveQuickFilterTone(props?.workspace_sidebar?.text_color),
         [incomingTone, props?.workspace_sidebar?.text_color]
     )
+    const usesWorkspaceSidebarBackdrop =
+        tone.flyoutBackground != null && String(tone.flyoutBackground).trim() !== ''
     const scopeId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
     const scopedScrollClass = `qf-scroll-${scopeId}`
     const scopedSearchClass = `qf-search-${scopeId}`
@@ -302,9 +323,18 @@ export default function FolderQuickFilterFlyout({
             // app chrome), so any radius makes the boundary feel like a
             // detached card. The hairline border + layered shadow carry
             // edge definition without softening the silhouette.
-            className="w-[15rem] max-h-[18rem] overflow-hidden border backdrop-blur-md"
+            // Match AssetSidebar: no backdrop-blur on the cinematic gradient
+            // (blur shifts hue vs the column and reads as a separate surface).
+            className={`w-[15rem] max-h-[18rem] overflow-hidden border ${
+                usesWorkspaceSidebarBackdrop ? '' : 'backdrop-blur-md'
+            }`}
             style={{
-                background: tone.surface,
+                ...(usesWorkspaceSidebarBackdrop
+                    ? {
+                          background: tone.flyoutBackground,
+                          backgroundColor: tone.flyoutBackgroundColor ?? '#0B0B0D',
+                      }
+                    : { background: tone.surface }),
                 borderColor: tone.border,
                 boxShadow: tone.shadow,
                 color: tone.labelStrong,
@@ -361,17 +391,19 @@ export default function FolderQuickFilterFlyout({
 
             <div className={`max-h-[14rem] overflow-auto px-1 py-1 ${scopedScrollClass}`}>
                 {state.status === 'loading' ? (
-                    <FlyoutHint tone={tone}>Loading values…</FlyoutHint>
+                    <FlyoutHint kind="neutral" tone={tone}>
+                        Loading values…
+                    </FlyoutHint>
                 ) : null}
 
                 {state.status === 'error' ? (
-                    <FlyoutHint tone={tone} kind="danger">
+                    <FlyoutHint kind="danger" tone={tone}>
                         {state.errorMessage}
                     </FlyoutHint>
                 ) : null}
 
                 {state.status === 'empty' ? (
-                    <FlyoutHint tone={tone}>
+                    <FlyoutHint kind="neutral" tone={tone}>
                         No values available for this filter.
                     </FlyoutHint>
                 ) : null}
@@ -414,7 +446,9 @@ export default function FolderQuickFilterFlyout({
                     : null}
 
                 {state.status === 'ready' && filteredValues.length === 0 ? (
-                    <FlyoutHint tone={tone}>No matches.</FlyoutHint>
+                    <FlyoutHint kind="neutral" tone={tone}>
+                        No matches.
+                    </FlyoutHint>
                 ) : null}
             </div>
 
@@ -433,9 +467,9 @@ export default function FolderQuickFilterFlyout({
 
             {/* Phase 5.2 — admin-only "Manage filter" deep link. Visibility is
                 gated server-side via folder_quick_filter_settings.can_manage_filters
-                so unauthorized users never see the affordance. The link
-                deep-links into the existing filter management surface; no
-                new admin panel is built here. */}
+                so unauthorized users never see the affordance. Targets the Manage
+                hub (Inertia) with optional `field_values` so the field editor opens;
+                never the JSON-only `tenant.metadata.fields.show` API route. */}
             {settings?.can_manage_filters ? (
                 <div
                     className="flex items-center justify-end px-3 py-1.5"
@@ -444,11 +478,7 @@ export default function FolderQuickFilterFlyout({
                     }}
                 >
                     <a
-                        href={
-                            typeof route === 'function'
-                                ? route('tenant.metadata.fields.show', field.id)
-                                : `/app/tenant/metadata/fields/${field.id}`
-                        }
+                        href={manageFilterHubHref(categorySlug, field.id)}
                         className="text-[11px] underline-offset-2 hover:underline"
                         style={{ color: tone.labelWeak }}
                         onClick={(e) => {
@@ -467,11 +497,16 @@ export default function FolderQuickFilterFlyout({
 }
 
 function FlyoutHint({ children, tone, kind = 'neutral' }) {
+    // `#ef6b6b` on saturated brand-orange flyouts fails contrast; on dark rails
+    // use near-white, on light slabs use a deep red (WCAG-friendly vs surface).
+    const dangerColor = tone?.isDark ? 'rgba(255, 255, 255, 0.98)' : '#b91c1c'
+    const neutralColor = tone?.labelWeak ?? 'rgba(71, 85, 105, 0.85)'
     return (
         <div
             className="px-3 py-2 text-[12px] leading-snug"
             style={{
-                color: kind === 'danger' ? '#ef6b6b' : tone.labelWeak,
+                color: kind === 'danger' ? dangerColor : neutralColor,
+                fontWeight: kind === 'danger' ? 500 : 400,
             }}
         >
             {children}

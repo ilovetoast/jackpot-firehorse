@@ -30,6 +30,12 @@
     <x-email.button :url="$inviteUrl" :color="$buttonColor">Accept invitation</x-email.button>
     <x-email.link-fallback :url="$inviteUrl" :color="$linkColor" />
 
+    @if(!empty($brandedLoginUrl))
+        <x-email.text>Already have an account? Sign in with this brand&rsquo;s themed gateway:</x-email.text>
+        <x-email.button :url="$brandedLoginUrl" :color="$buttonColor">Sign in to workspace</x-email.button>
+        <x-email.link-fallback :url="$brandedLoginUrl" :color="$linkColor" />
+    @endif
+
     <x-email.text :muted="true">If you didn&rsquo;t expect this invitation, you can safely ignore this email.</x-email.text>
 
 </x-email.layout>

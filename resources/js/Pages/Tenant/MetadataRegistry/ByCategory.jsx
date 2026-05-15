@@ -918,8 +918,8 @@ export default function ByCategoryView({
                         </div>
                     )}
                     {pendingSystemFieldCount > 0 && (
-                        <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/90 px-3 py-2.5">
-                            <p className="text-xs text-indigo-950/90">
+                        <div className="mt-4 rounded-lg border border-[color:color-mix(in_srgb,var(--wb-accent)_28%,#e2e8f0)] bg-[color:color-mix(in_srgb,var(--wb-accent)_10%,white)] px-3 py-2.5">
+                            <p className="text-xs text-slate-900">
                                 <span className="font-semibold tabular-nums">{pendingSystemFieldCount}</span> new platform
                                 metadata field placement{pendingSystemFieldCount === 1 ? ' is' : 's are'} on hold until you
                                 enable them (upload, grid, filters, and detail stay off for those rows).
@@ -929,12 +929,12 @@ export default function ByCategoryView({
                                     type="button"
                                     onClick={handleRevealSystemFields}
                                     disabled={revealSystemFieldsLoading}
-                                    className="mt-2 inline-flex items-center rounded-md bg-indigo-700 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-800 disabled:opacity-60"
+                                    className="mt-2 inline-flex items-center rounded-md bg-[var(--wb-accent)] px-2.5 py-1.5 text-xs font-semibold text-[var(--wb-on-accent)] shadow-sm hover:brightness-105 disabled:opacity-60"
                                 >
                                     {revealSystemFieldsLoading ? 'Applying…' : 'Enable new platform fields'}
                                 </button>
                             ) : (
-                                <p className="mt-2 text-[11px] text-indigo-900/80">
+                                <p className="mt-2 text-[11px] text-slate-700">
                                     Ask a tenant admin with metadata field or visibility management access to enable them.
                                 </p>
                             )}
@@ -949,7 +949,7 @@ export default function ByCategoryView({
                                 id="by-category-brand"
                                 value={selectedBrandId ?? ''}
                                 onChange={(e) => handleBrandChange(e.target.value ? parseInt(e.target.value, 10) : null)}
-                                className="w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                className="w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-[color:var(--wb-accent)] focus:ring-1 focus:ring-[color:var(--wb-ring)]"
                             >
                                 {brands.map(b => (
                                     <option key={b.id} value={b.id}>{b.name}</option>
@@ -1000,7 +1000,7 @@ export default function ByCategoryView({
                                 <button
                                     type="button"
                                     onClick={handleAddCategory}
-                                    className="mt-6 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:shadow-md hover:shadow-purple-500/25 transition-shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                                    className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[var(--wb-accent)] px-4 py-2.5 text-sm font-medium text-[var(--wb-on-accent)] shadow-sm transition-shadow hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--wb-accent)]"
                                 >
                                     <PlusIcon className="h-4 w-4" />
                                     Create folder
@@ -1087,8 +1087,8 @@ export default function ByCategoryView({
                                         aria-checked={selectedCategory.ebi_enabled === true}
                                         disabled={ebiToggleLoading || !!previewProfileName}
                                         onClick={toggleEbiEnabled}
-                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                                            selectedCategory.ebi_enabled === true ? 'bg-indigo-600' : 'bg-gray-200'
+                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                            selectedCategory.ebi_enabled === true ? 'bg-[var(--wb-accent)]' : 'bg-gray-200'
                                         }`}
                                     >
                                         <span
@@ -1115,9 +1115,9 @@ export default function ByCategoryView({
                                             aria-checked={selectedCategory.ai_use_library_references === true}
                                             disabled={aiLibRefToggleLoading || !!previewProfileName}
                                             onClick={toggleAiLibraryReferences}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[color:var(--wb-ring)] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                                                 selectedCategory.ai_use_library_references === true
-                                                    ? 'bg-indigo-600'
+                                                    ? 'bg-[var(--wb-accent)]'
                                                     : 'bg-gray-200'
                                             }`}
                                         >
@@ -1169,7 +1169,7 @@ export default function ByCategoryView({
                                                           : ''
                                                   }`
                                         }
-                                        className="mt-6 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+                                        className="mt-6 inline-flex items-center justify-center rounded-lg bg-[var(--wb-accent)] px-5 py-2.5 text-sm font-semibold text-[var(--wb-on-accent)] shadow-sm hover:brightness-105"
                                     >
                                         Open folders & fields
                                     </Link>

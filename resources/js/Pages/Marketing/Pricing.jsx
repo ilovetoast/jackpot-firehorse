@@ -141,7 +141,7 @@ const AI_COSTS = [
 export default function MarketingPricing() {
     const { auth, signup_enabled } = usePage().props
     const earlyHref = auth?.user ? '/app/overview' : signup_enabled !== false ? '/gateway?mode=register' : '/contact'
-    const earlyLabel = auth?.user ? 'Go to app' : 'Get started free'
+    const earlyLabel = auth?.user ? 'Workspace' : 'Get started free'
 
     return (
         <MarketingLayout>

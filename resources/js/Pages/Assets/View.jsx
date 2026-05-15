@@ -9,6 +9,7 @@ import AppNav from '../../Components/AppNav'
 import AppHead from '../../Components/AppHead'
 import { resolveRasterPrimaryThumbnailUrl } from '../../utils/thumbnailRasterPrimaryUrl'
 import { failedRasterThumbnailUrls } from '../../utils/thumbnailRasterFailedCache'
+import { getWorkspaceButtonColor, ensureAccentContrastOnWhite, darkenColor } from '../../utils/colorUtils'
 
 export default function AssetView({ asset }) {
     const { auth, dam_file_types: damFileTypes } = usePage().props
@@ -31,6 +32,10 @@ export default function AssetView({ asset }) {
     const [fullExtractionMessage, setFullExtractionMessage] = useState(null)
     const tenantRole = String(auth?.tenant_role || auth?.user?.tenant_role || '').toLowerCase()
     const canRequestFullPdfExtraction = tenantRole === 'owner' || tenantRole === 'admin'
+
+    const viewAccent = useMemo(() => getWorkspaceButtonColor(auth?.activeBrand) || '#6366f1', [auth?.activeBrand])
+    const viewLink = useMemo(() => ensureAccentContrastOnWhite(viewAccent), [viewAccent])
+    const viewLinkHover = useMemo(() => darkenColor(viewLink, 12), [viewLink])
 
     const fetchPdfPage = async (targetPage, attempt = 0) => {
         if (!asset?.id) return
@@ -100,7 +105,14 @@ export default function AssetView({ asset }) {
             <AppHead title="Asset" />
             <AppNav brand={auth?.activeBrand} tenant={null} />
 
-            <div className="max-w-5xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div
+                className="max-w-5xl mx-auto py-6 px-4 sm:px-6 lg:px-8"
+                style={{
+                    ['--av-accent']: viewAccent,
+                    ['--av-link']: viewLink,
+                    ['--av-link-hover']: viewLinkHover,
+                }}
+            >
                 {asset?.collection_only && asset?.collection && (
                     <Link
                         href={route('collection-invite.landing', { collection: asset.collection.id })}
@@ -113,7 +125,7 @@ export default function AssetView({ asset }) {
                     <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1">
                         <Link
                             href={route('assets.index')}
-                            className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                            className="text-sm font-medium text-[color:var(--av-link)] hover:text-[color:var(--av-link-hover)]"
                         >
                             ← Library grid
                         </Link>
@@ -194,7 +206,7 @@ export default function AssetView({ asset }) {
                                                     type="button"
                                                     onClick={requestFullExtraction}
                                                     disabled={fullExtractionLoading || fullExtractionRequested}
-                                                    className="inline-flex items-center rounded border border-indigo-300 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                                                    className="inline-flex items-center rounded border border-[color:color-mix(in_srgb,var(--av-accent)_32%,#94a3b8)] px-2 py-1 text-xs font-medium text-[color:var(--av-link)] hover:bg-[color:color-mix(in_srgb,var(--av-accent)_10%,white)] disabled:opacity-50"
                                                 >
                                                     {fullExtractionLoading
                                                         ? 'Queueing...'
@@ -273,7 +285,7 @@ export default function AssetView({ asset }) {
                                         {asset.download_url && (
                                             <a
                                                 href={asset.download_url}
-                                                className="mt-1 inline-block font-medium text-indigo-600 hover:text-indigo-800"
+                                                className="mt-1 inline-block font-medium text-[color:var(--av-link)] hover:text-[color:var(--av-link-hover)]"
                                             >
                                                 Download file
                                             </a>
@@ -286,7 +298,7 @@ export default function AssetView({ asset }) {
                                         {asset.download_url && (
                                             <a
                                                 href={asset.download_url}
-                                                className="font-medium text-indigo-600 hover:text-indigo-800"
+                                                className="font-medium text-[color:var(--av-link)] hover:text-[color:var(--av-link-hover)]"
                                             >
                                                 Download file
                                             </a>
@@ -299,7 +311,7 @@ export default function AssetView({ asset }) {
                                         {asset.download_url && (
                                             <a
                                                 href={asset.download_url}
-                                                className="font-medium text-indigo-600 hover:text-indigo-800"
+                                                className="font-medium text-[color:var(--av-link)] hover:text-[color:var(--av-link-hover)]"
                                             >
                                                 Download file
                                             </a>

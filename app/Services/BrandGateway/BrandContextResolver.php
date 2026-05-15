@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
+use App\Support\GatewayResumeCookie;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -96,6 +97,22 @@ class BrandContextResolver
             $brand = $brand ?? $tenant->defaultBrand;
         }
 
+        $gatewayResumeActive = false;
+
+        if ($user !== null && $inviteToken === null) {
+            $resume = GatewayResumeCookie::tryDecodeAndAuthorize(
+                $request,
+                $user,
+                $availableCompanies,
+            );
+            if ($resume) {
+                $tenant = $resume['tenant'];
+                $brand = $resume['brand'];
+                $availableBrands = $this->getAvailableBrands($user, $tenant);
+                $gatewayResumeActive = true;
+            }
+        }
+
         return [
             'tenant' => $tenant ? $this->serializeTenant($tenant) : null,
             'brand' => $brand ? $this->serializeBrand($brand) : null,
@@ -107,6 +124,8 @@ class BrandContextResolver
             'is_authenticated' => $user !== null,
             /** Logged-in user belongs to the resolved tenant but has zero brand memberships (gateway brand picker empty). */
             'tenant_member_without_brands' => $user !== null && $tenant !== null && count($availableBrands) === 0,
+            /** True when a valid jp_gateway_resume cookie pinned tenant+brand (cinematic enter despite multi-brand). */
+            'gateway_resume_active' => $gatewayResumeActive,
         ];
     }
 

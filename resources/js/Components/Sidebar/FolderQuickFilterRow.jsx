@@ -19,6 +19,7 @@ import { resolveQuickFilterTone } from '../../utils/folderQuickFilterTone'
 export default function FolderQuickFilterRow({
     field,
     categoryId,
+    categorySlug,
     /** Other folder quick-filter field keys on this folder — cleared when this dimension applies (single-slot UX). */
     exclusiveQuickFilterKeys = [],
     isActive = false,
@@ -104,20 +105,16 @@ export default function FolderQuickFilterRow({
                         </PopoverButton>
                         <PopoverPanel
                             transition
-                            // Phase 5.1 — pin the panel flush with the
-                            // sidebar's outer edge. The 288px sidebar +
-                            // (row right padding 8 + ul mr-1 4 + section
-                            // pr-3 12) → row right edge at ~272px → gap 16
-                            // lands the panel's left edge at exactly 288px.
-                            // Reverted from Phase 5's overlap experiment;
-                            // the flush boundary scans cleaner against the
-                            // square-cornered surface below.
-                            anchor={{ to: 'right start', gap: 16, offset: 0 }}
+                            // No gap — panel starts at the trigger's right edge so it
+                            // meets the library column edge (sidebar width is w-64 / xl:w-72;
+                            // a fixed 16px gap left a visible seam on narrower widths).
+                            anchor={{ to: 'right start', gap: 0, offset: 0 }}
                             className="z-[220] motion-safe:transition motion-safe:duration-[130ms] motion-safe:ease-out data-[closed]:translate-x-[-2px] data-[closed]:opacity-0 motion-reduce:transition-none motion-reduce:data-[closed]:opacity-100"
                         >
                             <FolderQuickFilterFlyout
                                 field={field}
                                 categoryId={categoryId}
+                                categorySlug={categorySlug}
                                 tone={tone}
                                 exclusiveQuickFilterKeys={exclusiveQuickFilterKeys}
                                 onRequestClose={close}

@@ -714,6 +714,7 @@ class BrandController extends Controller
             'portal_settings' => $brand->portal_settings ?? [],
             'portal_features' => $this->resolvePortalFeatures($tenant),
             'portal_url' => \App\Http\Controllers\PublicBrandPortalController::portalUrl($brand),
+            'gateway_show_legacy_entry_controls' => (bool) config('gateway.show_legacy_entry_controls', false),
             'creator_module' => [
                 'enabled' => app(FeatureGate::class)->creatorModuleEnabled($tenant),
                 'approver_user_ids' => $brand->creatorModuleApproverUserIds(),
@@ -770,6 +771,7 @@ class BrandController extends Controller
             'portal_settings.entry.primary_button' => 'nullable|string|in:assets,guidelines,collections',
             'portal_settings.entry.secondary_button' => 'nullable|string|in:assets,guidelines,collections',
             'portal_settings.entry.tagline_override' => 'nullable|string|max:255',
+            'portal_settings.entry.tagline_source' => 'nullable|string|in:brand,custom,hidden',
             'portal_settings.public' => 'nullable|array',
             'portal_settings.public.enabled' => 'nullable|boolean',
             'portal_settings.public.visibility' => 'nullable|string|in:private,link_only,public',

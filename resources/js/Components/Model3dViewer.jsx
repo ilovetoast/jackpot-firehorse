@@ -1,7 +1,7 @@
 /**
  * Phase 5B: Interactive GLB preview via &lt;model-viewer&gt;.
  * Parent surfaces should only mount this when {@link shouldShowRealtimeGlbModelViewer} is true
- * (registry `model_glb`, DAM_3D enabled, and a GLB source URL from `preview_3d_viewer_url` or `original`).
+ * (registry `model_glb`, `dam_3d_realtime_viewer_enabled`, and a GLB source URL from `preview_3d_viewer_url` or `original`).
  */
 import '@google/model-viewer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -92,12 +92,12 @@ function resolveModelViewerOrigins(modelSrc) {
  * @param {boolean} [props.lightboxStage] Fullscreen lightbox: freer touch/pointer for orbit (see model-viewer touch-action).
  */
 export default function Model3dViewer({ asset, className = '', lightboxStage = false }) {
-    const { dam_file_types: damFileTypes, dam_3d_enabled: dam3dEnabled } = usePage().props
+    const { dam_file_types: damFileTypes, dam_3d_realtime_viewer_enabled: damRealtimeViewer } = usePage().props
     const [viewerFailed, setViewerFailed] = useState(false)
     const [viewerLoading, setViewerLoading] = useState(true)
     const elRef = useRef(null)
 
-    const eligible = shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true)
+    const eligible = shouldShowRealtimeGlbModelViewer(asset, damFileTypes, damRealtimeViewer === true)
     const modelSrc = getRegistryModelGlbModelSourceUrl(asset, damFileTypes)
     const crossOriginModel = useMemo(() => {
         if (!modelSrc || typeof window === 'undefined') {

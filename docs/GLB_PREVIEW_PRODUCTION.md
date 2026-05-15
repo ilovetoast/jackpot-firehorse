@@ -2,12 +2,13 @@
 
 ## Scope
 
-- **Realtime in-browser preview** is **GLB-only** via `<model-viewer>` when the registry type is `model_glb`, `DAM_3D` is enabled, and signed poster/viewer CDN URLs resolve.
+- **Realtime in-browser preview** is **GLB-only** via `<model-viewer>` when the registry type is `model_glb`, **`DAM_3D_REALTIME_VIEWER`** (or `DAM_3D` when the former is unset) is enabled for the web app, and signed poster/viewer CDN URLs resolve.
 - **OBJ, FBX, BLEND, and glTF with external resources** are **not** served as interactive realtime previews in the product UI today. Those formats may still appear in the library with **raster poster thumbnails** (or placeholders) where the pipeline supports them; full interactive viewing requires canonical GLB delivery (Blender conversion on workers when `DAM_3D` and optional conversion are enabled — see Phase 6 below).
 
 ## Configuration
 
-- **`DAM_3D`**: `config/dam_3d.php` (`env('DAM_3D', false)` → `dam_3d.enabled`) gates registry 3D thumbnail generation and the GLB `<model-viewer>` path. When disabled, GLB assets do not get interactive viewer URLs even if metadata contains a native viewer key.
+- **`DAM_3D`**: `config/dam_3d.php` (`env('DAM_3D', false)` → `dam_3d.enabled`) gates registry 3D **thumbnail / poster** generation in `GenerateThumbnailsJob` (workers).
+- **`DAM_3D_REALTIME_VIEWER`**: `dam_3d.realtime_viewer_enabled` gates the **browser** `<model-viewer>` UI for native GLB. When unset, it defaults to the same boolean as `DAM_3D`. Set **`DAM_3D_REALTIME_VIEWER=true`** on **web-only staging** when workers use `DAM_3D=false` but you still want interactive GLB (signed URLs + CDN CORS must work). When both are false, the client does not mount `<model-viewer>` even if `preview_3d` metadata exists.
 - **Posters**: `metadata.preview_3d.poster_path` holds the **raster** poster object key; the API exposes `preview_3d_poster_url` and `preview_3d_revision` (opaque) for cache busting — never raw S3 keys in tenant JSON.
 
 ## Browsers

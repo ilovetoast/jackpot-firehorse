@@ -60,7 +60,7 @@ import { usePermission } from '../hooks/usePermission'
 import UserSelect from './UserSelect'
 import Avatar from './Avatar'
 import MoreFiltersTriggerButton from './MoreFiltersTriggerButton'
-import { getWorkspaceButtonColor, hexToRgba } from '../utils/colorUtils'
+import { getWorkspaceButtonColor, hexToRgba, ensureAccentContrastOnWhite, darkenColor } from '../utils/colorUtils'
 
 const GRID_PARTIAL_RELOAD_KEYS = [
     'assets',
@@ -199,6 +199,10 @@ export default function AssetGridSecondaryFilters({
         }),
         [brandPrimary],
     )
+
+    /** WCAG-friendly link text on white / pale gray filter surfaces (not raw accent). */
+    const filterLinkOnLight = useMemo(() => ensureAccentContrastOnWhite(brandPrimary), [brandPrimary])
+    const filterLinkOnLightHover = useMemo(() => darkenColor(filterLinkOnLight, 14), [filterLinkOnLight])
 
     const partialReloadKeys = useMemo(
         () =>
@@ -913,7 +917,15 @@ export default function AssetGridSecondaryFilters({
                 style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
             >
                 <div className={isExpanded ? 'min-h-0 overflow-visible' : 'min-h-0 overflow-hidden'}>
-                    <div className="space-y-4 border-t border-gray-200/80 px-3 py-4 sm:px-4">
+                    <div
+                        className="space-y-4 border-t border-gray-200/80 px-3 py-4 sm:px-4"
+                        style={{
+                            ['--gf-accent']: brandPrimary,
+                            ['--gf-link']: filterLinkOnLight,
+                            ['--gf-link-hover']: filterLinkOnLightHover,
+                            ['--gf-focus-ring']: hexToRgba(brandPrimary, 0.38),
+                        }}
+                    >
                     {(() => {
                         const findFieldForPill = (key) =>
                             visibleSecondaryFilters.find((f) => getFieldKey(f) === key) ||
@@ -967,7 +979,7 @@ export default function AssetGridSecondaryFilters({
                                                 <button
                                                     type="button"
                                                     onClick={handleClearAllFiltersExpanded}
-                                                    className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                                    className="text-xs font-medium transition-colors text-[color:var(--gf-link)] hover:text-[color:var(--gf-link-hover)]"
                                                 >
                                                     Clear all
                                                 </button>
@@ -1228,7 +1240,8 @@ export default function AssetGridSecondaryFilters({
                                                                 type="checkbox"
                                                                 checked={pendingPublicationFilter}
                                                                 onChange={handlePendingPublicationFilterToggle}
-                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--gf-focus-ring)] focus:ring-offset-0"
+                                                                style={{ accentColor: 'var(--gf-accent)' }}
                                                             />
                                                             <span className="flex items-center gap-1 text-xs text-gray-700">
                                                                 <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
@@ -1242,7 +1255,8 @@ export default function AssetGridSecondaryFilters({
                                                                 type="checkbox"
                                                                 checked={unpublishedFilter}
                                                                 onChange={handleUnpublishedFilterToggle}
-                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--gf-focus-ring)] focus:ring-offset-0"
+                                                                style={{ accentColor: 'var(--gf-accent)' }}
                                                             />
                                                             <span className="flex items-center gap-1 text-xs text-gray-700">
                                                                 <ClockIcon className="h-3.5 w-3.5 text-gray-400" />
@@ -1256,7 +1270,8 @@ export default function AssetGridSecondaryFilters({
                                                                 type="checkbox"
                                                                 checked={archivedFilter}
                                                                 onChange={handleArchivedFilterToggle}
-                                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                                className="h-4 w-4 rounded border-gray-300 focus:outline-none focus:ring-2 focus:ring-[color:var(--gf-focus-ring)] focus:ring-offset-0"
+                                                                style={{ accentColor: 'var(--gf-accent)' }}
                                                             />
                                                             <span className="flex items-center gap-1 text-xs text-gray-700">
                                                                 <ArchiveBoxIcon className="h-3.5 w-3.5 text-gray-400" />
@@ -1331,7 +1346,7 @@ export default function AssetGridSecondaryFilters({
                                                                     e.target.value === 'all' ? '' : e.target.value
                                                                 )
                                                             }
-                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm text-gray-900 focus:border-[color:var(--gf-accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--gf-focus-ring)]"
                                                         >
                                                             <option value="all">All</option>
                                                             <option value="superb">Superb (≥90)</option>
@@ -1350,7 +1365,7 @@ export default function AssetGridSecondaryFilters({
                                                         <select
                                                             value={fileTypeFilter}
                                                             onChange={(e) => handleFileTypeFilterChange(e.target.value)}
-                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                            className="h-10 w-full rounded-lg border border-gray-300/80 bg-white px-3 text-sm focus:border-[color:var(--gf-accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--gf-focus-ring)]"
                                                         >
                                                             <option value="all">All</option>
                                                             {gridFileTypeGroups.map((grp) => (
@@ -1400,7 +1415,7 @@ export default function AssetGridSecondaryFilters({
                                                 <button
                                                     type="button"
                                                     onClick={() => setCustomFieldsExpanded((v) => !v)}
-                                                    className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                                    className="mt-3 text-sm font-medium transition-colors text-[color:var(--gf-link)] hover:text-[color:var(--gf-link-hover)]"
                                                 >
                                                     {customFieldsExpanded
                                                         ? 'Show less'
@@ -1424,7 +1439,7 @@ export default function AssetGridSecondaryFilters({
                                                 <button
                                                     type="button"
                                                     onClick={() => setOtherFieldsExpanded((v) => !v)}
-                                                    className="mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                                                    className="mt-3 text-sm font-medium transition-colors text-[color:var(--gf-link)] hover:text-[color:var(--gf-link-hover)]"
                                                 >
                                                     {otherFieldsExpanded
                                                         ? 'Show less'
@@ -1476,7 +1491,7 @@ export default function AssetGridSecondaryFilters({
                         <div className="mt-4 pt-4 border-t border-gray-200">
                             <Link
                                 href={`/app/tenant/metadata/registry?category_id=${selectedCategoryId}&asset_type=${assetType}`}
-                                className="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-600 transition-colors"
+                                className="inline-flex items-center gap-1.5 text-xs text-gray-600 transition-colors hover:text-[color:var(--gf-link)]"
                             >
                                 <PlusIcon className="h-4 w-4" />
                                 <span>Add filter to this folder</span>

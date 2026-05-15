@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Link } from '@inertiajs/react'
+import { Link, usePage } from '@inertiajs/react'
 import AppNav from '../../../Components/AppNav'
 import AppHead from '../../../Components/AppHead'
 import ByCategoryView from './ByCategory'
+import { BrandWorkbenchChrome } from '../../../contexts/BrandWorkbenchChromeContext'
+import { buildBrandWorkbenchChromePackage } from '../../../utils/brandWorkbenchTheme'
 
 /**
  * Categories & Fields (Metadata Management) Index
@@ -23,6 +25,7 @@ export default function TenantMetadataRegistryIndex({
     initial_category_slug = null,
     initial_brand_id = null,
 }) {
+    const { auth } = usePage().props
     const brandIds = useMemo(() => brands.map((b) => b.id), [brands])
     const initialBrandId =
         (initial_brand_id != null && brandIds.includes(initial_brand_id))
@@ -51,11 +54,22 @@ export default function TenantMetadataRegistryIndex({
         }
     }, [initial_brand_id, brandIds])
 
+    const brandForWorkbench = useMemo(() => {
+        const id = selectedBrandId ?? brands[0]?.id
+        return brands.find((b) => String(b.id) === String(id)) ?? null
+    }, [brands, selectedBrandId])
+
+    const workbenchChrome = useMemo(
+        () => buildBrandWorkbenchChromePackage(brandForWorkbench || {}, auth?.tenant || null),
+        [brandForWorkbench, auth?.tenant]
+    )
+
     return (
         <div className="min-h-screen bg-gray-50">
             <AppHead title="Categories & Fields" />
             <AppNav />
 
+            <BrandWorkbenchChrome package={workbenchChrome}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {/* Page Header — aligned with Brand Portal */}
                 <div className="mb-8">
@@ -106,6 +120,7 @@ export default function TenantMetadataRegistryIndex({
                     initialCategorySlug={initial_category_slug}
                 />
             </div>
+            </BrandWorkbenchChrome>
         </div>
     )
 }

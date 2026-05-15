@@ -29,7 +29,7 @@ export default function MarketingLayout({ children, cinematicBackdrop = false })
 
     const navButton = () => {
         if (auth?.user) {
-            return { text: 'Dashboard', href: '/gateway' }
+            return { text: 'Workspace', href: '/app/overview' }
         }
         return { text: 'Sign in', href: '/gateway' }
     }

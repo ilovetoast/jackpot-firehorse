@@ -1,19 +1,14 @@
 import { useState, useEffect } from 'react'
 import { usePage } from '@inertiajs/react'
 
-const DESTINATION_ROUTES = {
-    assets: '/app/overview',
-    guidelines: '/app/brand-guidelines',
-    collections: '/app/collections',
-}
-
 export default function EnterTransition({ suppressAutoRedirect = false }) {
     const { theme } = usePage().props
     const [stage, setStage] = useState('init')
 
     const portal = theme?.portal?.entry || {}
     const isInstant = portal.style === 'instant'
-    const destination = DESTINATION_ROUTES[portal.default_destination] || '/app/overview'
+    /** Product default: post-gateway landing is always Overview (tasks). */
+    const destination = '/app/overview'
 
     useEffect(() => {
         if (suppressAutoRedirect) {

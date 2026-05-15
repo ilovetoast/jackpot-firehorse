@@ -118,8 +118,12 @@ export default function AssetDetailPanel({
     /** Lightbox CTA: return user to drawer (parent closes lightbox and focuses drawer) */
     onManageInDrawer = null,
 }) {
-    const { auth, download_policy_disable_single_asset: policyDisableSingleAsset = false, dam_file_types: damFileTypes, dam_3d_enabled: dam3dEnabled } =
-        usePage().props
+    const {
+        auth,
+        download_policy_disable_single_asset: policyDisableSingleAsset = false,
+        dam_file_types: damFileTypes,
+        dam_3d_realtime_viewer_enabled: damRealtimeViewer,
+    } = usePage().props
     const brandPrimary = primaryColor || auth?.activeBrand?.primary_color || '#6366f1'
     const readonlyMode = mode === 'readonly'
     const selection = useSelectionOptional()
@@ -197,9 +201,9 @@ export default function AssetDetailPanel({
         () =>
             Boolean(
                 asset?.id &&
-                    shouldShowRealtimeGlbModelViewer(asset, damFileTypes, dam3dEnabled === true),
+                    shouldShowRealtimeGlbModelViewer(asset, damFileTypes, damRealtimeViewer === true),
             ),
-        [asset, damFileTypes, dam3dEnabled],
+        [asset, damFileTypes, damRealtimeViewer],
     )
 
     const aiEnabled = auth?.permissions?.ai_enabled !== false

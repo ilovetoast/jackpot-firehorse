@@ -68,6 +68,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Block search engine crawling
+    |--------------------------------------------------------------------------
+    |
+    | When true, every HTTP response includes X-Robots-Tag: noindex, nofollow, noarchive so
+    | well-behaved crawlers skip indexing (useful for public staging). Set BLOCK_SEARCH_ENGINE_CRAWLING
+    | in .env, or leave it unset to default to true only when APP_ENV is "staging".
+    |
+    */
+
+    'block_search_engine_crawling' => (static function (): bool {
+        $raw = env('BLOCK_SEARCH_ENGINE_CRAWLING');
+        if ($raw !== null && $raw !== '') {
+            return filter_var($raw, FILTER_VALIDATE_BOOL);
+        }
+
+        return env('APP_ENV', 'production') === 'staging';
+    })(),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application URL
     |--------------------------------------------------------------------------
     |

@@ -120,3 +120,12 @@ test('resolveQuickFilterTone: brandAccentHex tints valueSelectedBg (dark sidebar
     const t = resolveQuickFilterTone('#ffffff', '#5b2d7e', '#3a1d52', '#a78bfa')
     assert.match(t.valueSelectedBg, /^rgba\(167,\s*139,\s*250/)
 })
+
+test('resolveQuickFilterTone: workspace cinematic backdrop is passed through for flyout chrome', () => {
+    const gradient =
+        'linear-gradient(165deg, #0B0B0D 0%, rgba(91,45,126,0.35) 45%, #0B0B0D 100%)'
+    const t = resolveQuickFilterTone('#ffffff', '#5b2d7e', '#3a1d52', '#a78bfa', gradient)
+    assert.equal(t.flyoutBackground, gradient)
+    assert.equal(t.flyoutBackgroundColor, '#0B0B0D')
+    assert.equal(t.surfaceElevated, 'rgba(255, 255, 255, 0.08)')
+})

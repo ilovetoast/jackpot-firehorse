@@ -17,5 +17,6 @@ final class Dam3dBlenderBinaryConfigTest extends TestCase
             $php
         );
         $this->assertStringContainsString("env('DAM_3D_REAL_RENDER_ENABLED', true)", $php);
+        $this->assertStringContainsString("env('DAM_3D_REALTIME_VIEWER')", $php);
     }
 }

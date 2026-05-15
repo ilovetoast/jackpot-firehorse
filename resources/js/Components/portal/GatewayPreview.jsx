@@ -2,20 +2,36 @@
  * Shared gateway preview renderer — uses the exact same visual structure
  * as the real EnterTransition / InviteAccept pages (reduced / static mode).
  * Import this in portal settings panels so preview ≡ production.
+ *
+ * @see docs/GATEWAY_ENTRY_CONTROLS_DEFERRED.md — entry style + destination are system-driven in production preview.
  */
-const DESTINATION_LABELS = {
-    assets: 'Assets',
-    guidelines: 'Brand Guidelines',
-    collections: 'Collections',
+function previewTagline(entry, brandDnaTagline) {
+    const s = entry?.tagline_source
+    if (s === 'hidden') {
+        return null
+    }
+    if (s === 'custom') {
+        const o = entry?.tagline_override
+        return o && String(o).trim() ? String(o).trim() : null
+    }
+    if (s === 'brand') {
+        return brandDnaTagline && String(brandDnaTagline).trim() ? String(brandDnaTagline).trim() : null
+    }
+    if (entry?.tagline_override && String(entry.tagline_override).trim()) {
+        return String(entry.tagline_override).trim()
+    }
+    if (brandDnaTagline && String(brandDnaTagline).trim()) {
+        return String(brandDnaTagline).trim()
+    }
+    return null
 }
 
-export function EntryPreview({ brand, entry }) {
+export function EntryPreview({ brand, entry, brandDnaTagline = null }) {
     const primary = brand?.primary_color || '#6366f1'
     const name = brand?.name || 'Brand'
     const letter = name.charAt(0).toUpperCase()
-    const style = entry?.style || 'cinematic'
-    const dest = DESTINATION_LABELS[entry?.default_destination] || 'Assets'
-    const tagline = entry?.tagline_override || null
+    const style = 'cinematic'
+    const tagline = previewTagline(entry, brandDnaTagline)
 
     return (
         <div
@@ -61,14 +77,10 @@ export function EntryPreview({ brand, entry }) {
                     </div>
                 )}
 
-                {/* Style / destination badges */}
+                {/* Style / destination badges — product defaults */}
                 <div className="mt-4 flex justify-center gap-2">
-                    <span className="text-[10px] px-3 py-1 rounded-md bg-white/10 text-white/60">
-                        {style === 'instant' ? 'Instant' : 'Cinematic'}
-                    </span>
-                    <span className="text-[10px] px-3 py-1 rounded-md bg-white/10 text-white/60">
-                        → {dest}
-                    </span>
+                    <span className="text-[10px] px-3 py-1 rounded-md bg-white/10 text-white/60">Cinematic</span>
+                    <span className="text-[10px] px-3 py-1 rounded-md bg-white/10 text-white/60">→ Overview</span>
                 </div>
             </div>
         </div>

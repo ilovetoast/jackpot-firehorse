@@ -51,7 +51,7 @@ const WHO_ITS_FOR = [
 export default function MarketingBenefits() {
     const { auth, signup_enabled } = usePage().props
     const earlyHref = auth?.user ? '/app/overview' : signup_enabled !== false ? '/gateway?mode=register' : '/contact'
-    const earlyLabel = auth?.user ? 'Go to app' : 'Get early access'
+    const earlyLabel = auth?.user ? 'Workspace' : 'Get early access'
 
     return (
         <MarketingLayout>

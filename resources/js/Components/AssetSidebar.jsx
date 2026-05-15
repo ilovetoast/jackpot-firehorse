@@ -382,6 +382,7 @@ export default function AssetSidebar({
                                         <FolderQuickFilters
                                             quickFilters={category.quick_filters || []}
                                             categoryId={category.id}
+                                            categorySlug={category.slug}
                                             isActiveFolder={isSelected}
                                             textColor={rowFg}
                                             activeAccentColor={activeTextColor}
@@ -394,6 +395,7 @@ export default function AssetSidebar({
                                             sidebarColor={sidebarColor}
                                             sidebarActiveBgColor={activeBgColor}
                                             brandAccentHex={workspaceAccentColor}
+                                            sidebarBackdropCss={sidebarBackdropCss}
                                         />
                                         </div>
                                     )

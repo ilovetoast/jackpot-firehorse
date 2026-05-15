@@ -172,10 +172,10 @@ export function getRegistryModelGlbModelSourceUrl(asset, damOverride) {
  *
  * @param {object|null|undefined} asset
  * @param {import('./damFileTypes.js').DamFileTypesPayload|null|undefined} [damOverride]
- * @param {boolean} [dam3dEnabled=false] — {@link HandleInertiaRequests} `dam_3d_enabled`
+ * @param {boolean} [realtimeViewerEnabled=false] — {@link HandleInertiaRequests} `dam_3d_realtime_viewer_enabled` (not `dam_3d_enabled`, which gates workers)
  * @returns {boolean}
  */
-export function shouldShowRealtimeGlbModelViewer(asset, damOverride, dam3dEnabled) {
-    if (!dam3dEnabled) return false
+export function shouldShowRealtimeGlbModelViewer(asset, damOverride, realtimeViewerEnabled) {
+    if (!realtimeViewerEnabled) return false
     return getRegistryModelGlbModelSourceUrl(asset, damOverride) != null
 }

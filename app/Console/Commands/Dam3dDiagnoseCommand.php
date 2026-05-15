@@ -17,6 +17,8 @@ class Dam3dDiagnoseCommand extends Command
     {
         $dam3d = (bool) config('dam_3d.enabled');
         $this->line('DAM_3D enabled: '.($dam3d ? 'yes' : 'no'));
+        $rt = (bool) config('dam_3d.realtime_viewer_enabled', false);
+        $this->line('DAM_3D realtime viewer (DAM_3D_REALTIME_VIEWER / web): '.($rt ? 'yes' : 'no'));
 
         $sail = filter_var(env('LARAVEL_SAIL', false), FILTER_VALIDATE_BOOLEAN);
         $this->line('Laravel Sail (LARAVEL_SAIL): '.($sail ? 'yes' : 'no'));
