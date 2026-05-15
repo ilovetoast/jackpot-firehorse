@@ -95,17 +95,13 @@ export default function FolderQuickFilters({
         return out
     }, [isActiveFolder, quickFilters, filterableSchema, url])
 
-    // Empty / disabled / inactive: render nothing. NEVER an empty container.
-    if (!isActiveFolder) return null
-    if (!enabled) return null
-    if (!Array.isArray(quickFilters) || quickFilters.length === 0) return null
-
     // Phase 5.2 — pinned filters resist overflow. The backend already sorts
     // pinned-first, so a naive `slice(0, maxVisible)` would already keep them
     // visible; this loop makes the guarantee explicit (and survives a future
     // sort change). We start from the natural sort order, ensure every pinned
     // entry lands in `visible`, then top up with the next non-pinned entries
     // until the cap is hit. `hidden` gets the rest.
+    // Must stay before early returns so hook count is stable (React #310).
     const { visible, hidden } = useMemo(() => {
         if (maxVisible <= 0) {
             return { visible: [], hidden: quickFilters }
@@ -135,6 +131,11 @@ export default function FolderQuickFilters({
         )
         return { visible: visibleOut, hidden: hiddenOut }
     }, [quickFilters, maxVisible])
+
+    // Empty / disabled / inactive: render nothing. NEVER an empty container.
+    if (!isActiveFolder) return null
+    if (!enabled) return null
+    if (!Array.isArray(quickFilters) || quickFilters.length === 0) return null
 
     // Phase 4.4: brand-aware tonal palette tinted from the sidebar surface
     // and active-row tone.
