@@ -6,6 +6,7 @@ use App\Models\Brand;
 use App\Models\BrandInvitation;
 use App\Models\Tenant;
 use App\Models\TenantInvitation;
+use App\Models\User;
 use App\Support\GatewayResumeCookie;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -21,7 +22,8 @@ class BrandContextResolver
      *  3. Invite token
      *  4. Session (last_company_id, last_brand_id)
      *  5. Authenticated user memberships
-     *  6. Fallback to null (default Jackpot branding)
+     *  6. Plain /gateway (no ?company / ?tenant / ?brand, no company subdomain): merge **all** brands across every company the user belongs to (`brand_picker_scope === all_workspaces`), with session tenant brands listed first when possible
+     *  7. Fallback to null (default Jackpot branding)
      */
     public function resolve(Request $request, ?string $inviteToken = null): array
     {
@@ -29,9 +31,10 @@ class BrandContextResolver
         $tenant = null;
         $brand = null;
 
-        // 1. Subdomain resolution
+        // 1. Subdomain resolution (locks brand list to that workspace when present)
+        $subdomainTenant = $this->resolveFromSubdomain($request);
         if (! $tenant) {
-            $tenant = $this->resolveFromSubdomain($request);
+            $tenant = $subdomainTenant;
         }
 
         // 2. URL param resolution (?company= or ?tenant= slug/id — legacy login used ?tenant=)
@@ -113,6 +116,30 @@ class BrandContextResolver
             }
         }
 
+        $brandPickerScope = 'tenant';
+
+        if ($user !== null
+            && $inviteToken === null
+            && ! $gatewayResumeActive
+            && $availableCompanies !== []
+            && ! $this->isGatewayBrandListScopedToSingleWorkspace($request, $subdomainTenant)) {
+            $allBrands = $this->getAllAccessibleBrandsAcrossTenants(
+                $user,
+                $availableCompanies,
+                session('tenant_id') ? (int) session('tenant_id') : null,
+            );
+
+            if (count($allBrands) > 0) {
+                $availableBrands = $allBrands;
+                $brandPickerScope = 'all_workspaces';
+
+                if (count($allBrands) === 1 && ! $brand) {
+                    $tenant = Tenant::find((int) $allBrands[0]['tenant_id']);
+                    $brand = $tenant ? Brand::find((int) $allBrands[0]['id']) : null;
+                }
+            }
+        }
+
         return [
             'tenant' => $tenant ? $this->serializeTenant($tenant) : null,
             'brand' => $brand ? $this->serializeBrand($brand) : null,
@@ -123,10 +150,80 @@ class BrandContextResolver
             'is_multi_brand' => count($availableBrands) > 1,
             'is_authenticated' => $user !== null,
             /** Logged-in user belongs to the resolved tenant but has zero brand memberships (gateway brand picker empty). */
-            'tenant_member_without_brands' => $user !== null && $tenant !== null && count($availableBrands) === 0,
+            'tenant_member_without_brands' => $user !== null && $tenant !== null && count($availableBrands) === 0
+                && $brandPickerScope !== 'all_workspaces',
             /** True when a valid jp_gateway_resume cookie pinned tenant+brand (cinematic enter despite multi-brand). */
             'gateway_resume_active' => $gatewayResumeActive,
+            /**
+             * all_workspaces: GET /gateway lists every brand the user can open across companies (unless URL/subdomain scopes the list).
+             */
+            'brand_picker_scope' => $brandPickerScope,
         ];
+    }
+
+    /**
+     * When true, keep the brand picker scoped to the resolved workspace (subdomain or explicit query).
+     */
+    protected function isGatewayBrandListScopedToSingleWorkspace(Request $request, ?Tenant $subdomainTenant): bool
+    {
+        if ($subdomainTenant !== null) {
+            return true;
+        }
+
+        return $request->filled('company')
+            || $request->filled('tenant')
+            || $request->filled('brand');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $availableCompanies
+     * @return array<int, array<string, mixed>>
+     */
+    protected function getAllAccessibleBrandsAcrossTenants(User $user, array $availableCompanies, ?int $prioritizeTenantId): array
+    {
+        $merged = [];
+
+        foreach ($availableCompanies as $c) {
+            $tid = (int) ($c['id'] ?? 0);
+            if ($tid === 0) {
+                continue;
+            }
+
+            $tenantModel = Tenant::find($tid);
+            if (! $tenantModel) {
+                continue;
+            }
+
+            foreach ($this->getAvailableBrands($user, $tenantModel) as $row) {
+                $merged[] = array_merge($row, [
+                    'tenant_id' => $tenantModel->id,
+                    'tenant_name' => $tenantModel->name,
+                    'tenant_slug' => $tenantModel->slug,
+                ]);
+            }
+        }
+
+        usort($merged, function (array $a, array $b) use ($prioritizeTenantId): int {
+            $at = (int) ($a['tenant_id'] ?? 0);
+            $bt = (int) ($b['tenant_id'] ?? 0);
+
+            if ($prioritizeTenantId) {
+                $aPri = $at === $prioritizeTenantId ? 0 : 1;
+                $bPri = $bt === $prioritizeTenantId ? 0 : 1;
+                if ($aPri !== $bPri) {
+                    return $aPri <=> $bPri;
+                }
+            }
+
+            $nameCmp = strcasecmp((string) ($a['tenant_name'] ?? ''), (string) ($b['tenant_name'] ?? ''));
+            if ($nameCmp !== 0) {
+                return $nameCmp;
+            }
+
+            return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+        });
+
+        return array_values($merged);
     }
 
     protected function resolveFromSubdomain(Request $request): ?Tenant

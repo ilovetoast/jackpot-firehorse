@@ -56,11 +56,15 @@ class AgencyContextPickerOptionsBuilder
                 );
             }
             $totalItems += count($items);
+            $agencyTenantModel = Tenant::find((int) $grouped['agency_tenant_id']);
             $groups[] = [
                 'type' => 'agency',
                 'section_label' => 'AGENCY WORKSPACE',
                 'tenant_id' => (int) $grouped['agency_tenant_id'],
                 'tenant_name' => (string) $grouped['agency_tenant_name'],
+                'tenant_has_company_settings_access' => $agencyTenantModel
+                    ? $user->hasPermissionForTenant($agencyTenantModel, 'company_settings.view')
+                    : false,
                 'items' => $items,
             ];
         }
@@ -82,11 +86,15 @@ class AgencyContextPickerOptionsBuilder
                 continue;
             }
             $totalItems += count($items);
+            $clientTenantModel = Tenant::find((int) $workspace['tenant_id']);
             $groups[] = [
                 'type' => 'client',
                 'section_label' => $managedSectionPlaced ? null : 'MANAGED CLIENTS',
                 'tenant_id' => (int) $workspace['tenant_id'],
                 'tenant_name' => (string) $workspace['tenant_name'],
+                'tenant_has_company_settings_access' => $clientTenantModel
+                    ? $user->hasPermissionForTenant($clientTenantModel, 'company_settings.view')
+                    : false,
                 'items' => $items,
             ];
             $managedSectionPlaced = true;

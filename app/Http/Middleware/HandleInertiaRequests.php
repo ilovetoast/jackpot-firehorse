@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Http\Middleware\RedirectAuthenticatedFromMarketingSurface;
 use App\Models\Brand;
 use App\Models\Collection;
 use App\Models\Consent;
@@ -515,6 +516,16 @@ class HandleInertiaRequests extends Middleware
                 // C9.2: Roles for upload AI controls (Admin/Brand Manager) — used by UploadAssetDialog, AssetDrawer
                 'brand_role' => ($user && $activeBrand) ? ($user->getRoleForBrand($activeBrand) ?? null) : null,
                 'tenant_role' => ($user && $tenant) ? ($user->getRoleForTenant($tenant) ?? null) : null,
+                /** True after visiting marketing with ?marketing_site=1; cleared on /app/* or when logged out. */
+                'marketing_site_bypass' => (function () use ($request, $user) {
+                    if (! $user) {
+                        $request->session()->forget(RedirectAuthenticatedFromMarketingSurface::SESSION_KEY);
+
+                        return false;
+                    }
+
+                    return (bool) $request->session()->get(RedirectAuthenticatedFromMarketingSurface::SESSION_KEY);
+                })(),
                 /** Creator / prostaff — active membership on the workspace brand (overview + /api/prostaff/me). */
                 'is_prostaff_for_active_brand' => $user && $activeBrand ? $user->isProstaffForBrand($activeBrand) : false,
                 /** Rejected creator uploads still needing fix & re-upload (AppNav badge). */

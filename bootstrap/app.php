@@ -34,6 +34,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'CloudFront-Policy',
             'CloudFront-Signature',
             'CloudFront-Key-Pair-Id',
+            /** Value is already application-encrypted in {@see \App\Support\GatewayResumeCookie}. */
+            \App\Support\GatewayResumeCookie::NAME,
         ]);
 
         $middleware->web(prepend: [

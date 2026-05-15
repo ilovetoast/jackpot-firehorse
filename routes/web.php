@@ -49,11 +49,18 @@ Route::get('/manifest.webmanifest', function () {
 })->name('manifest');
 
 // Marketing site (subdomains disabled) — pages live in resources/js/Pages/Marketing/
-Route::get('/', fn () => Inertia::render('Home'));
-Route::get('/product', fn () => Inertia::render('Marketing/Product'))->name('marketing.product');
-Route::get('/benefits', fn () => Inertia::render('Marketing/Benefits'))->name('marketing.benefits');
-Route::get('/agency', fn () => Inertia::render('Marketing/Agency'))->name('marketing.agency');
-Route::get('/pricing', fn () => Inertia::render('Marketing/Pricing'))->name('marketing.pricing');
+// Authenticated users are redirected to the gateway unless they opt in with ?marketing_site=1
+// (session bypass cleared on any /app/* visit — see RedirectAuthenticatedFromMarketingSurface).
+Route::middleware([\App\Http\Middleware\RedirectAuthenticatedFromMarketingSurface::class])->group(function () {
+    Route::get('/', fn () => Inertia::render('Home'));
+    Route::get('/product', fn () => Inertia::render('Marketing/Product'))->name('marketing.product');
+    Route::get('/benefits', fn () => Inertia::render('Marketing/Benefits'))->name('marketing.benefits');
+    Route::get('/agency', fn () => Inertia::render('Marketing/Agency'))->name('marketing.agency');
+    Route::get('/pricing', fn () => Inertia::render('Marketing/Pricing'))->name('marketing.pricing');
+    Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
+        'plan' => $request->query('plan'),
+    ]))->name('contact');
+});
 
 // Legal surface — public, unauthenticated. See docs/compliance/PATH_TO_GDPR.md.
 Route::get('/terms', fn () => Inertia::render('Legal/Terms'))->name('legal.terms');
@@ -72,10 +79,6 @@ Route::post('/privacy/contact-leads/object-to-processing', [\App\Http\Controller
     ->name('privacy.contact-leads.object-to-processing');
 
 // Contact / sales inquiry (e.g. Enterprise plan)
-Route::get('/contact', fn (Request $request) => Inertia::render('Contact', [
-    'plan' => $request->query('plan'),
-]))->name('contact');
-// Public inbound capture — throttled + honeypot-protected (see ContactLeadController).
 Route::post('/contact', [\App\Http\Controllers\ContactLeadController::class, 'storeContact'])
     ->middleware(['web', 'throttle:5,1'])
     ->name('contact.store');
@@ -196,7 +199,7 @@ Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Htt
 // Use the concrete class here (not the `prevent.bfcache` alias): string aliases can fail with
 // `Target class [prevent.bfcache] does not exist` when route cache / worker boot order differs from
 // the middleware alias map; FQN resolution is always reliable.
-Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', PreventBackForwardCacheForAuthenticatedApp::class])->prefix('app')->group(function () {
+Route::middleware([\App\Http\Middleware\ForgetMarketingSiteBypassForApp::class, 'auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', PreventBackForwardCacheForAuthenticatedApp::class])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 

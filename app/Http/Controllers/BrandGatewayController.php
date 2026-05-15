@@ -651,16 +651,18 @@ class BrandGatewayController extends Controller
         ]);
 
         $user = Auth::user();
-        $tenantId = session('tenant_id');
+        $brand = Brand::findOrFail($validated['brand_id']);
+        $tenant = $brand->tenant;
 
-        if (! $tenantId) {
-            return redirect()->route('gateway');
+        if (! $tenant) {
+            abort(404, 'Brand has no company.');
         }
 
-        $tenant = Tenant::findOrFail($tenantId);
-        $brand = Brand::where('id', $validated['brand_id'])
-            ->where('tenant_id', $tenantId)
-            ->firstOrFail();
+        if (! $user->tenants()->where('tenants.id', $tenant->id)->exists()) {
+            abort(403, 'You do not have access to this company.');
+        }
+
+        $tenantId = (int) $tenant->id;
 
         $tenantRole = $user->getRoleForTenant($tenant);
         $isElevatedTenantUser = in_array($tenantRole, ['owner', 'admin', 'agency_admin'], true);
@@ -674,7 +676,10 @@ class BrandGatewayController extends Controller
             $enabledBrand = $planService->findFirstEnabledBrand($tenant, $user);
 
             if ($enabledBrand) {
-                session(['brand_id' => $enabledBrand->id]);
+                session([
+                    'tenant_id' => $tenantId,
+                    'brand_id' => $enabledBrand->id,
+                ]);
                 session()->flash('warning', "The brand \"{$brand->name}\" is unavailable on your current plan. You've been redirected to \"{$enabledBrand->name}\".");
 
                 return $this->redirectToGatewayIntended();
@@ -683,7 +688,10 @@ class BrandGatewayController extends Controller
             return redirect()->route('errors.brand-disabled');
         }
 
-        session(['brand_id' => $brand->id]);
+        session([
+            'tenant_id' => $tenantId,
+            'brand_id' => $brand->id,
+        ]);
 
         $this->trackGatewayEvent(EventType::GATEWAY_ENTER_CLICKED, [
             'tenant' => ['id' => $tenantId],
@@ -827,6 +835,17 @@ class BrandGatewayController extends Controller
 
         if ($context['gateway_resume_active'] ?? false) {
             return 'enter';
+        }
+
+        // Unified picker: every brand across all companies (plain /gateway; see BrandContextResolver::brand_picker_scope).
+        if (($context['brand_picker_scope'] ?? null) === 'all_workspaces') {
+            $n = count($context['available_brands'] ?? []);
+            if ($n > 1) {
+                return 'brand_select';
+            }
+            if ($n === 1 && ($context['brand']['id'] ?? null)) {
+                return 'enter';
+            }
         }
 
         if ($context['is_multi_company'] && ! $context['tenant']) {

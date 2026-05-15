@@ -14,6 +14,12 @@ class GatewayResumeCookieTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config()->set('plans.free.limits.max_brands', 50);
+    }
+
     public function test_valid_resume_cookie_yields_enter_mode_when_user_has_two_brands(): void
     {
         $tenant = Tenant::create([
@@ -31,7 +37,9 @@ class GatewayResumeCookieTest extends TestCase
             'tenant_id' => $tenant->id,
             'name' => 'Brand B',
             'slug' => 'brand-b',
+            'is_default' => true,
         ]);
+        $brandA->update(['is_default' => false]);
 
         $user = User::create([
             'email' => 'member@example.com',
@@ -53,7 +61,7 @@ class GatewayResumeCookieTest extends TestCase
 
         $this->actingAs($user)
             ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brandA->id])
-            ->withCookie(GatewayResumeCookie::NAME, $cookieVal)
+            ->withUnencryptedCookie(GatewayResumeCookie::NAME, $cookieVal)
             ->get(route('gateway'))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
@@ -78,7 +86,9 @@ class GatewayResumeCookieTest extends TestCase
             'tenant_id' => $tenant->id,
             'name' => 'Brand B2',
             'slug' => 'brand-b2',
+            'is_default' => true,
         ]);
+        $brandA->update(['is_default' => false]);
 
         $user = User::create([
             'email' => 'member2@example.com',
@@ -100,7 +110,7 @@ class GatewayResumeCookieTest extends TestCase
 
         $this->actingAs($user)
             ->withSession(['tenant_id' => $tenant->id, 'brand_id' => $brandA->id])
-            ->withCookie(GatewayResumeCookie::NAME, $cookieVal)
+            ->withUnencryptedCookie(GatewayResumeCookie::NAME, $cookieVal)
             ->get(route('gateway', ['switch' => 1]))
             ->assertOk()
             ->assertInertia(fn ($page) => $page

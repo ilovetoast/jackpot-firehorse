@@ -23,6 +23,7 @@ import { switchCompanyWorkspace } from '../../utils/workspaceCompanySwitch'
  *     in a non-agency client workspace). Overview is universally valid.
  */
 const PICKER_HOME_URL = '/app/overview'
+const COMPANY_SETTINGS_URL = '/app/companies/settings'
 
 function brandRowForIcon(item) {
     return {
@@ -78,6 +79,17 @@ export default function AgencyContextNavPicker({
             companyId: item.tenant_id,
             brandId: item.brand_id,
             redirect: PICKER_HOME_URL,
+        })
+    }
+
+    const openTenantCompanySettings = (e, group) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setMenuOpen(false)
+        switchCompanyWorkspace({
+            companyId: group.tenant_id,
+            brandId: null,
+            redirect: COMPANY_SETTINGS_URL,
         })
     }
 
@@ -223,9 +235,20 @@ export default function AgencyContextNavPicker({
                                             </div>
                                         ) : null}
                                         {(group.type === 'agency' || group.type === 'client') && group.tenant_name ? (
-                                            <div className="px-4 pb-0.5 pt-1 text-xs font-semibold text-gray-600">
-                                                {group.tenant_name}
-                                            </div>
+                                            group.tenant_has_company_settings_access ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => openTenantCompanySettings(e, group)}
+                                                    className="block w-full px-4 pb-0.5 pt-1 text-left text-xs font-semibold text-gray-500 transition-colors hover:text-indigo-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30 rounded-sm"
+                                                    title={`Open ${group.tenant_name} company settings`}
+                                                >
+                                                    {group.tenant_name}
+                                                </button>
+                                            ) : (
+                                                <div className="px-4 pb-0.5 pt-1 text-xs font-semibold text-gray-500">
+                                                    {group.tenant_name}
+                                                </div>
+                                            )
                                         ) : null}
                                         {(group.items || []).map((item) => (
                                             <button

@@ -1,5 +1,8 @@
 import JackpotQuietFooterMark from './JackpotQuietFooterMark'
 
+/** Authenticated: opens marketing with session opt-in (see RedirectAuthenticatedFromMarketingSurface). */
+const MARKETING_PUBLIC_ENTRY = '/?marketing_site=1'
+
 /**
  * @param {{
  *   variant?: 'light' | 'dark' | 'settings'
@@ -49,16 +52,15 @@ export default function AppFooter({
                 className={`mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2.5 ${showWordmark ? 'space-y-1' : 'space-y-0.5'}`}
             >
                 {showWordmark ? (
-                    <JackpotQuietFooterMark surface={dark ? 'dark' : 'light'} />
+                    <JackpotQuietFooterMark surface={dark ? 'dark' : 'light'} href={MARKETING_PUBLIC_ENTRY} />
                 ) : null}
                 <p className={`${copyrightClass} antialiased`}>
-                    <span
-                        className={
-                            dark ? 'text-white/45' : settings ? 'text-slate-400/50' : 'text-slate-400/55'
-                        }
+                    <a
+                        href={MARKETING_PUBLIC_ENTRY}
+                        className={`${dark ? 'text-white/45 hover:text-white/75' : settings ? 'text-slate-400/50 hover:text-slate-500/75' : 'text-slate-400/55 hover:text-slate-500/70'} ${linkBase}`}
                     >
                         Jackpot
-                    </span>{' '}
+                    </a>{' '}
                     <span
                         className={
                             dark

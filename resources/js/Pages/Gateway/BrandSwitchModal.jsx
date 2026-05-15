@@ -79,6 +79,7 @@ export default function BrandSwitchModal({ onClose, context }) {
                 <BrandSelector
                     brands={context.available_brands}
                     tenant={context.tenant}
+                    brandPickerScope={context.brand_picker_scope}
                     tenantMemberWithoutBrands={Boolean(context.tenant_member_without_brands)}
                     variant="modal"
                 />

@@ -149,6 +149,15 @@ export default function MarketingLayout({ children, cinematicBackdrop = false })
                 </div>
             </nav>
 
+            {auth?.user && auth?.marketing_site_bypass ? (
+                <div className="relative z-40 border-b border-white/[0.06] bg-white/[0.03] px-4 py-2 text-center text-xs text-white/55">
+                    You&apos;re on the public marketing site.{` `}
+                    <Link href="/app/overview" className="font-medium text-indigo-300 hover:text-indigo-200">
+                        Back to workspace
+                    </Link>
+                </div>
+            ) : null}
+
             <main className="relative z-10">{children}</main>
 
             <footer className="relative z-10 border-t border-white/[0.06] mt-0">

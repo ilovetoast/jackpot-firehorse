@@ -136,7 +136,9 @@ class AgencyContextPickerAndPortfolioSwitchTest extends TestCase
                 ->where('auth.agency_context_picker.is_agency_context_picker', true)
                 ->where('auth.agency_context_picker.active_tenant_id', $agency->id)
                 ->where('auth.agency_context_picker.active_brand_id', $agBrand->id)
-                ->has('auth.agency_context_picker.groups'));
+                ->has('auth.agency_context_picker.groups')
+                ->where('auth.agency_context_picker.groups.0.tenant_has_company_settings_access', true)
+                ->where('auth.agency_context_picker.groups.1.tenant_has_company_settings_access', true));
     }
 
     #[Test]
@@ -275,5 +277,43 @@ class AgencyContextPickerAndPortfolioSwitchTest extends TestCase
 
         $this->assertSame($b->id, session('tenant_id'));
         $this->assertSame($brandB->id, session('brand_id'));
+    }
+
+    #[Test]
+    public function agency_context_picker_company_settings_flag_follows_tenant_role(): void
+    {
+        [$agency, $agBrand] = $this->tenantWithBrand(['is_agency' => true]);
+        [$client, $clientBrand] = $this->tenantWithBrand(['is_agency' => false]);
+
+        $user = User::create([
+            'email' => 'role-'.uniqid().'@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'R',
+            'last_name' => 'L',
+        ]);
+        $user->tenants()->attach($agency->id, ['role' => 'admin', 'is_agency_managed' => false]);
+        $user->tenants()->attach($client->id, [
+            'role' => 'member',
+            'is_agency_managed' => true,
+            'agency_tenant_id' => $agency->id,
+        ]);
+        $user->brands()->attach($agBrand->id, ['role' => 'admin', 'removed_at' => null]);
+        $user->brands()->attach($clientBrand->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        TenantAgency::create([
+            'tenant_id' => $client->id,
+            'agency_tenant_id' => $agency->id,
+            'role' => 'agency_admin',
+            'brand_assignments' => [['brand_id' => $clientBrand->id, 'role' => 'viewer']],
+            'created_by' => $user->id,
+        ]);
+
+        $this->actingAs($user)
+            ->withSession(['tenant_id' => $agency->id, 'brand_id' => $agBrand->id])
+            ->get(route('overview'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('auth.agency_context_picker.groups.0.tenant_has_company_settings_access', true)
+                ->where('auth.agency_context_picker.groups.1.tenant_has_company_settings_access', false));
     }
 }

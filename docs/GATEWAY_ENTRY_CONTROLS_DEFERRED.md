@@ -22,7 +22,9 @@ This document describes **system-enforced** gateway behavior in the Jackpot app,
 
 4. **Last workspace resume** — Encrypted cookie `jp_gateway_resume` (TTL from `GATEWAY_RESUME_TTL_MINUTES`, default **240**). Lets users with **multiple brands** (or multi-company flows) skip the picker on plain `GET /gateway` when the cookie is valid. **`?switch=1`** clears the cookie and shows the picker. Logout queues cookie removal.
 
-5. **Gateway tagline** — Controlled by `portal_settings.entry.tagline_source`: `brand` (Brand DNA tagline), `custom` (`tagline_override` text), or `hidden`. Legacy rows without `tagline_source` keep previous behavior (override text first, then DNA).
+5. **All-workspaces brand picker** — On plain `GET /gateway` (no `?company`, `?tenant`, or `?brand`, and not on a company subdomain), the gateway lists **every brand** the user can open across **all** companies they belong to. Brands are sorted with the **current session company first** (recent workspace), then by company name. Use `?company={slug}` or a company subdomain to keep the list scoped to one workspace. `POST /gateway/select-brand` sets both `tenant_id` and `brand_id` from the chosen brand.
+
+6. **Gateway tagline** — Controlled by `portal_settings.entry.tagline_source`: `brand` (Brand DNA tagline), `custom` (`tagline_override` text), or `hidden`. Legacy rows without `tagline_source` keep previous behavior (override text first, then DNA).
 
 ## Re-enabling legacy UI controls
 
