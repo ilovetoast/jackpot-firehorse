@@ -51,7 +51,38 @@ class GatewayAllWorkspacesBrandsTest extends TestCase
                 ->where('context.brand_picker_scope', 'all_workspaces')
                 ->has('context.available_brands', 4)
                 ->where('context.available_brands.0.tenant_id', $tenantB->id)
-                ->where('context.available_brands.2.tenant_id', $tenantA->id));
+                ->where('context.available_brands.0.tenant_is_agency', false)
+                ->where('context.available_brands.2.tenant_id', $tenantA->id)
+                ->where('context.available_brands.2.tenant_is_agency', false));
+    }
+
+    public function test_all_workspaces_brand_rows_include_tenant_is_agency_flag(): void
+    {
+        $agency = Tenant::create(['name' => 'Agency Parent', 'slug' => 'agency-parent', 'is_agency' => true]);
+        $client = Tenant::create(['name' => 'Client Co', 'slug' => 'client-co', 'is_agency' => false]);
+
+        $brandAg = Brand::create(['tenant_id' => $agency->id, 'name' => 'Agency Brand', 'slug' => 'agency-brand']);
+        $brandCl = Brand::create(['tenant_id' => $client->id, 'name' => 'Client Brand', 'slug' => 'client-brand']);
+
+        $user = User::create([
+            'email' => 'agency-picker@example.com',
+            'password' => bcrypt('password'),
+            'first_name' => 'A',
+            'last_name' => 'P',
+        ]);
+        $user->tenants()->attach($agency->id, ['role' => 'member']);
+        $user->tenants()->attach($client->id, ['role' => 'member']);
+        $user->brands()->attach($brandAg->id, ['role' => 'viewer', 'removed_at' => null]);
+        $user->brands()->attach($brandCl->id, ['role' => 'viewer', 'removed_at' => null]);
+
+        $this->actingAs($user)
+            ->get(route('gateway'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('context.brand_picker_scope', 'all_workspaces')
+                ->has('context.available_brands', 2)
+                ->where('context.available_brands.0.tenant_is_agency', true)
+                ->where('context.available_brands.1.tenant_is_agency', false));
     }
 
     public function test_company_query_scopes_brand_list_to_that_workspace(): void

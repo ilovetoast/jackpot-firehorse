@@ -31,6 +31,12 @@ class EnsureGatewayEntry
             return $next($request);
         }
 
+        // Same behavior as legacy ForgetMarketingSiteBypassForApp: any /app/* visit drops the
+        // marketing-site bypass so the next public marketing load again redirects to the gateway.
+        if ($request->hasSession()) {
+            $request->session()->forget(RedirectAuthenticatedFromMarketingSurface::SESSION_KEY);
+        }
+
         if ($request->is('app/errors/*') || $request->is('app/api/*')) {
             return $next($request);
         }

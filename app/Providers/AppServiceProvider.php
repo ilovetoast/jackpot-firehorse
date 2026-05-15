@@ -82,10 +82,11 @@ class AppServiceProvider extends ServiceProvider
         // Without a container alias, the router's fallback path treats the string as a class name and
         // Container::build throws "Target class [...] does not exist". The $middleware->alias() map in
         // bootstrap/app.php handles the normal path; these are belt-and-suspenders for rolling deploys
-        // and stale OPcache where that map hasn't reloaded yet.
+        // and stale OPcache where that map hasn't reloaded yet (e.g. Sentry JACKPOT-DAM-A on /app/api/notifications).
         $this->app->alias(EnsureIncubationWorkspaceNotLocked::class, 'incubation.not_locked');
         $this->app->alias(EnsureOnboardingComplete::class, 'ensure.onboarding');
         $this->app->alias(\App\Http\Middleware\ImpersonationMiddleware::class, 'impersonation');
+        $this->app->alias(\App\Http\Middleware\PreventBackForwardCacheForAuthenticatedApp::class, 'prevent.bfcache');
 
         $this->app->bind(
             \App\Studio\LayerExtraction\Contracts\SamSegmentationClientInterface::class,

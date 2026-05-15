@@ -199,6 +199,8 @@ class BrandContextResolver
                     'tenant_id' => $tenantModel->id,
                     'tenant_name' => $tenantModel->name,
                     'tenant_slug' => $tenantModel->slug,
+                    /** Gateway brand cards: distinguish agency workspace vs client company. */
+                    'tenant_is_agency' => (bool) $tenantModel->is_agency,
                 ]);
             }
         }

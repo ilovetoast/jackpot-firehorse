@@ -199,7 +199,7 @@ Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Htt
 // Use the concrete class here (not the `prevent.bfcache` alias): string aliases can fail with
 // `Target class [prevent.bfcache] does not exist` when route cache / worker boot order differs from
 // the middleware alias map; FQN resolution is always reliable.
-Route::middleware([\App\Http\Middleware\ForgetMarketingSiteBypassForApp::class, 'auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', PreventBackForwardCacheForAuthenticatedApp::class])->prefix('app')->group(function () {
+Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', PreventBackForwardCacheForAuthenticatedApp::class])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 

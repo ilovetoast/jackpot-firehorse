@@ -4,17 +4,20 @@ import { refreshCsrfTokenFromServer } from '../../utils/csrf'
 import BrandIconUnified from '../../Components/BrandIconUnified'
 import { getBrandLogoForSurface } from '../../utils/brandLogo'
 
-function BrandLogo({ brand, disabled }) {
+function BrandLogo({ brand, disabled, compact = false }) {
     const [imgError, setImgError] = useState(false)
     /** Gateway is a dark cinematic surface — prefer the dark variant, fall back to primary. */
     const logoSrc = getBrandLogoForSurface(brand, 'dark')
+    const imgClass = compact
+        ? 'h-7 w-auto max-w-[104px] sm:max-w-[120px] object-contain transition-all'
+        : 'h-9 w-auto max-w-[140px] sm:h-10 sm:max-w-full object-contain transition-all'
 
     if (logoSrc && !imgError) {
         return (
             <img
                 src={logoSrc}
-                alt={brand.name}
-                className={`h-10 w-auto max-w-full object-contain transition-all ${disabled ? 'grayscale opacity-40' : ''}`}
+                alt=""
+                className={`${imgClass} ${disabled ? 'grayscale opacity-40' : ''}`}
                 onError={() => setImgError(true)}
             />
         )
@@ -22,7 +25,7 @@ function BrandLogo({ brand, disabled }) {
 
     return (
         <div className={disabled ? 'grayscale opacity-40' : ''}>
-            <BrandIconUnified brand={brand} size="lg" />
+            <BrandIconUnified brand={brand} size={compact ? 'md' : 'lg'} />
         </div>
     )
 }
@@ -84,13 +87,17 @@ export default function BrandSelector({
         })
     }
 
-    const containerMax = !isPage ? 'max-w-none' : isAllWorkspaces ? 'max-w-4xl' : 'max-w-lg'
+    const containerMax = !isPage ? 'max-w-none' : isAllWorkspaces ? 'max-w-6xl xl:max-w-7xl' : 'max-w-lg'
     const gridClass =
-        isPage && isAllWorkspaces && list.length > 4
-            ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-            : isPage
-                ? 'grid-cols-1 sm:grid-cols-2'
-                : 'grid-cols-1'
+        isPage && isAllWorkspaces && list.length > 12
+            ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+            : isPage && isAllWorkspaces && list.length > 6
+                ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'
+                : isPage && isAllWorkspaces && list.length > 3
+                    ? 'grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3'
+                    : isPage
+                        ? 'grid-cols-1 sm:grid-cols-2'
+                        : 'grid-cols-1'
 
     return (
         <div className={`w-full animate-fade-in ${containerMax}`} style={{ animationDuration: '500ms' }}>
@@ -140,47 +147,70 @@ export default function BrandSelector({
             )}
 
             {!isEmpty && (
-            <div className={`grid gap-4 ${gridClass}`}>
+            <div className={`grid gap-2.5 sm:gap-3 ${gridClass}`}>
                 {list.map((brand) => {
                     const color = brand.primary_color || theme?.colors?.primary || '#7c3aed'
-                    const hasLogo = !!(brand.logo_path || brand.logo_dark_path)
                     const isDisabled = brand.is_disabled
+                    const useCompactCard = isPage && (isAllWorkspaces || list.length > 4)
 
                     return (
                         <button
                             key={brand.id}
                             type="button"
+                            aria-label={
+                                isAllWorkspaces && brand.tenant_name
+                                    ? `Open ${brand.name} in ${brand.tenant_name}`
+                                    : `Open ${brand.name}`
+                            }
                             onClick={() => handleSelect(brand)}
                             disabled={processing || isDisabled}
-                            className={`group relative overflow-hidden rounded-xl border p-6 text-left transition-all duration-200 ${
+                            className={`group relative overflow-hidden rounded-lg border text-left transition-colors duration-200 ${
+                                useCompactCard ? 'p-3 sm:p-3.5' : 'p-5 sm:p-6'
+                            } ${
                                 isDisabled
                                     ? 'border-white/[0.04] bg-white/[0.01] cursor-not-allowed'
-                                    : 'border-white/[0.08] bg-white/[0.03] hover:scale-[1.02] hover:border-white/[0.16] hover:bg-white/10'
+                                    : 'border-white/[0.08] bg-white/[0.03] hover:border-white/[0.14] hover:bg-white/[0.07]'
                             } disabled:opacity-50`}
                         >
-                            <div className="flex flex-col items-start gap-4">
-                                <BrandLogo brand={brand} disabled={isDisabled} />
-                                {isAllWorkspaces && brand.tenant_name && (
-                                    <p className="text-[11px] font-medium uppercase tracking-wider text-white/40">
-                                        {brand.tenant_name}
-                                    </p>
-                                )}
-                                {!hasLogo && (
-                                    <h2 className={`text-lg font-medium ${isDisabled ? 'text-white/30' : 'text-white'}`}>
+                            <div className="flex items-start gap-2.5 sm:gap-3">
+                                <div className="shrink-0 pt-0.5">
+                                    <BrandLogo brand={brand} disabled={isDisabled} compact={useCompactCard} />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <h2
+                                        className={`font-semibold leading-snug tracking-tight ${
+                                            useCompactCard ? 'text-sm' : 'text-base sm:text-lg'
+                                        } ${isDisabled ? 'text-white/30' : 'text-white'} truncate`}
+                                    >
                                         {brand.name}
                                     </h2>
-                                )}
-                                <div className="flex items-center gap-2">
-                                    {brand.is_default && !isDisabled && (
-                                        <span className="text-[10px] uppercase tracking-widest text-white/30 inline-block">
-                                            Default
-                                        </span>
+                                    {isAllWorkspaces && brand.tenant_name && (
+                                        <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                                            <span className="max-w-full truncate text-[10px] font-semibold uppercase tracking-wider text-white/38">
+                                                {brand.tenant_name}
+                                            </span>
+                                            {brand.tenant_is_agency ? (
+                                                <span className="shrink-0 rounded border border-sky-400/30 bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100/95">
+                                                    Agency workspace
+                                                </span>
+                                            ) : null}
+                                            {brand.is_default && !isDisabled ? (
+                                                <span className="shrink-0 rounded border border-violet-400/25 bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-100/90">
+                                                    Default brand
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    )}
+                                    {!isAllWorkspaces && brand.is_default && !isDisabled && (
+                                        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+                                            Default for this workspace
+                                        </p>
                                     )}
                                     {isDisabled && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-amber-400/70">
-                                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
+                                        <p className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-400/85">
+                                            <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
                                             Plan limit
-                                        </span>
+                                        </p>
                                     )}
                                 </div>
                             </div>
@@ -188,13 +218,13 @@ export default function BrandSelector({
                             {!isDisabled && (
                                 <>
                                     <div
-                                        className="absolute top-0 left-0 right-0 h-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+                                        className="absolute top-0 left-0 right-0 h-px opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                                         style={{ backgroundColor: color }}
                                     />
                                     <div
-                                        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                                        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
                                         style={{
-                                            background: `radial-gradient(circle at 50% 100%, ${color}12 0%, transparent 70%)`,
+                                            background: `radial-gradient(circle at 50% 100%, ${color}10 0%, transparent 72%)`,
                                         }}
                                     />
                                 </>

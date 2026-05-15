@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\Response;
  * unless they explicitly opted in with ?marketing_site=1 (sets a session flag; URL is cleaned)
  * or already have that session flag from a prior opt-in (e.g. footer link from the app).
  *
- * @see \App\Http\Middleware\ForgetMarketingSiteBypassForApp
+ * @see \App\Http\Middleware\EnsureGatewayEntry (clears bypass on /app/*)
  */
 class RedirectAuthenticatedFromMarketingSurface
 {
