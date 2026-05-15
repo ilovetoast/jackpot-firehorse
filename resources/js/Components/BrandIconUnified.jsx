@@ -16,6 +16,9 @@ const SIZES = {
     /** Gateway workspace tiles — prominent mark without tenant purple chrome. */
     tile: { container: 'h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]', text: 'text-lg sm:text-xl', radius: 'rounded-2xl' },
     '2xl': { container: 'h-20 w-20', text: 'text-2xl', radius: 'rounded-2xl' },
+    /** Gateway workspace picker cards — large mark; see BrandSelector WorkspaceCard. */
+    'gateway-ws': { container: 'h-24 w-24', text: 'text-xl', radius: 'rounded-2xl' },
+    'gateway-ws-compact': { container: 'h-20 w-20', text: 'text-lg', radius: 'rounded-2xl' },
 }
 
 const GATEWAY_TILE_BG =
@@ -24,10 +27,11 @@ const GATEWAY_TILE_BG =
 /**
  * Unified brand tile: logo (inverted on gradient) or first letter — used in brand selector, nav, overview.
  *
- * @param {object} brand - primary_color, secondary_color, icon_style, name, logo_path
+ * @param {object} brand - primary_color, secondary_color, icon_style, name, logo_path, settings.nav_display_mode
  * @param {'brand' | 'gateway'} [palette='brand'] — `gateway`: neutral vault surface (no purple tenant gradient).
+ * @param {'auto'|'logo'|'monogram'} [markMode='auto'] — `auto`: use brand `settings.nav_display_mode` (logo vs text/monogram); `logo` / `monogram` override.
  */
-export default function BrandIconUnified({ brand, size = 'md', variant = 'gradient', className = '', palette = 'brand' }) {
+export default function BrandIconUnified({ brand, size = 'md', variant = 'gradient', className = '', palette = 'brand', markMode = 'auto' }) {
     const [imgError, setImgError] = useState(false)
 
     const isGateway = palette === 'gateway'
@@ -48,8 +52,12 @@ export default function BrandIconUnified({ brand, size = 'md', variant = 'gradie
         : getSolidFillButtonForegroundHex(monogramSurface)
     const name = brand?.name || ''
     const firstLetter = name.charAt(0).toUpperCase() || 'B'
-    const logoPath = getBrandLogoForSurface(brand, 'dark')
-    const dedicatedDarkLogo = hasDedicatedVariantForSurface(brand, 'dark')
+    const navDisplayMode = brand?.settings?.nav_display_mode
+    const useMonogramTile =
+        markMode !== 'logo'
+        && (markMode === 'monogram' || (markMode === 'auto' && navDisplayMode === 'text'))
+    const logoPath = useMonogramTile ? null : getBrandLogoForSurface(brand, 'dark')
+    const dedicatedDarkLogo = Boolean(logoPath) && hasDedicatedVariantForSurface(brand, 'dark')
 
     const s = SIZES[size] || SIZES.md
     const radius = variant === 'circle' ? 'rounded-full' : s.radius

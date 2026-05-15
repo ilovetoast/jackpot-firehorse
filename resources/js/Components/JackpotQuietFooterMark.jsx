@@ -33,7 +33,7 @@ export default function JackpotQuietFooterMark({
         <a
             href={href}
             aria-label={linkAriaLabel}
-            className="group/mark inline-block rounded-sm outline-none ring-offset-2 transition hover:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+            className="group/mark mx-auto block w-fit rounded-sm outline-none ring-offset-2 transition hover:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-500/40"
         >
             <span className="block opacity-90 transition group-hover/mark:opacity-100">{img}</span>
         </a>

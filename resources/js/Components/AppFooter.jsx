@@ -52,7 +52,9 @@ export default function AppFooter({
                 className={`mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2.5 ${showWordmark ? 'space-y-1' : 'space-y-0.5'}`}
             >
                 {showWordmark ? (
-                    <JackpotQuietFooterMark surface={dark ? 'dark' : 'light'} href={MARKETING_PUBLIC_ENTRY} />
+                    <div className="flex w-full justify-center">
+                        <JackpotQuietFooterMark surface={dark ? 'dark' : 'light'} href={MARKETING_PUBLIC_ENTRY} />
+                    </div>
                 ) : null}
                 <p className={`${copyrightClass} antialiased`}>
                     <a

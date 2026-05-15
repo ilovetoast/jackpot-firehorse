@@ -10,7 +10,6 @@ const PILL_CFG = {
     recent:   { label: 'Recent',   cls: 'text-amber-300/70 border-amber-300/25' },
     agency:   { label: 'Agency',   cls: 'text-violet-300/60 border-violet-300/20' },
     client:   { label: 'Client',   cls: 'text-sky-300/50 border-sky-300/15' },
-    default:  { label: 'Default',  cls: 'text-white/35 border-white/10' },
     internal: { label: 'Internal', cls: 'text-white/35 border-white/10' },
 }
 
@@ -25,13 +24,13 @@ function WorkspacePill({ type }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  WorkspaceCard — horizontal rectangle, ~280px × 100px
+//  WorkspaceCard — horizontal rectangle with large brand mark
 // ─────────────────────────────────────────────────────────────────────────────
-function WorkspaceCard({ brand, onClick, onHoverStart, onHoverEnd, disabled, pill, stretch = false, compact = false }) {
+function WorkspaceCard({ brand, onClick, onHoverStart, onHoverEnd, disabled, stretch = false, compact = false }) {
     const primary = brand?.primary_color || '#94a3b8'
     const widthCls  = stretch ? 'w-full' : compact ? 'w-[210px] sm:w-[232px]' : 'w-[260px] sm:w-[288px]'
-    const heightCls = compact ? 'min-h-[78px] px-3 py-2.5' : 'min-h-[96px] px-4 py-3.5'
-    const iconSize  = compact ? 'sm' : 'md'
+    const heightCls = compact ? 'min-h-[112px] px-3 py-3' : 'min-h-[140px] px-4 py-4'
+    const iconSize  = compact ? 'gateway-ws-compact' : 'gateway-ws'
 
     return (
         <button
@@ -44,7 +43,7 @@ function WorkspaceCard({ brand, onClick, onHoverStart, onHoverEnd, disabled, pil
             onBlur={() => onHoverEnd?.()}
             disabled={disabled}
             className={[
-                'group relative flex items-center gap-3 text-left overflow-hidden flex-shrink-0',
+                'group relative flex items-center gap-4 text-left overflow-hidden flex-shrink-0',
                 'rounded-xl border',
                 'transition-[transform,box-shadow,border-color,background-color] duration-300 ease-out',
                 widthCls, heightCls,
@@ -63,7 +62,6 @@ function WorkspaceCard({ brand, onClick, onHoverStart, onHoverEnd, disabled, pil
                         {brand.name}
                     </span>
                 </div>
-                {pill && <div className="mt-1.5"><WorkspacePill type={pill} /></div>}
                 {brand.is_disabled && (
                     <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-amber-400/65">Plan limit</p>
                 )}
@@ -177,7 +175,6 @@ function WorkspaceLane({ group, onCardClick, onHoverStart, onHoverEnd, processin
                             onHoverStart={onHoverStart}
                             onHoverEnd={onHoverEnd}
                             disabled={processing || brand.is_disabled}
-                            pill={brand.is_default ? 'default' : undefined}
                             compact={compact}
                         />
                     ))}
@@ -305,15 +302,6 @@ function detectLayoutMode(groups, totalBrands, isAllWorkspaces) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-function filterHiddenBrand(rows, activeBrandId) {
-    if (activeBrandId == null) return rows
-    const id = Number(activeBrandId)
-    return rows.filter((b) => Number(b.id) !== id)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  BrandSelector — main export
 //
 //  Three adaptive layout modes:
@@ -349,9 +337,10 @@ export default function BrandSelector({
         return list.find(b => Number(b.id) === Number(activeBrandId)) ?? null
     }, [list, activeBrandId, isAllWorkspaces])
 
-    const displayBrands = useMemo(() => filterHiddenBrand(list, activeBrandId), [list, activeBrandId])
-    const isDisplayEmpty = displayBrands.length === 0
-    const hasDisabledBrands = displayBrands.some(b => b.is_disabled)
+    // Keep every brand in tenant lanes / grids — including the current workspace — so hierarchy
+    // (e.g. Nebo under Managed clients · ACG) stays complete. The hero is additive, not a replacement row.
+    const isDisplayEmpty = list.length === 0
+    const hasDisabledBrands = list.some(b => b.is_disabled)
 
     // Build groups — prefer pre-computed agency groups, otherwise derive from flat brand list
     const groups = useMemo(() => {
@@ -362,13 +351,13 @@ export default function BrandSelector({
                     type:         g.type ?? 'company',
                     tenantId:     Number(g.tenant_id ?? 0),
                     tenantName:   String(g.tenant_name ?? 'Company'),
-                    brands:       filterHiddenBrand(Array.isArray(g.brands) ? g.brands : [], activeBrandId),
+                    brands:       Array.isArray(g.brands) ? g.brands : [],
                 }))
                 .filter(g => g.brands.length > 0)
         }
 
         const map = new Map()
-        for (const b of displayBrands) {
+        for (const b of list) {
             const tid   = Number(b.tenant_id ?? tenant?.id ?? 0)
             const tname = String(b.tenant_name ?? tenant?.name ?? 'Company')
             if (!map.has(tid)) {
@@ -386,9 +375,9 @@ export default function BrandSelector({
             a.tenantName.localeCompare(b.tenantName, undefined, { sensitivity: 'base' }),
         )
         return grouped
-    }, [brandPickerGroups, displayBrands, tenant, isAgencyGrouped, activeBrandId])
+    }, [brandPickerGroups, list, tenant, isAgencyGrouped])
 
-    const layoutMode  = detectLayoutMode(groups, displayBrands.length, isAllWorkspaces)
+    const layoutMode  = detectLayoutMode(groups, list.length, isAllWorkspaces)
     const compact   = layoutMode === 'enterprise'
     const showHero  = Boolean(activeBrand) && !isDisplayEmpty && isPage
 
@@ -432,7 +421,7 @@ export default function BrandSelector({
     if (!isPage) {
         return (
             <div className="w-full space-y-1">
-                {displayBrands.map(brand => (
+                {list.map(brand => (
                     <button
                         key={brand.id}
                         type="button"
@@ -539,7 +528,6 @@ export default function BrandSelector({
                                             onHoverStart={handleHoverStart}
                                             onHoverEnd={handleHoverEnd}
                                             disabled={processing || brand.is_disabled}
-                                            pill={brand.is_default ? 'default' : undefined}
                                             stretch
                                         />
                                     ))}

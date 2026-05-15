@@ -415,12 +415,15 @@ class BrandContextResolver
 
     protected function serializeBrand(Brand $brand): array
     {
+        $settings = is_array($brand->settings) ? $brand->settings : [];
+
         return [
             'id' => $brand->id,
             'name' => $brand->name,
             'slug' => $brand->slug,
             'logo_path' => $brand->logo_path,
             'logo_dark_path' => $brand->logo_dark_path,
+            'logo_light_path' => $brand->logo_light_path,
             'icon_bg_color' => $brand->icon_bg_color,
             'icon_style' => $brand->icon_style ?? 'subtle',
             'primary_color' => $brand->primary_color,
@@ -428,6 +431,10 @@ class BrandContextResolver
             'accent_color' => $brand->accent_color,
             'nav_color' => $brand->nav_color,
             'is_default' => (bool) $brand->is_default,
+            /** Workspace / nav: `text` = monogram-style mark in compact surfaces (see BrandIconUnified). */
+            'settings' => [
+                'nav_display_mode' => $settings['nav_display_mode'] ?? 'logo',
+            ],
         ];
     }
 
