@@ -20,7 +20,7 @@ const MODES = {
 }
 
 export default function GatewayIndex({ context, mode: initialMode, invite_token, flash_error, auto_enter }) {
-    const { flash, theme } = usePage().props
+    const { flash, theme, signup_enabled: signupEnabledProp } = usePage().props
     const [mode, setMode] = useState(initialMode || MODES.LOGIN)
     const [pickerAmbientBrand, setPickerAmbientBrand] = useState(null)
 
@@ -71,7 +71,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                 return (
                     <LoginForm
                         context={context}
-                        onToggleRegister={() => handleToggleMode(MODES.REGISTER)}
+                        onToggleRegister={signupEnabledProp !== false ? () => handleToggleMode(MODES.REGISTER) : undefined}
                         inviteToken={mode === MODES.INVITE_LOGIN ? invite_token : null}
                     />
                 )
@@ -121,7 +121,7 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                 return (
                     <LoginForm
                         context={context}
-                        onToggleRegister={() => handleToggleMode(MODES.REGISTER)}
+                        onToggleRegister={signupEnabledProp !== false ? () => handleToggleMode(MODES.REGISTER) : undefined}
                     />
                 )
         }

@@ -13,6 +13,7 @@ use App\Services\BrandGateway\BrandContextResolver;
 use App\Services\BrandGateway\BrandThemeBuilder;
 use App\Support\GatewayIntendedUrl;
 use App\Support\GatewayResumeCookie;
+use App\Support\RegistrationGate;
 use App\Services\Prostaff\ApplyProstaffAfterBrandInvitationAccept;
 use App\Mail\EmailVerification;
 use Illuminate\Http\RedirectResponse;
@@ -67,6 +68,8 @@ class BrandGatewayController extends Controller
 
         $context = $this->contextResolver->resolve($request);
 
+        RegistrationGate::maybeGrantBypassFromRequest($request);
+
         if (Auth::check()
             && ($context['gateway_resume_active'] ?? false)
             && ($context['tenant']['id'] ?? null)
@@ -96,6 +99,18 @@ class BrandGatewayController extends Controller
 
         $theme = $this->buildThemeFromContext($context);
         $mode = $this->determineMode($request, $context);
+
+        if ($mode === 'register' && ! RegistrationGate::allowsPublicSignup($request)) {
+            return redirect()->route('gateway', array_filter([
+                'mode' => 'login',
+                'company' => $request->query('company'),
+                'tenant' => $request->query('tenant'),
+                'brand' => $request->query('brand'),
+            ], fn ($v) => $v !== null && $v !== ''))->with(
+                'error',
+                'New account signup is not available here. Use an invitation link, or contact us for access.'
+            );
+        }
 
         if ($mode === 'enter') {
             $theme['portal']['entry']['style'] = 'cinematic';
@@ -191,6 +206,8 @@ class BrandGatewayController extends Controller
 
         $request->session()->regenerate();
 
+        RegistrationGate::forgetBypass();
+
         $user = Auth::user();
 
         if (! empty($credentials['invite_token'])) {
@@ -279,6 +296,12 @@ class BrandGatewayController extends Controller
      */
     public function register(Request $request)
     {
+        if (! RegistrationGate::allowsPublicSignup($request)) {
+            throw ValidationException::withMessages([
+                'email' => 'New account registration is not available on this site.',
+            ]);
+        }
+
         $validated = $request->validate([
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -335,6 +358,8 @@ class BrandGatewayController extends Controller
             'brand' => ['id' => $brand->id],
             'is_authenticated' => true,
         ]);
+
+        RegistrationGate::forgetBypass();
 
         return $this->redirectToGatewayIntended();
     }

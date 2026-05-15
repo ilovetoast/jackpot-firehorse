@@ -17,8 +17,8 @@ const SIZES = {
     tile: { container: 'h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]', text: 'text-lg sm:text-xl', radius: 'rounded-2xl' },
     '2xl': { container: 'h-20 w-20', text: 'text-2xl', radius: 'rounded-2xl' },
     /** Gateway workspace picker cards — large mark; see BrandSelector WorkspaceCard. */
-    'gateway-ws': { container: 'h-24 w-24', text: 'text-xl', radius: 'rounded-2xl' },
-    'gateway-ws-compact': { container: 'h-20 w-20', text: 'text-lg', radius: 'rounded-2xl' },
+    'gateway-ws': { container: 'h-[6.5rem] w-[6.5rem]', text: 'text-2xl', radius: 'rounded-2xl' },
+    'gateway-ws-compact': { container: 'h-[5.5rem] w-[5.5rem]', text: 'text-xl', radius: 'rounded-2xl' },
 }
 
 const GATEWAY_TILE_BG =

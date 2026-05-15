@@ -29,7 +29,7 @@ function WorkspacePill({ type }) {
 function WorkspaceCard({ brand, onClick, onHoverStart, onHoverEnd, disabled, stretch = false, compact = false }) {
     const primary = brand?.primary_color || '#94a3b8'
     const widthCls  = stretch ? 'w-full' : compact ? 'w-[210px] sm:w-[232px]' : 'w-[260px] sm:w-[288px]'
-    const heightCls = compact ? 'min-h-[112px] px-3 py-3' : 'min-h-[140px] px-4 py-4'
+    const heightCls = compact ? 'min-h-[120px] px-3 py-3' : 'min-h-[152px] px-4 py-4'
     const iconSize  = compact ? 'gateway-ws-compact' : 'gateway-ws'
 
     return (

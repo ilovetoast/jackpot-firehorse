@@ -19,6 +19,7 @@ use App\Services\PlanService;
 use App\Services\Prostaff\ResolveCreatorsDashboardAccess;
 use App\Support\BrandDNA\HeadlineAppearanceCatalog;
 use App\Support\JackpotConsoleRelease;
+use App\Support\RegistrationGate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Middleware;
@@ -452,7 +453,7 @@ class HandleInertiaRequests extends Middleware
             'onboarding_status' => ($activeBrand && $user && $tenant && $user->isTenantOwnerAdminOrAgencyAdmin($tenant))
                 ? app(\App\Services\OnboardingService::class)->getStatusPayload($activeBrand)
                 : null,
-            'signup_enabled' => ! app()->environment('staging'),
+            'signup_enabled' => RegistrationGate::isSignupAdvertised(),
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
             'upload_limits' => [

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
+use App\Support\RegistrationGate;
 use Illuminate\Http\Request;
 use App\Mail\EmailVerification;
 use Illuminate\Support\Facades\Auth;
@@ -22,9 +23,11 @@ class SignupController extends Controller
      */
     public function show(Request $request): RedirectResponse
     {
-        if (app()->environment('staging')) {
+        RegistrationGate::maybeGrantBypassFromRequest($request);
+
+        if (! RegistrationGate::allowsPublicSignup($request)) {
             return redirect()->route('gateway', ['mode' => 'login'])
-                ->with('info', 'Signup is temporarily disabled on staging.');
+                ->with('error', 'Signup is not available on this environment.');
         }
 
         $query = array_filter([
@@ -42,9 +45,11 @@ class SignupController extends Controller
      */
     public function store(Request $request)
     {
-        if (app()->environment('staging')) {
+        RegistrationGate::maybeGrantBypassFromRequest($request);
+
+        if (! RegistrationGate::allowsPublicSignup($request)) {
             return redirect()->route('gateway', ['mode' => 'login'])
-                ->with('error', 'Signup is temporarily disabled on staging.');
+                ->with('error', 'Signup is not available on this environment.');
         }
 
         $validated = $request->validate([

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Asset;
 use App\Models\Brand;
 use App\Models\Download;
+use App\Support\RegistrationGate;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -124,7 +125,7 @@ class DownloadPublicPageBrandingResolver
             'footer_promo' => [
                 'line1' => 'Provided by '.$appName.' — Free Digital Asset Management',
                 'line2' => 'Sign up today',
-                'signup_url' => app()->environment('staging') ? null : (config('app.url').'/gateway?mode=register'),
+                'signup_url' => RegistrationGate::isSignupAdvertised() ? (config('app.url').'/gateway?mode=register') : null,
             ],
         ];
     }

@@ -172,7 +172,7 @@ export default function LoginForm({ context, onToggleRegister, inviteToken = nul
                 </button>
             </form>
 
-            {!inviteToken && (
+            {!inviteToken && typeof onToggleRegister === 'function' && (
                 <div className="mt-8 text-center">
                     <p className="text-sm text-white/50">
                         Don&apos;t have an account?{' '}
