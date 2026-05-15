@@ -6,6 +6,7 @@ use App\Http\Controllers\BrandGatewayController;
 use App\Http\Controllers\PublicBrandPortalController;
 use App\Http\Middleware\EnsureIncubationWorkspaceNotLocked;
 use App\Http\Middleware\ImpersonationMiddleware;
+use App\Http\Middleware\PreventBackForwardCacheForAuthenticatedApp;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -190,10 +191,12 @@ Route::post('/app/admin/performance/client-metric', $performanceClientMetric)->m
 Route::middleware(['auth', 'ensure.account.active'])->get('/test-push', \App\Http\Controllers\PushTestController::class)
     ->name('test-push');
 
-// `prevent.bfcache` adds `Cache-Control: no-store` so browser-Back triggers a fresh server render
-// (reading the current session/tenant) instead of restoring a stale page from the browser's bfcache.
-// See App\Http\Middleware\PreventBackForwardCacheForAuthenticatedApp for the full rationale.
-Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', 'prevent.bfcache'])->prefix('app')->group(function () {
+// PreventBackForwardCacheForAuthenticatedApp adds `Cache-Control: no-store` so browser-Back
+// triggers a fresh server render (current session/tenant) instead of restoring a stale bfcache page.
+// Use the concrete class here (not the `prevent.bfcache` alias): string aliases can fail with
+// `Target class [prevent.bfcache] does not exist` when route cache / worker boot order differs from
+// the middleware alias map; FQN resolution is always reliable.
+Route::middleware(['auth', 'ensure.account.active', ImpersonationMiddleware::class, 'collect.asset_url_metrics', 'log.cloudfront.403', PreventBackForwardCacheForAuthenticatedApp::class])->prefix('app')->group(function () {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
     Route::post('/impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop'])->name('impersonation.stop');
 
