@@ -7,12 +7,11 @@ return [
     | Public self-service registration
     |--------------------------------------------------------------------------
     |
-    | When false, marketing and the gateway hide "Sign up" / "Create account" for
-    | guests. POST /gateway/register is rejected unless a bypass session was granted
-    | (see registration_key below). Invitation-based signup is unchanged.
+    | When false, marketing and gateway still link to signup; guests must enter
+    | REGISTRATION_BYPASS_SECRET on the register screen (or use ?registration_key= for a bookmark).
+    | POST /gateway/register stays blocked until that session unlock. Invitation-based signup is unchanged.
     |
-    | Set REGISTRATION_ENABLED=false to block public signup (set this on staging / private previews).
-    | When disabled, optional REGISTRATION_BYPASS_SECRET unlocks /gateway?mode=register for your team.
+    | Set REGISTRATION_ENABLED=false on staging / private previews; set REGISTRATION_BYPASS_SECRET for team access.
     |
     */
     'enabled' => filter_var(env('REGISTRATION_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
@@ -22,9 +21,9 @@ return [
     | Bypass secret (optional)
     |--------------------------------------------------------------------------
     |
-    | When registration is disabled and this is non-empty, visiting:
+    | When registration is disabled and this is non-empty, guests see an access-code step before
+    | the signup form. Optional URL shortcut (same value):
     |   /gateway?mode=register&registration_key=<secret>
-    | sets a short-lived session flag so your team can still create accounts.
     | Keep this long and random; do not expose it in the marketing UI.
     |
     */

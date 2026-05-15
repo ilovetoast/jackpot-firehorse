@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Head, usePage } from '@inertiajs/react'
+import { Head, usePage, router } from '@inertiajs/react'
 import GatewayLayout from './GatewayLayout'
 import LoginForm from './LoginForm'
 import RegisterForm from './RegisterForm'
@@ -19,10 +19,27 @@ const MODES = {
     INVITE_LOGIN: 'invite_login',
 }
 
-export default function GatewayIndex({ context, mode: initialMode, invite_token, flash_error, auto_enter }) {
-    const { flash, theme, signup_enabled: signupEnabledProp } = usePage().props
+export default function GatewayIndex({
+    context,
+    mode: initialMode,
+    invite_token,
+    flash_error,
+    auto_enter,
+    registration_beta_pending: registrationBetaPending = false,
+    gateway_register_query: gatewayRegisterQuery = {},
+}) {
+    const {
+        flash,
+        theme,
+        signup_enabled: signupEnabledProp,
+        registration_beta_environment: registrationBetaEnvironment = false,
+    } = usePage().props
     const [mode, setMode] = useState(initialMode || MODES.LOGIN)
     const [pickerAmbientBrand, setPickerAmbientBrand] = useState(null)
+
+    useEffect(() => {
+        setMode(initialMode || MODES.LOGIN)
+    }, [initialMode])
 
     useEffect(() => {
         const clearsHover = [
@@ -49,9 +66,28 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
             MODES.INVITE_REGISTER,
         ].includes(mode))
 
-    const handleToggleMode = useCallback((newMode) => {
-        setMode(newMode)
-    }, [])
+    const handleToggleMode = useCallback(
+        (newMode) => {
+            if (newMode === MODES.REGISTER && registrationBetaEnvironment) {
+                if (typeof window === 'undefined') {
+                    setMode(MODES.REGISTER)
+                    return
+                }
+                const params = new URLSearchParams(window.location.search)
+                const query = { mode: 'register' }
+                for (const key of ['company', 'tenant', 'brand']) {
+                    const v = params.get(key)
+                    if (v) {
+                        query[key] = v
+                    }
+                }
+                router.get('/gateway', query, { preserveScroll: true })
+                return
+            }
+            setMode(newMode)
+        },
+        [registrationBetaEnvironment],
+    )
 
     if (auto_enter && mode === MODES.ENTER) {
         return (
@@ -81,6 +117,8 @@ export default function GatewayIndex({ context, mode: initialMode, invite_token,
                     <RegisterForm
                         context={context}
                         onToggleLogin={() => handleToggleMode(MODES.LOGIN)}
+                        registrationBetaPending={registrationBetaPending}
+                        gatewayRegisterQuery={gatewayRegisterQuery}
                     />
                 )
 

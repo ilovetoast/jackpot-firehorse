@@ -6,7 +6,8 @@ use Illuminate\Http\Request;
 
 /**
  * Controls public self-service signup (marketing CTAs + /gateway?mode=register + POST /gateway/register).
- * Invitation flows ({@see BrandGatewayController::invite}, invite_register) are not gated here.
+ * When disabled with REGISTRATION_BYPASS_SECRET set, links stay visible; guests enter the secret on the register screen
+ * (or use ?registration_key=). Invitation flows ({@see BrandGatewayController::invite}, invite_register) are not gated here.
  */
 class RegistrationGate
 {
@@ -22,10 +23,31 @@ class RegistrationGate
         return trim((string) config('registration.bypass_secret', ''));
     }
 
-    /** Marketing + gateway "Create account" — only when public signup is enabled. */
+    /**
+     * Marketing + gateway "Create account" links.
+     * Same destinations as when signup is fully open; beta environments use a password step before the form.
+     */
     public static function isSignupAdvertised(): bool
     {
-        return self::isEnabled();
+        if (self::isEnabled()) {
+            return true;
+        }
+
+        return self::bypassSecret() !== '';
+    }
+
+    /** Guest must enter REGISTRATION_BYPASS_SECRET (beta password) before the register form. */
+    public static function requiresBetaPasswordUnlock(Request $request): bool
+    {
+        if (self::isEnabled()) {
+            return false;
+        }
+
+        if (self::bypassSecret() === '') {
+            return false;
+        }
+
+        return ! (bool) $request->session()->get(self::SESSION_KEY, false);
     }
 
     /**

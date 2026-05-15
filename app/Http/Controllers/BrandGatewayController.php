@@ -101,15 +101,18 @@ class BrandGatewayController extends Controller
         $mode = $this->determineMode($request, $context);
 
         if ($mode === 'register' && ! RegistrationGate::allowsPublicSignup($request)) {
-            return redirect()->route('gateway', array_filter([
-                'mode' => 'login',
-                'company' => $request->query('company'),
-                'tenant' => $request->query('tenant'),
-                'brand' => $request->query('brand'),
-            ], fn ($v) => $v !== null && $v !== ''))->with(
-                'error',
-                'New account signup is not available here. Use an invitation link, or contact us for access.'
-            );
+            if (RegistrationGate::bypassSecret() === '') {
+                return redirect()->route('gateway', array_filter([
+                    'mode' => 'login',
+                    'company' => $request->query('company'),
+                    'tenant' => $request->query('tenant'),
+                    'brand' => $request->query('brand'),
+                ], fn ($v) => $v !== null && $v !== ''))->with(
+                    'error',
+                    'New account signup is not available here. Use an invitation link, or contact us for access.'
+                );
+            }
+            // Beta: same links as production; user enters env secret on the register screen.
         }
 
         if ($mode === 'enter') {
@@ -143,6 +146,13 @@ class BrandGatewayController extends Controller
             'theme' => $theme,
             'mode' => $mode,
             'auto_enter' => $autoEnter,
+            'registration_beta_pending' => $mode === 'register'
+                && RegistrationGate::requiresBetaPasswordUnlock($request),
+            'gateway_register_query' => array_filter([
+                'company' => $request->query('company'),
+                'tenant' => $request->query('tenant'),
+                'brand' => $request->query('brand'),
+            ], fn ($v) => $v !== null && $v !== ''),
         ]);
     }
 
@@ -160,6 +170,8 @@ class BrandGatewayController extends Controller
                 'theme' => $theme,
                 'mode' => 'login',
                 'flash_error' => 'This invitation link is invalid or has already been used.',
+                'registration_beta_pending' => false,
+                'gateway_register_query' => [],
             ]);
         }
 
@@ -181,7 +193,59 @@ class BrandGatewayController extends Controller
             'theme' => $theme,
             'mode' => $mode,
             'invite_token' => $token,
+            'registration_beta_pending' => false,
+            'gateway_register_query' => [],
         ]);
+    }
+
+    /**
+     * Guest enters REGISTRATION_BYPASS_SECRET ("beta password") to unlock the register form for this session.
+     */
+    public function unlockRegistration(Request $request): RedirectResponse
+    {
+        if (RegistrationGate::isEnabled()) {
+            return redirect()->route('gateway', $this->registerModeQueryFromRequest($request));
+        }
+
+        if (RegistrationGate::bypassSecret() === '') {
+            return redirect()->route('gateway', ['mode' => 'login'])->with(
+                'error',
+                'New account signup is not available here. Use an invitation link, or contact us for access.'
+            );
+        }
+
+        $request->validate([
+            'registration_beta_password' => ['required', 'string', 'max:2048'],
+            'gateway_company' => ['nullable', 'string', 'max:255'],
+            'gateway_tenant' => ['nullable', 'string', 'max:255'],
+            'gateway_brand' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $secret = RegistrationGate::bypassSecret();
+        $given = trim((string) $request->input('registration_beta_password', ''));
+
+        if (! hash_equals($secret, $given)) {
+            throw ValidationException::withMessages([
+                'registration_beta_password' => 'That access code is not valid.',
+            ]);
+        }
+
+        $request->session()->put(RegistrationGate::SESSION_KEY, true);
+
+        return redirect()->route('gateway', $this->registerModeQueryFromRequest($request));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function registerModeQueryFromRequest(Request $request): array
+    {
+        return array_filter([
+            'mode' => 'register',
+            'company' => $request->input('gateway_company') ?: $request->query('company'),
+            'tenant' => $request->input('gateway_tenant') ?: $request->query('tenant'),
+            'brand' => $request->input('gateway_brand') ?: $request->query('brand'),
+        ], fn ($v) => $v !== null && $v !== '');
     }
 
     /**

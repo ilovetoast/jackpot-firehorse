@@ -27,7 +27,57 @@ class RegistrationGateTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Gateway/Index')
-                ->where('mode', 'register'));
+                ->where('mode', 'register')
+                ->where('registration_beta_pending', false));
+    }
+
+    public function test_gateway_register_shows_beta_step_when_disabled_with_secret(): void
+    {
+        config(['registration.enabled' => false, 'registration.bypass_secret' => 'team-only-secret']);
+
+        $this->get('/gateway?mode=register')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Gateway/Index')
+                ->where('mode', 'register')
+                ->where('registration_beta_pending', true));
+    }
+
+    public function test_registration_unlock_rejects_wrong_password(): void
+    {
+        config(['registration.enabled' => false, 'registration.bypass_secret' => 'correct-secret']);
+        $this->withoutMiddleware(VerifyCsrfToken::class);
+
+        $this->from('/gateway?mode=register')
+            ->post('/gateway/registration-unlock', [
+                'registration_beta_password' => 'wrong-secret',
+            ])
+            ->assertSessionHasErrors('registration_beta_password');
+    }
+
+    public function test_registration_unlock_then_register_succeeds(): void
+    {
+        config(['registration.enabled' => false, 'registration.bypass_secret' => 'unlock-me']);
+        $this->withoutMiddleware(VerifyCsrfToken::class);
+
+        $this->from('/gateway?mode=register')
+            ->post('/gateway/registration-unlock', [
+                'registration_beta_password' => 'unlock-me',
+            ])
+            ->assertRedirect(route('gateway', ['mode' => 'register']));
+
+        $email = 'beta-unlock-'.uniqid('', true).'@example.com';
+
+        $this->post('/gateway/register', [
+            'first_name' => 'Beta',
+            'last_name' => 'User',
+            'email' => $email,
+            'password' => 'Password1!x',
+            'password_confirmation' => 'Password1!x',
+            'company_name' => 'Beta Co '.uniqid(),
+        ])->assertRedirect();
+
+        $this->assertDatabaseHas('users', ['email' => $email]);
     }
 
     public function test_gateway_register_post_rejected_when_disabled_without_bypass_session(): void

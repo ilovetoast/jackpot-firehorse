@@ -95,6 +95,7 @@ Route::get('/experience', fn () => Inertia::render('Experience/Index'));
 // Brand Gateway — unified entry layer (auth-agnostic)
 Route::get('/gateway', [BrandGatewayController::class, 'index'])->name('gateway');
 Route::post('/gateway/login', [BrandGatewayController::class, 'login'])->name('gateway.login');
+Route::post('/gateway/registration-unlock', [BrandGatewayController::class, 'unlockRegistration'])->name('gateway.registration-unlock');
 Route::post('/gateway/register', [BrandGatewayController::class, 'register'])->name('gateway.register');
 Route::get('/gateway/invite/{token}', [BrandGatewayController::class, 'invite'])->name('gateway.invite');
 Route::post('/gateway/invite/{token}/accept', [BrandGatewayController::class, 'acceptInvite'])->name('gateway.invite.accept')->middleware('auth');

@@ -11,8 +11,20 @@ function isDuplicateRegistrationEmail(message) {
     return m.includes('already been taken') || m.includes('already registered')
 }
 
-export default function RegisterForm({ context, onToggleLogin }) {
+export default function RegisterForm({
+    context,
+    onToggleLogin,
+    registrationBetaPending = false,
+    gatewayRegisterQuery = {},
+}) {
     const { theme, errors: sharedErrors = {}, old = {} } = usePage().props
+
+    const betaForm = useForm({
+        registration_beta_password: '',
+        gateway_company: gatewayRegisterQuery.company ?? '',
+        gateway_tenant: gatewayRegisterQuery.tenant ?? '',
+        gateway_brand: gatewayRegisterQuery.brand ?? '',
+    })
 
     const { data, setData, post, processing, errors: formErrors } = useForm({
         first_name: old.first_name || '',
@@ -28,11 +40,29 @@ export default function RegisterForm({ context, onToggleLogin }) {
         [sharedErrors, formErrors],
     )
 
+    const betaErrors = useMemo(
+        () => ({ ...sharedErrors, ...betaForm.errors }),
+        [sharedErrors, betaForm.errors],
+    )
+
     const [focusedField, setFocusedField] = useState(null)
 
     useEffect(() => {
         refreshCsrfTokenFromServer().catch(() => {})
     }, [])
+
+    const handleBetaSubmit = async (e) => {
+        e.preventDefault()
+        try {
+            await refreshCsrfTokenFromServer()
+        } catch {
+            /* still attempt */
+        }
+        betaForm.post('/gateway/registration-unlock', {
+            preserveState: true,
+            preserveScroll: true,
+        })
+    }
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -61,6 +91,99 @@ export default function RegisterForm({ context, onToggleLogin }) {
     const isJackpotDefault = theme?.mode === 'default'
 
     const emailError = firstError(errors.email)
+
+    if (registrationBetaPending) {
+        const betaPwErr = firstError(betaErrors.registration_beta_password)
+        const betaBorder = focusedField === 'registration_beta_password'
+            ? `${primary}88`
+            : betaPwErr
+                ? '#ef444488'
+                : 'rgba(255,255,255,0.08)'
+
+        return (
+            <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>
+                <div className="text-center mb-10">
+                    {!isJackpotDefault && (
+                        <div className="flex justify-center mb-6">
+                            <div
+                                className="h-14 w-14 rounded-xl flex items-center justify-center backdrop-blur"
+                                style={{ backgroundColor: `${primary}15` }}
+                            >
+                                {theme?.logo ? (
+                                    <img src={theme.logo} alt={theme.name} className="h-9 object-contain" />
+                                ) : (
+                                    <span className="text-xl font-semibold text-white">
+                                        {theme?.name?.charAt(0) || 'J'}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    {isJackpotDefault && (
+                        <div className="flex justify-center mb-6">
+                            <img
+                                src="/jp-wordmark-inverted.svg"
+                                alt="Jackpot"
+                                className="h-12 w-auto max-w-full sm:h-14 md:h-16"
+                                decoding="async"
+                            />
+                        </div>
+                    )}
+                    <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight leading-tight text-white/95 mb-2">
+                        Beta access
+                    </h1>
+                    <p className="text-sm text-white/60 mt-2 max-w-md mx-auto">
+                        Enter the access code you were given to create an account.
+                    </p>
+                </div>
+
+                <form onSubmit={handleBetaSubmit} className="space-y-4">
+                    <div>
+                        <input
+                            type="password"
+                            value={betaForm.data.registration_beta_password}
+                            onChange={(e) => betaForm.setData('registration_beta_password', e.target.value)}
+                            onFocus={() => setFocusedField('registration_beta_password')}
+                            onBlur={() => setFocusedField(null)}
+                            placeholder="Access code"
+                            autoComplete="off"
+                            className={inputClass}
+                            style={{ borderColor: betaBorder }}
+                        />
+                        {betaPwErr && (
+                            <p className="mt-1 text-xs text-red-400/90" role="alert">
+                                {betaPwErr}
+                            </p>
+                        )}
+                    </div>
+
+                    <button
+                        type="submit"
+                        disabled={betaForm.processing}
+                        className="w-full py-3.5 px-6 rounded-lg font-semibold text-white transition-all duration-300 disabled:opacity-40"
+                        style={{ backgroundColor: primary }}
+                        onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+                        onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                    >
+                        {betaForm.processing ? 'Checking…' : 'Continue'}
+                    </button>
+                </form>
+
+                <div className="mt-8 text-center">
+                    <p className="text-sm text-white/50">
+                        Already have an account?{' '}
+                        <button
+                            type="button"
+                            onClick={onToggleLogin}
+                            className="text-white/70 hover:text-white transition-colors duration-300 underline underline-offset-4 decoration-white/20 hover:decoration-white/50"
+                        >
+                            Sign in
+                        </button>
+                    </p>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className="w-full max-w-sm animate-fade-in" style={{ animationDuration: '500ms' }}>

@@ -146,7 +146,7 @@ export default function GatewayLayout({
                 {/* Header */}
                 <div className="absolute top-6 left-6 right-6 flex items-center z-20">
                     {showHeaderLogo ? (
-                        <LogoMark size="sm" href={isDefault ? '/?marketing_site=1' : null} forceJackpotWordmark={jackpotPick && !brandPreviewActive} />
+                        <LogoMark size="sm" href={isDefault ? '/?marketing_site=1' : null} forceJackpotWordmark={jackpotPick} />
                     ) : null}
                 </div>
 

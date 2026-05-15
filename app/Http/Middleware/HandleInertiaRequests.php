@@ -454,6 +454,7 @@ class HandleInertiaRequests extends Middleware
                 ? app(\App\Services\OnboardingService::class)->getStatusPayload($activeBrand)
                 : null,
             'signup_enabled' => RegistrationGate::isSignupAdvertised(),
+            'registration_beta_environment' => ! RegistrationGate::isEnabled() && RegistrationGate::bypassSecret() !== '',
             'performance_client_metrics_enabled' => config('performance.client_metrics_enabled', false),
             // DAM file registry → uploader accept + thumbnail UI (single source: config/file_types.php via FileTypeService)
             'upload_limits' => [

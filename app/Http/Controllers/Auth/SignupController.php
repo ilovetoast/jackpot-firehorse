@@ -25,7 +25,7 @@ class SignupController extends Controller
     {
         RegistrationGate::maybeGrantBypassFromRequest($request);
 
-        if (! RegistrationGate::allowsPublicSignup($request)) {
+        if (! RegistrationGate::allowsPublicSignup($request) && RegistrationGate::bypassSecret() === '') {
             return redirect()->route('gateway', ['mode' => 'login'])
                 ->with('error', 'Signup is not available on this environment.');
         }
